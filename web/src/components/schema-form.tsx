@@ -1,6 +1,6 @@
-import { Braces, Plus, RotateCcw, X } from 'lucide-react'
+import { Braces, Plus, RotateCcw, Trash2, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { softSpring } from '../lib/motion.ts'
 import type { JsonSchema } from '../lib/types.ts'
 import { cn } from '../lib/utils.ts'
@@ -12,18 +12,29 @@ import { Switch } from './ui/switch.tsx'
 type Value = unknown
 type Issues = Record<string, string>
 
+const primitives = new Set(['string', 'number', 'integer', 'boolean'])
+/** Keys whose values the server masks; mirrors the redaction list of the backend. */
+const secretKeys = new Set(['accessToken', 'token', 'password', 'apiToken'])
+
+/**
+ * The field type, with one addition: `scalar` for an anyOf of primitives (e.g. durations accepted as 30000 or
+ * "30s"), edited as text where a purely numeric entry is stored as a number.
+ */
 function typeOf(schema: JsonSchema): string | undefined {
   if (Array.isArray(schema.type)) return schema.type.find((type) => type !== 'null')
+  if (schema.type === undefined && schema.anyOf?.every((option) => primitives.has(typeOf(option) ?? '')))
+    return 'scalar'
   return schema.type
 }
 
 /** Whether every field of this schema can be rendered as a form control (otherwise fall back to JSON). */
 function isSupported(schema: JsonSchema): boolean {
   const type = typeOf(schema)
-  if (schema.enum) return true
-  if (type === 'string' || type === 'number' || type === 'integer' || type === 'boolean') return true
+  if (schema.enum || schema.const !== undefined) return true
+  if (type === 'scalar' || primitives.has(type ?? '')) return true
   if (type === 'array') {
     const item = schema.items ? typeOf(schema.items) : undefined
+    if (item === 'object') return isSupported(schema.items as JsonSchema)
     return item === 'string' || item === 'number' || item === 'integer'
   }
   if (type === 'object') return Object.values(schema.properties ?? {}).every(isSupported)
@@ -31,6 +42,7 @@ function isSupported(schema: JsonSchema): boolean {
 }
 
 function defaultsOf(schema: JsonSchema): Value {
+  if (schema.const !== undefined) return schema.const
   if (schema.default !== undefined) return schema.default
   if (typeOf(schema) === 'object') {
     return Object.fromEntries(
@@ -43,8 +55,26 @@ function defaultsOf(schema: JsonSchema): Value {
 function setAt(value: Value, path: string[], next: Value): Value {
   if (path.length === 0) return next
   const [head, ...rest] = path as [string, ...string[]]
+  if (Array.isArray(value)) {
+    const copy = [...value]
+    copy[Number(head)] = setAt(copy[Number(head)], rest, next)
+    return copy
+  }
   const base = value && typeof value === 'object' ? (value as Record<string, Value>) : {}
   return { ...base, [head]: setAt(base[head], rest, next) }
+}
+
+/** Server issue paths look like `a.b[0].c`; the form keys fields by `a.b.0.c`. */
+function normalizeIssueKeys(issues: Issues): Issues {
+  return Object.fromEntries(
+    Object.entries(issues).map(([path, message]) => [path.replace(/\[(\d+)\]/g, '.$1'), message]),
+  )
+}
+
+function defaultHint(schema: JsonSchema): string | undefined {
+  const value = schema.default
+  if (value === undefined || value === '' || typeof value === 'object') return undefined
+  return `默认 ${String(value)}`
 }
 
 function getAt(value: Value, path: string[]): Value {
@@ -56,22 +86,28 @@ function getAt(value: Value, path: string[]): Value {
 }
 
 /**
- * Renders a plugin config form from its JSON Schema (generated server-side by z.toJSONSchema). Objects, primitives,
- * enums and primitive arrays get real controls; anything else falls back to a JSON editor so no config is uneditable.
+ * Renders a config form from its JSON Schema (generated server-side by z.toJSONSchema). Objects, primitives, enums,
+ * primitive unions, primitive arrays and arrays of objects get real controls; anything else falls back to a JSON
+ * editor so no config is uneditable.
  */
 export function SchemaForm({
   schema,
   value,
-  issues,
+  issues: rawIssues,
   saving,
   onSubmit,
+  note = '保存后写回配置文件并重载插件',
+  submitLabel = '保存并重载',
 }: {
   schema: JsonSchema
   value: Value
   issues: Issues
   saving: boolean
   onSubmit: (value: Value) => void
+  note?: ReactNode
+  submitLabel?: string
 }) {
+  const issues = useMemo(() => normalizeIssueKeys(rawIssues), [rawIssues])
   const initial = useMemo(() => value ?? defaultsOf(schema), [schema, value])
   const supported = useMemo(() => isSupported(schema), [schema])
   const [draft, setDraft] = useState<Value>(initial)
@@ -104,7 +140,7 @@ export function SchemaForm({
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <p className="text-[12.5px] text-fg-3">保存后写回配置文件并重载插件</p>
+        <p className="text-[12.5px] text-fg-3">{note}</p>
         {supported && (
           <Button
             variant="ghost"
@@ -200,7 +236,7 @@ export function SchemaForm({
                 还原
               </Button>
               <Button variant="primary" size="sm" loading={saving} onClick={submit}>
-                保存并重载
+                {submitLabel}
               </Button>
             </div>
           </motion.div>
@@ -235,6 +271,23 @@ function SchemaFields({
         const error = issues[childPath.join('.')]
         const current = getAt(value, [key])
         const type = typeOf(child)
+        // Constants (e.g. a discriminator like type: 'forward') are filled in by defaultsOf, not edited.
+        if (child.const !== undefined) return null
+
+        if (type === 'array' && child.items && typeOf(child.items) === 'object') {
+          const itemSchema = child.items
+          return (
+            <Field key={key} label={label} hint={child.description} error={error} htmlFor={id}>
+              <ObjectListControl
+                schema={itemSchema}
+                value={Array.isArray(current) ? current : []}
+                path={childPath}
+                issues={issues}
+                onChange={onChange}
+              />
+            </Field>
+          )
+        }
 
         if (type === 'object' && !child.enum) {
           return (
@@ -286,6 +339,7 @@ function SchemaFields({
               id={id}
               schema={child}
               value={current}
+              secret={secretKeys.has(key)}
               invalid={Boolean(error)}
               onChange={(next) => onChange(childPath, next)}
             />
@@ -300,16 +354,36 @@ function PrimitiveControl({
   id,
   schema,
   value,
+  secret = false,
   invalid,
   onChange,
 }: {
   id: string
   schema: JsonSchema
   value: Value
+  secret?: boolean
   invalid: boolean
   onChange: (value: Value) => void
 }) {
   const type = typeOf(schema)
+  if (type === 'scalar') {
+    const numeric = schema.anyOf?.some(
+      (option) => typeOf(option) === 'number' || typeOf(option) === 'integer',
+    )
+    return (
+      <Input
+        id={id}
+        value={value === undefined ? '' : String(value)}
+        placeholder={defaultHint(schema)}
+        aria-invalid={invalid}
+        onChange={(event) => {
+          const text = event.target.value.trim()
+          onChange(text === '' ? undefined : numeric && /^-?\d+(?:\.\d+)?$/.test(text) ? Number(text) : text)
+        }}
+        className="font-mono"
+      />
+    )
+  }
   if (schema.enum) {
     return (
       <Select
@@ -331,6 +405,7 @@ function PrimitiveControl({
         min={schema.minimum}
         max={schema.maximum}
         value={typeof value === 'number' ? value : ''}
+        placeholder={defaultHint(schema)}
         aria-invalid={invalid}
         onChange={(event) => onChange(event.target.value === '' ? undefined : Number(event.target.value))}
         className="tabular"
@@ -346,17 +421,98 @@ function PrimitiveControl({
         onChange={onChange}
       />
     )
+  const text = typeof value === 'string' ? value : ''
+  // `${VAR}` references are not secrets themselves; literal secrets come back masked and are replaced wholesale.
+  const masked = secret && !text.startsWith('${')
   return (
     <Input
       id={id}
-      value={typeof value === 'string' ? value : ''}
+      type={masked ? 'password' : 'text'}
+      autoComplete={secret ? 'off' : undefined}
+      value={text}
+      placeholder={defaultHint(schema)}
       aria-invalid={invalid}
+      onFocus={secret ? (event) => event.target.select() : undefined}
       onChange={(event) => onChange(event.target.value)}
+      className={cn(secret && 'font-mono')}
     />
   )
 }
 
-function ListControl({
+function ObjectListControl({
+  schema,
+  value,
+  path,
+  issues,
+  onChange,
+}: {
+  schema: JsonSchema
+  value: Value[]
+  path: string[]
+  issues: Issues
+  onChange: (path: string[], value: Value) => void
+}) {
+  // Items have no identity of their own; a parallel list of keys keeps animations and inputs stable on removal.
+  const [keys, setKeys] = useState<string[]>(() => value.map(() => crypto.randomUUID()))
+  const ids = value.map((_, index) => keys[index] ?? `item-${index}`)
+  return (
+    <div className="space-y-2.5">
+      <AnimatePresence initial={false}>
+        {value.map((item, index) => (
+          <motion.div
+            key={ids[index]}
+            layout
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.97 }}
+            transition={softSpring}
+            className="rounded-xl border border-border bg-surface-2/40 p-4"
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-[12px] font-medium text-fg-3 tabular">#{index + 1}</span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`删除第 ${index + 1} 项`}
+                onClick={() => {
+                  setKeys(ids.filter((_, i) => i !== index))
+                  onChange(
+                    path,
+                    value.filter((_, i) => i !== index),
+                  )
+                }}
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            </div>
+            <div className="space-y-4">
+              <SchemaFields
+                schema={schema}
+                value={item}
+                path={[...path, String(index)]}
+                issues={issues}
+                onChange={onChange}
+              />
+            </div>
+          </motion.div>
+        ))}
+      </AnimatePresence>
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() => {
+          setKeys([...ids, crypto.randomUUID()])
+          onChange(path, [...value, defaultsOf(schema)])
+        }}
+      >
+        <Plus className="size-3.5" />
+        添加一项
+      </Button>
+    </div>
+  )
+}
+
+export function ListControl({
   id,
   itemType,
   value,

@@ -15,6 +15,10 @@ import type {
   PlaygroundRequest,
   PluginView,
   Segment,
+  Session,
+  Settings,
+  SettingsUpdate,
+  SetupInput,
   StatsPoint,
   Target,
 } from './types.ts'
@@ -56,7 +60,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   } catch {
     throw new ApiError(0, 'network', '无法连接到 AsaBot，请确认服务正在运行')
   }
-  if (response.status === 401 && path !== '/login') onUnauthorized()
+  // A wrong password or setup code is a 401 too, but it must not reset the screen the user is typing into.
+  if (response.status === 401 && path !== '/login' && path !== '/setup') onUnauthorized()
   if (!response.ok) {
     const parsed = (await response.json().catch(() => null)) as ApiErrorBody | null
     const error = parsed?.error
@@ -74,7 +79,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 const encode = encodeURIComponent
 
 export const api = {
-  session: () => request<{ authenticated: boolean }>('GET', '/session'),
+  session: () => request<Session>('GET', '/session'),
+  setup: (input: SetupInput) => request<{ ok: true }>('POST', '/setup', input),
   login: (password: string) => request<{ ok: true }>('POST', '/login', { password }),
   logout: () => request<unknown>('POST', '/logout', {}),
 
@@ -122,6 +128,9 @@ export const api = {
   acl: () => request<AccessEntry[]>('GET', '/acl'),
   addAcl: (entry: AccessEntry) => request<unknown>('POST', '/acl', entry),
   removeAcl: (entry: AccessEntry) => request<unknown>('DELETE', '/acl', entry),
+
+  settings: () => request<Settings>('GET', '/settings'),
+  updateSettings: (input: SettingsUpdate) => request<Settings>('PUT', '/settings', input),
 
   logs: (limit = 500) => request<LogRecord[]>('GET', `/logs?limit=${limit}&level=10`),
   logLevel: () => request<{ level: LogLevel }>('GET', '/logs/level'),

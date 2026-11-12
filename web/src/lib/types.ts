@@ -98,6 +98,47 @@ export interface PackageSearchItem {
   installedVersion?: string
 }
 
+export interface Session {
+  authenticated: boolean
+  /** First run: no panel password yet, the setup wizard must be completed with the console setup code. */
+  setup?: boolean
+}
+
+export interface SetupInput {
+  code: string
+  password: string
+  superusers: string[]
+  adapters?: Record<string, unknown>
+}
+
+export interface CommandSettings {
+  prefixes: string[]
+  mentionAsPrefix: boolean
+  privateRequirePrefix: boolean
+  replyOnError: boolean
+  replyOnDenied: boolean
+}
+
+export interface Settings {
+  superusers: string[]
+  timezone: string
+  command: CommandSettings
+  /** Configured adapters: raw (pre-interpolation) values with masked literal secrets. */
+  adapters: Record<string, { value: unknown; schema: JsonSchema }>
+  /** Every adapter platform the server knows how to create. */
+  available: string[]
+  /** Saved settings that only apply after a restart, e.g. ['timezone']. */
+  restartRequired: string[]
+}
+
+export interface SettingsUpdate {
+  superusers?: string[]
+  timezone?: string
+  command?: Partial<CommandSettings>
+  /** `null` removes the adapter. */
+  adapters?: Record<string, unknown>
+}
+
 export type PackageSort = 'relevance' | 'updated' | 'name'
 
 export interface PackageVersion {

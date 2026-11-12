@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   Puzzle,
   ScrollText,
+  Settings,
   ShieldCheck,
   TerminalSquare,
 } from 'lucide-react'
@@ -31,6 +32,7 @@ export const navGroups: { label: string; items: NavItem[] }[] = [
     items: [
       { to: '/logs', label: '日志', icon: ScrollText },
       { to: '/acl', label: '访问控制', icon: ShieldCheck },
+      { to: '/settings', label: '设置', icon: Settings },
     ],
   },
 ]

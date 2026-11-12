@@ -8,6 +8,7 @@ import { softSpring } from './lib/motion.ts'
 import { RealtimeProvider } from './lib/realtime.tsx'
 import { resetSession } from './lib/session.ts'
 import { LoginPage } from './pages/login.tsx'
+import { SetupPage } from './pages/setup.tsx'
 
 export function App() {
   const client = useQueryClient()
@@ -29,7 +30,9 @@ export function App() {
       ? 'error'
       : session.data?.authenticated
         ? 'app'
-        : 'login'
+        : session.data?.setup
+          ? 'setup'
+          : 'login'
 
   return (
     <AnimatePresence mode="wait">
@@ -52,6 +55,7 @@ export function App() {
       {view === 'error' && (
         <UnavailableScreen key="error" error={session.error} onRetry={() => void session.refetch()} />
       )}
+      {view === 'setup' && <SetupPage key="setup" />}
       {view === 'login' && (
         <LoginPage
           key="login"

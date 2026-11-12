@@ -18,6 +18,7 @@ import { NotFoundPage } from '../../pages/not-found.tsx'
 import { OverviewPage } from '../../pages/overview.tsx'
 import { PlaygroundPage } from '../../pages/playground.tsx'
 import { PluginsPage } from '../../pages/plugins.tsx'
+import { SettingsPage } from '../../pages/settings.tsx'
 import { CommandPalette } from '../command-palette.tsx'
 import { OperationsDock } from '../plugin-manage.tsx'
 import { Button } from '../ui/button.tsx'
@@ -34,6 +35,7 @@ const pages: Record<string, ComponentType> = {
   '/playground': PlaygroundPage,
   '/logs': LogsPage,
   '/acl': AclPage,
+  '/settings': SettingsPage,
 }
 
 const allItems = navGroups.flatMap((group) => group.items)
