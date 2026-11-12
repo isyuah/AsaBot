@@ -16,6 +16,8 @@ dispatch:
   maxPromptTimeout: 30m
 
 onebot11:
+  apiTimeout: 30s
+  reconnect: { minDelay: 1s, maxDelay: 60s }
   connections:
     - type: forward
       url: ws://127.0.0.1:3001

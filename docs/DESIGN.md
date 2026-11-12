@@ -154,7 +154,7 @@ interface BaseEvent {
   platform: string                 // 'onebot11'
   selfId: string
   time: number                     // ms
-  kind: 'message' | 'notice' | 'request' | 'meta'
+  kind: 'message' | 'notice' | 'request' | 'meta' | 'internal'   // internal：框架自身派发的事件
   name: string                     // 分层事件名，见下
   raw: unknown                     // 原始平台数据
   bot: Bot
@@ -238,6 +238,7 @@ interface AdapterHost {
 - 同一个 selfId 只对应一个 Bot 实例，断线和重连都不会更换实例，保证插件手里的 Bot 引用一直有效。
 - 断线时 status 变为 `offline` 并派发 `bot.offline`，但 Bot 仍留在注册表中；重连成功后 status 变为 `online` 并派发 `bot.online`。
 - 重连后 `get_login_info` 返回的 selfId 和之前不同（换号了）时，注销旧 Bot，再注册新 Bot。
+- 两条连接登录了同一个账号时，先上线的连接占有这个 Bot；后上线的连接登录失败，记录 warn 日志并按退避策略继续重试。这样第一条连接断开后，第二条会自动接管，起到故障转移的作用。
 - `app.stop()` 时注销所有 Bot。
 
 **事件总线**（M1 先提供，M2 在此基础上扩展成完整管线）：`app.events.on(name, listener)` 返回 disposer。按第 6 节的分层名称匹配；所有命中的监听器通过 `Promise.allSettled` 并发执行，异常带上事件名记录日志。签名利用 `EventMap` 提供精确类型。

@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { App } from './core/app.ts'
+import { createApp } from './bootstrap.ts'
+import type { App } from './core/app.ts'
 import { loadConfig } from './core/config/load.ts'
 import { ConfigError } from './core/errors.ts'
 import { createLogger } from './core/logger.ts'
@@ -84,7 +85,7 @@ export async function runMain(): Promise<void> {
   }
 
   const config = await loadConfig(configPath)
-  const app = new App(config, createLogger({ level: config.logLevel }))
+  const app = createApp(config, { logger: createLogger({ level: config.logLevel }) })
   installProcessHandlers(app)
   app.logger.info({ configPath }, 'Starting AsaBot')
   await app.start()

@@ -45,6 +45,14 @@ const connectionSchema = z
 
 const onebot11Schema = z
   .object({
+    apiTimeout: durationSchema.default(30_000),
+    reconnect: z
+      .object({
+        minDelay: durationSchema.default(1_000),
+        maxDelay: durationSchema.default(60_000),
+      })
+      .strict()
+      .default(() => ({ minDelay: 1_000, maxDelay: 60_000 })),
     connections: z.array(connectionSchema).default([]),
   })
   .strict()
