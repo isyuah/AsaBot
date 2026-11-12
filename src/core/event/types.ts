@@ -61,100 +61,102 @@ export interface PrivateSession extends Session {
   readonly groupId?: undefined
 }
 
-export interface NoticeEvent extends BaseEvent {
+interface NoticeBaseEvent extends BaseEvent {
   readonly kind: 'notice'
-  readonly noticeType: string
-  readonly subType?: string
   readonly userId?: string
   readonly groupId?: string
   readonly operatorId?: string
 }
 
-export interface GroupIncreaseEvent extends NoticeEvent {
-  readonly name: 'notice.group_increase' | 'notice.group_increase.approve' | 'notice.group_increase.invite'
-  readonly noticeType: 'group_increase'
-  readonly subType: 'approve' | 'invite'
+export interface MemberJoinEvent extends NoticeBaseEvent {
+  readonly name: 'notice.member.join'
   readonly groupId: string
   readonly userId: string
-  readonly operatorId: string
+  readonly joinType: 'approve' | 'invite' | string
 }
 
-export interface GroupDecreaseEvent extends NoticeEvent {
-  readonly name:
-    | 'notice.group_decrease'
-    | 'notice.group_decrease.leave'
-    | 'notice.group_decrease.kick'
-    | 'notice.group_decrease.kick_me'
-  readonly noticeType: 'group_decrease'
-  readonly subType: 'leave' | 'kick' | 'kick_me'
+export interface MemberLeaveEvent extends NoticeBaseEvent {
+  readonly name: 'notice.member.leave'
   readonly groupId: string
   readonly userId: string
-  readonly operatorId: string
+  readonly reason: 'leave' | 'kick' | string
 }
 
-export interface GroupRecallEvent extends NoticeEvent {
-  readonly name: 'notice.group_recall'
-  readonly noticeType: 'group_recall'
+export interface MemberMuteEvent extends NoticeBaseEvent {
+  readonly name: 'notice.member.mute'
   readonly groupId: string
   readonly userId: string
-  readonly operatorId: string
-  readonly messageId: string
-}
-
-export interface FriendRecallEvent extends NoticeEvent {
-  readonly name: 'notice.friend_recall'
-  readonly noticeType: 'friend_recall'
-  readonly userId: string
-  readonly messageId: string
-}
-
-export interface GroupBanEvent extends NoticeEvent {
-  readonly name: 'notice.group_ban' | 'notice.group_ban.ban' | 'notice.group_ban.lift_ban'
-  readonly noticeType: 'group_ban'
-  readonly subType: 'ban' | 'lift_ban'
-  readonly groupId: string
-  readonly userId: string
-  readonly operatorId: string
   readonly duration: number
 }
 
-export interface PokeEvent extends NoticeEvent {
-  readonly name: 'notice.notify.poke'
-  readonly noticeType: 'notify'
-  readonly subType: 'poke'
-  readonly groupId?: string
+export interface MemberUnmuteEvent extends NoticeBaseEvent {
+  readonly name: 'notice.member.unmute'
+  readonly groupId: string
+  readonly userId: string
+}
+
+export interface MemberRoleEvent extends NoticeBaseEvent {
+  readonly name: 'notice.member.role'
+  readonly groupId: string
+  readonly userId: string
+  readonly role: 'admin' | 'member'
+}
+
+export interface MessageRecallEvent extends NoticeBaseEvent {
+  readonly name: 'notice.message.recall'
+  readonly userId: string
+  readonly messageId: string
+}
+
+export interface PokeEvent extends NoticeBaseEvent {
+  readonly name: 'notice.poke'
   readonly userId: string
   readonly targetId: string
 }
 
-export interface GroupAdminEvent extends NoticeEvent {
-  readonly name: 'notice.group_admin' | 'notice.group_admin.set' | 'notice.group_admin.unset'
-  readonly noticeType: 'group_admin'
-  readonly subType: 'set' | 'unset'
-  readonly groupId: string
-  readonly userId: string
+export interface PlatformNoticeEvent extends NoticeBaseEvent {
+  readonly name: `notice.${string}.${string}`
+  readonly platformType: string
+  readonly subType?: string
 }
 
-export type KnownNoticeEvent =
-  | GroupIncreaseEvent
-  | GroupDecreaseEvent
-  | GroupRecallEvent
-  | FriendRecallEvent
-  | GroupBanEvent
-  | PokeEvent
-  | GroupAdminEvent
+export type MemberNoticeEvent =
+  | MemberJoinEvent
+  | MemberLeaveEvent
+  | MemberMuteEvent
+  | MemberUnmuteEvent
+  | MemberRoleEvent
 
-export interface RequestEvent extends BaseEvent {
+export type KnownNoticeEvent = MemberNoticeEvent | MessageRecallEvent | PokeEvent
+export type NoticeEvent = KnownNoticeEvent | PlatformNoticeEvent
+
+interface RequestBaseEvent extends BaseEvent {
   readonly kind: 'request'
-  readonly requestType: 'friend' | 'group'
-  readonly subType?: 'add' | 'invite'
   readonly userId: string
-  readonly groupId?: string
   readonly comment: string
-  readonly flag: string
   approve(remark?: string): Promise<void>
   reject(reason?: string): Promise<void>
 }
+
+export interface FriendRequestEvent extends RequestBaseEvent {
+  readonly name: 'request.friend'
+}
+
+/** Group requests always identify their group, so per-group toggles and group access control apply to them. */
+interface GroupRequestBaseEvent extends RequestBaseEvent {
+  readonly groupId: string
+}
+
+export interface GroupJoinRequestEvent extends GroupRequestBaseEvent {
+  readonly name: 'request.group.join'
+}
+
+export interface GroupInviteRequestEvent extends GroupRequestBaseEvent {
+  readonly name: 'request.group.invite'
+}
+
+export type GroupRequestEvent = GroupJoinRequestEvent | GroupInviteRequestEvent
+export type RequestEvent = FriendRequestEvent | GroupRequestEvent
 
 export interface MetaEvent extends BaseEvent {
   readonly kind: 'meta'
@@ -187,7 +189,6 @@ export interface MessageSentEvent extends BaseEvent {
 
 export type AnyEvent =
   | Session
-  | KnownNoticeEvent
   | NoticeEvent
   | RequestEvent
   | MetaEvent
@@ -195,33 +196,25 @@ export type AnyEvent =
   | BotOfflineEvent
   | MessageSentEvent
 
-export interface EventMap {
+export interface KnownEventMap {
   message: Session
   'message.private': PrivateSession
   'message.group': GroupSession
   notice: NoticeEvent
-  'notice.notify': NoticeEvent
-  'notice.notify.poke': PokeEvent
-  'notice.group_increase': GroupIncreaseEvent
-  'notice.group_increase.approve': GroupIncreaseEvent
-  'notice.group_increase.invite': GroupIncreaseEvent
-  'notice.group_decrease': GroupDecreaseEvent
-  'notice.group_decrease.leave': GroupDecreaseEvent
-  'notice.group_decrease.kick': GroupDecreaseEvent
-  'notice.group_decrease.kick_me': GroupDecreaseEvent
-  'notice.group_recall': GroupRecallEvent
-  'notice.friend_recall': FriendRecallEvent
-  'notice.group_ban': GroupBanEvent
-  'notice.group_ban.ban': GroupBanEvent
-  'notice.group_ban.lift_ban': GroupBanEvent
-  'notice.group_admin': GroupAdminEvent
-  'notice.group_admin.set': GroupAdminEvent
-  'notice.group_admin.unset': GroupAdminEvent
+  'notice.member': MemberNoticeEvent
+  'notice.member.join': MemberJoinEvent
+  'notice.member.leave': MemberLeaveEvent
+  'notice.member.mute': MemberMuteEvent
+  'notice.member.unmute': MemberUnmuteEvent
+  'notice.member.role': MemberRoleEvent
+  'notice.message': MessageRecallEvent
+  'notice.message.recall': MessageRecallEvent
+  'notice.poke': PokeEvent
   request: RequestEvent
-  'request.friend': RequestEvent
-  'request.group': RequestEvent
-  'request.group.add': RequestEvent
-  'request.group.invite': RequestEvent
+  'request.friend': FriendRequestEvent
+  'request.group': GroupRequestEvent
+  'request.group.join': GroupJoinRequestEvent
+  'request.group.invite': GroupInviteRequestEvent
   meta: MetaEvent
   'meta.lifecycle': MetaEvent
   'meta.heartbeat': MetaEvent
@@ -232,4 +225,8 @@ export interface EventMap {
   'bot.offline': BotOfflineEvent
   'bot.message': MessageSentEvent
   'bot.message.sent': MessageSentEvent
+}
+
+export interface EventMap extends KnownEventMap {
+  [name: `notice.${string}`]: NoticeEvent
 }

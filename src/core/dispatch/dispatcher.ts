@@ -6,8 +6,10 @@ import type { Config } from '../config/schema.ts'
 import { CommandConflictError } from '../errors.ts'
 import type {
   EventMap,
+  KnownEventMap,
   MetaEvent,
   NoticeEvent,
+  PlatformNoticeEvent,
   PromptOptions,
   RequestEvent,
   Session,
@@ -37,6 +39,7 @@ type PublicListener =
   | Listener
   | ((event: Session, signal: AbortSignal) => unknown | Promise<unknown>)
   | ((event: NoticeEvent, signal: AbortSignal) => unknown | Promise<unknown>)
+  | ((event: PlatformNoticeEvent, signal: AbortSignal) => unknown | Promise<unknown>)
   | ((event: RequestEvent, signal: AbortSignal) => unknown | Promise<unknown>)
   | ((event: MetaEvent, signal: AbortSignal) => unknown | Promise<unknown>)
   | ((event: PluginStateEvent, signal: AbortSignal) => unknown | Promise<unknown>)
@@ -113,7 +116,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
     )
   }
 
-  on<K extends keyof EventMap>(
+  on<K extends keyof KnownEventMap>(
     scope: Scope,
     name: K,
     listener: (event: EventMap[K], signal: AbortSignal) => unknown | Promise<unknown>,
@@ -126,7 +129,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
   on(
     scope: Scope,
     name: `notice.${string}`,
-    listener: (event: NoticeEvent, signal: AbortSignal) => unknown | Promise<unknown>,
+    listener: (event: PlatformNoticeEvent, signal: AbortSignal) => unknown | Promise<unknown>,
   ): Disposer
   on(
     scope: Scope,

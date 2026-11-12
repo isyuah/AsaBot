@@ -10,8 +10,10 @@ import type { DispatchEvent } from './dispatch/types.ts'
 import type {
   AnyEvent,
   EventMap,
+  KnownEventMap,
   MetaEvent,
   NoticeEvent,
+  PlatformNoticeEvent,
   RequestEvent,
   Session,
   SessionServices,
@@ -32,6 +34,7 @@ type PublicListener =
   | Listener
   | ((event: Session) => unknown | Promise<unknown>)
   | ((event: NoticeEvent) => unknown | Promise<unknown>)
+  | ((event: PlatformNoticeEvent) => unknown | Promise<unknown>)
   | ((event: RequestEvent) => unknown | Promise<unknown>)
   | ((event: MetaEvent) => unknown | Promise<unknown>)
   | ((event: PluginStateEvent) => unknown | Promise<unknown>)
@@ -42,12 +45,15 @@ class CoreEvents {
     this.dispatcher = dispatcher
   }
 
-  on<K extends keyof EventMap>(
+  on<K extends keyof KnownEventMap>(
     name: K,
     listener: (event: EventMap[K]) => unknown | Promise<unknown>,
   ): () => void
   on(name: 'plugin.state', listener: (event: PluginStateEvent) => unknown | Promise<unknown>): () => void
-  on(name: `notice.${string}`, listener: (event: NoticeEvent) => unknown | Promise<unknown>): () => void
+  on(
+    name: `notice.${string}`,
+    listener: (event: PlatformNoticeEvent) => unknown | Promise<unknown>,
+  ): () => void
   on(name: `request.${string}`, listener: (event: RequestEvent) => unknown | Promise<unknown>): () => void
   on(name: `meta.${string}`, listener: (event: MetaEvent) => unknown | Promise<unknown>): () => void
   on(name: string, listener: Listener): () => void

@@ -8,7 +8,14 @@ import type { Bot } from '../bot.ts'
 import type { CommandBuilder } from '../command/builder.ts'
 import type { Disposer, MatchHandler, MatchPattern, Middleware, Scope } from '../dispatch/types.ts'
 import { NoBotOnlineError, PluginError } from '../errors.ts'
-import type { AnyEvent, EventMap, MetaEvent, NoticeEvent, RequestEvent } from '../event/index.ts'
+import type {
+  AnyEvent,
+  EventMap,
+  KnownEventMap,
+  MetaEvent,
+  PlatformNoticeEvent,
+  RequestEvent,
+} from '../event/index.ts'
 import { Scheduler } from '../scheduler.ts'
 import type { KVStore } from '../storage/index.ts'
 import type { PluginStateEvent } from './types.ts'
@@ -89,7 +96,7 @@ export class Context<Config = undefined> {
     this.app.storage.migrate(this.owner, steps)
   }
 
-  on<K extends keyof EventMap>(
+  on<K extends keyof KnownEventMap>(
     name: K,
     listener: (event: EventMap[K], signal: AbortSignal) => unknown | Promise<unknown>,
   ): Disposer
@@ -99,7 +106,7 @@ export class Context<Config = undefined> {
   ): Disposer
   on(
     name: `notice.${string}`,
-    listener: (event: NoticeEvent, signal: AbortSignal) => unknown | Promise<unknown>,
+    listener: (event: PlatformNoticeEvent, signal: AbortSignal) => unknown | Promise<unknown>,
   ): Disposer
   on(
     name: `request.${string}`,

@@ -144,7 +144,7 @@ export default definePlugin({
 | API | 用途 |
 | --- | --- |
 | `ctx.name`、`ctx.config`、`ctx.logger` | 插件名、schema 解析后的只读配置、插件日志 |
-| `ctx.on(name, handler)` | 观察事件，例如 `notice.group_increase` |
+| `ctx.on(name, handler)` | 观察事件，例如 `notice.member.join` |
 | `ctx.middleware(fn, { priority })` | 注册中间件；调用 `next()` 才继续处理 |
 | `ctx.command(declaration)` | 注册命令并链式设置选项、权限和 action |
 | `ctx.match(pattern, handler, options)` | 按字符串、正则或函数匹配消息 |
@@ -155,6 +155,30 @@ export default definePlugin({
 | `ctx.dataDir`、`ctx.signal`、`ctx.onDispose(fn)` | 插件数据目录、卸载信号、自定义清理函数 |
 
 观察者、命令、中间件、匹配器和定时任务随插件卸载自动回收。事件处理器应配合 `signal` 取消耗时操作；插件代码仍运行在主进程中。
+
+### 通知与请求事件
+
+事件名按层级匹配：派发 `notice.member.join` 时，`notice`、`notice.member` 和 `notice.member.join` 的监听器都会收到事件。带群 ID 的通知受插件按群开关控制；通知的用户 ID 和群 ID 也参与访问控制。所有 ID 都是字符串。
+
+| 事件名 | 主要字段 |
+| --- | --- |
+| `notice.member.join` | `groupId`、`userId`、`operatorId?`、`joinType`（`approve`、`invite` 或其他类型） |
+| `notice.member.leave` | `groupId`、`userId`、`operatorId?`、`reason`（`leave`、`kick` 或其他原因） |
+| `notice.member.mute` / `notice.member.unmute` | `groupId`、`userId`、`operatorId?`；禁言事件另有毫秒数 `duration` |
+| `notice.member.role` | `groupId`、`userId`、`role`（`admin` 或 `member`） |
+| `notice.message.recall` | `messageId`、原作者 `userId`、`operatorId?`、`groupId?` |
+| `notice.poke` | 发起者 `userId`、`targetId`、`groupId?` |
+| `request.friend` / `request.group.join` / `request.group.invite` | `userId`、`groupId?`、`comment`，可调用 `approve(remark?)` 或 `reject(reason?)` |
+
+例如，在插件的 `setup` 中欢迎新成员：
+
+```ts
+ctx.on('notice.member.join', async (event) => {
+  await event.bot.sendGroup(event.groupId, `欢迎 ${event.userId}`)
+})
+```
+
+未映射到通用事件的通知使用 `notice.<platform>.<type>[.<subType>]`，并提供 `platformType`、可选的 `subType` 和相关 ID。例如订阅 `notice.onebot11` 可接收 OneBot 11 的平台专属通知；其原始数据保存在 `raw` 中。
 
 ### 命令、参数与选项
 

@@ -228,16 +228,15 @@ describe('M3b through the virtual adapter', () => {
     expect(await t.say('/acl list -p 3', { user: '99' })).toEqual([expect.stringContaining('没有第 3 页')])
   })
 
-  it('welcomes group members only when configured and enabled in that group', async () => {
+  it('welcomes group members subject to the group switch and access lists', async () => {
     const t = await start({ config: { plugins: { echo: { config: { welcome: true } } } } })
     const event = {
-      name: 'notice.group_increase.approve',
-      noticeType: 'group_increase',
-      subType: 'approve',
+      name: 'notice.member.join',
+      joinType: 'approve',
       groupId: '10',
       userId: '21',
       operatorId: '22',
-    }
+    } as const
     await t.mock.emitNotice(event)
     expect(t.mock.bot.sends.at(-1)?.message).toEqual([seg.text('欢迎 '), seg.at('21')])
     await t.say('/plugin off echo', { user: '99' })
@@ -248,5 +247,29 @@ describe('M3b through the virtual adapter', () => {
     expect(
       t.mock.bot.sends.slice(before).filter((item) => JSON.stringify(item.message).includes('欢迎')),
     ).toEqual([])
+
+    await t.say('/plugin on echo', { user: '99' })
+    let sent = t.mock.bot.sends.length
+    const access = t.app.storage.access
+    access.add('block', 'user', 'virtual:21')
+    await t.mock.emitNotice(event)
+    expect(t.mock.bot.sends).toHaveLength(sent)
+    access.remove('block', 'user', 'virtual:21')
+    access.add('block', 'group', 'virtual:10')
+    await t.mock.emitNotice(event)
+    expect(t.mock.bot.sends).toHaveLength(sent)
+    access.remove('block', 'group', 'virtual:10')
+    access.add('allow', 'user', 'virtual:other')
+    await t.mock.emitNotice(event)
+    expect(t.mock.bot.sends).toHaveLength(sent)
+    access.add('allow', 'user', 'virtual:21')
+    await t.mock.emitNotice(event)
+    expect(t.mock.bot.sends).toHaveLength(++sent)
+    access.add('allow', 'group', 'virtual:other')
+    await t.mock.emitNotice(event)
+    expect(t.mock.bot.sends).toHaveLength(sent)
+    access.add('allow', 'group', 'virtual:10')
+    await t.mock.emitNotice(event)
+    expect(t.mock.bot.sends).toHaveLength(++sent)
   })
 })

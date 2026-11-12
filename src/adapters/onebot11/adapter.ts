@@ -10,8 +10,7 @@ import type {
   BotOnlineEvent,
   MessageSentEvent,
   MetaEvent,
-  NoticeEvent,
-  RequestEvent,
+  PlatformNoticeEvent,
   Session,
 } from '../../core/event/index.ts'
 import { createSession } from '../../core/event/index.ts'
@@ -518,53 +517,129 @@ class OneBotSession {
   }
 
   private handleNotice(frame: OneBotFrame): void {
-    if (this.currentBot === undefined || this.currentBot.status !== 'online') {
+    const bot = this.currentBot
+    if (bot === undefined || bot.status !== 'online') {
       return
     }
     const noticeType = String(frame.notice_type ?? '')
     const subType = frame.sub_type === undefined ? undefined : String(frame.sub_type)
-    const requiredFields: Record<string, string[]> = {
-      group_increase: ['group_id', 'user_id', 'operator_id'],
-      group_decrease: ['group_id', 'user_id', 'operator_id'],
-      group_recall: ['group_id', 'user_id', 'operator_id', 'message_id'],
-      friend_recall: ['user_id', 'message_id'],
-      group_ban: ['group_id', 'user_id', 'operator_id', 'duration'],
-      group_admin: ['group_id', 'user_id'],
-    }
-    const validSubtypes: Record<string, string[]> = {
-      group_increase: ['approve', 'invite'],
-      group_decrease: ['leave', 'kick', 'kick_me'],
-      group_ban: ['ban', 'lift_ban'],
-      group_admin: ['set', 'unset'],
-    }
+    const requiredFields = new Map<string, string[]>([
+      ['group_increase', ['group_id', 'user_id', 'operator_id']],
+      ['group_decrease', ['group_id', 'user_id', 'operator_id']],
+      ['group_recall', ['group_id', 'user_id', 'operator_id', 'message_id']],
+      ['friend_recall', ['user_id', 'message_id']],
+      ['group_ban', ['group_id', 'user_id', 'operator_id', 'duration']],
+      ['group_admin', ['group_id', 'user_id']],
+    ])
+    const validSubtypes = new Map<string, string[]>([
+      ['group_increase', ['approve', 'invite']],
+      ['group_decrease', ['leave', 'kick', 'kick_me']],
+      ['group_ban', ['ban', 'lift_ban']],
+      ['group_admin', ['set', 'unset']],
+    ])
+    const allowedSubtypes = validSubtypes.get(noticeType)
     if (
       !noticeType ||
-      requiredFields[noticeType]?.some((key) => frame[key] === undefined || frame[key] === null) ||
-      (validSubtypes[noticeType] !== undefined && !validSubtypes[noticeType].includes(subType ?? '')) ||
+      requiredFields.get(noticeType)?.some((key) => frame[key] === undefined || frame[key] === null) ||
+      (allowedSubtypes !== undefined && !allowedSubtypes.includes(subType ?? '')) ||
+      (noticeType === 'group_ban' && !Number.isFinite(Number(frame.duration) * 1_000)) ||
       (noticeType === 'notify' && subType === 'poke' && (frame.user_id == null || frame.target_id == null))
     ) {
       this.log('warn', { noticeType, subType }, 'Ignoring malformed OneBot notice')
       return
     }
-    const name = `notice.${noticeType}${subType ? `.${subType}` : ''}`
-    const event: NoticeEvent = {
+    const base = {
       id: randomUUID(),
       platform: 'onebot11',
-      selfId: this.currentBot.selfId,
+      selfId: bot.selfId,
       time: eventTime(frame as { time?: unknown }),
-      kind: 'notice',
-      name,
+      kind: 'notice' as const,
       raw: frame,
-      bot: this.currentBot,
-      noticeType,
+      bot,
+    }
+    const optionalIds = {
+      ...(frame.user_id == null ? {} : { userId: platformId(frame.user_id) }),
+      ...(frame.group_id == null ? {} : { groupId: platformId(frame.group_id) }),
+      ...(frame.operator_id == null ? {} : { operatorId: platformId(frame.operator_id) }),
+    }
+
+    switch (noticeType) {
+      case 'group_increase':
+        this.host.emit({
+          ...base,
+          name: 'notice.member.join',
+          groupId: platformId(frame.group_id),
+          userId: platformId(frame.user_id),
+          operatorId: platformId(frame.operator_id),
+          joinType: String(subType),
+        })
+        return
+      case 'group_decrease':
+        this.host.emit({
+          ...base,
+          name: 'notice.member.leave',
+          groupId: platformId(frame.group_id),
+          userId: subType === 'kick_me' ? bot.selfId : platformId(frame.user_id),
+          operatorId: platformId(frame.operator_id),
+          reason: subType === 'kick_me' ? 'kick' : String(subType),
+        })
+        return
+      case 'group_ban': {
+        const member = {
+          ...base,
+          groupId: platformId(frame.group_id),
+          userId: platformId(frame.user_id),
+          operatorId: platformId(frame.operator_id),
+        }
+        this.host.emit(
+          subType === 'ban'
+            ? { ...member, name: 'notice.member.mute', duration: Number(frame.duration) * 1_000 }
+            : { ...member, name: 'notice.member.unmute' },
+        )
+        return
+      }
+      case 'group_admin':
+        this.host.emit({
+          ...base,
+          name: 'notice.member.role',
+          groupId: platformId(frame.group_id),
+          userId: platformId(frame.user_id),
+          role: subType === 'set' ? 'admin' : 'member',
+        })
+        return
+      case 'group_recall':
+      case 'friend_recall':
+        this.host.emit({
+          ...base,
+          name: 'notice.message.recall',
+          userId: platformId(frame.user_id),
+          messageId: platformId(frame.message_id),
+          ...(noticeType === 'group_recall'
+            ? { groupId: platformId(frame.group_id), operatorId: platformId(frame.operator_id) }
+            : {}),
+        })
+        return
+      case 'notify':
+        if (subType === 'poke') {
+          this.host.emit({
+            ...base,
+            name: 'notice.poke',
+            userId: platformId(frame.user_id),
+            targetId: platformId(frame.target_id),
+            ...(frame.group_id == null ? {} : { groupId: platformId(frame.group_id) }),
+          })
+          return
+        }
+        break
+    }
+
+    const event: PlatformNoticeEvent = {
+      ...base,
+      ...optionalIds,
+      name: `notice.onebot11.${noticeType}${subType ? `.${subType}` : ''}`,
+      platformType: noticeType,
       ...(subType === undefined ? {} : { subType }),
-      ...(frame.user_id === undefined ? {} : { userId: platformId(frame.user_id) }),
-      ...(frame.group_id === undefined ? {} : { groupId: platformId(frame.group_id) }),
-      ...(frame.operator_id === undefined ? {} : { operatorId: platformId(frame.operator_id) }),
-      ...(frame.message_id === undefined ? {} : { messageId: platformId(frame.message_id) }),
-      ...(frame.target_id === undefined ? {} : { targetId: platformId(frame.target_id) }),
-      ...(frame.duration === undefined ? {} : { duration: Number(frame.duration) }),
-    } as NoticeEvent
+    }
     this.host.emit(event)
   }
 
@@ -575,41 +650,43 @@ class OneBotSession {
     }
     if (
       (frame.request_type !== 'friend' && frame.request_type !== 'group') ||
-      (frame.request_type === 'group' && frame.sub_type !== 'add' && frame.sub_type !== 'invite') ||
+      (frame.request_type === 'group' &&
+        ((frame.sub_type !== 'add' && frame.sub_type !== 'invite') || frame.group_id === undefined)) ||
       frame.user_id === undefined ||
       typeof frame.flag !== 'string'
     ) {
       this.log('warn', {}, 'Ignoring malformed OneBot request')
       return
     }
-    const requestType = frame.request_type
-    const subType = frame.sub_type === 'add' || frame.sub_type === 'invite' ? frame.sub_type : undefined
     const flag = frame.flag
-    const event: RequestEvent = {
+    const base = {
       id: randomUUID(),
       platform: 'onebot11',
       selfId: bot.selfId,
       time: eventTime(frame as { time?: unknown }),
-      kind: 'request',
-      name: `request.${requestType}${subType ? `.${subType}` : ''}`,
+      kind: 'request' as const,
       raw: frame,
       bot,
-      requestType,
-      ...(subType === undefined ? {} : { subType }),
       userId: platformId(frame.user_id),
-      ...(frame.group_id === undefined ? {} : { groupId: platformId(frame.group_id) }),
       comment: String(frame.comment ?? ''),
-      flag,
-      approve: (remark = '') =>
-        requestType === 'friend'
-          ? bot.onebot.setFriendAddRequest(flag, true, remark)
-          : bot.onebot.setGroupAddRequest(flag, subType as 'add' | 'invite', true, remark),
-      reject: (reason = '') =>
-        requestType === 'friend'
-          ? bot.onebot.setFriendAddRequest(flag, false)
-          : bot.onebot.setGroupAddRequest(flag, subType as 'add' | 'invite', false, reason),
     }
-    this.host.emit(event)
+    if (frame.request_type === 'friend') {
+      this.host.emit({
+        ...base,
+        name: 'request.friend',
+        approve: (remark = '') => bot.onebot.setFriendAddRequest(flag, true, remark),
+        reject: () => bot.onebot.setFriendAddRequest(flag, false),
+      })
+      return
+    }
+    const subType = frame.sub_type === 'add' ? 'add' : 'invite'
+    this.host.emit({
+      ...base,
+      groupId: platformId(frame.group_id),
+      name: subType === 'add' ? 'request.group.join' : 'request.group.invite',
+      approve: (remark = '') => bot.onebot.setGroupAddRequest(flag, subType, true, remark),
+      reject: (reason = '') => bot.onebot.setGroupAddRequest(flag, subType, false, reason),
+    })
   }
 
   private handleMeta(frame: OneBotFrame): void {

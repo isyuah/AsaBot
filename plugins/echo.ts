@@ -22,7 +22,7 @@ export default definePlugin({
         return Array.from({ length: options.times }, () => args.text).flat()
       })
 
-    ctx.on('notice.group_increase', async (event) => {
+    ctx.on('notice.member.join', async (event) => {
       if (ctx.config.welcome)
         await event.bot.sendGroup(event.groupId, [seg.text('欢迎 '), seg.at(event.userId)])
     })

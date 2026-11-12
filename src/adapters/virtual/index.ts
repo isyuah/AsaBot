@@ -22,6 +22,10 @@ export interface VirtualMessageOptions {
   superuser?: boolean
 }
 
+type VirtualNoticeInput<T extends NoticeEvent = NoticeEvent> = T extends NoticeEvent
+  ? Omit<T, keyof BaseEvent> & Pick<T, 'name'>
+  : never
+
 export class VirtualBot implements Bot {
   readonly platform = 'virtual'
   readonly selfId: string
@@ -156,7 +160,7 @@ export class VirtualAdapter implements Adapter {
     return work
   }
 
-  async emitNotice(input: Omit<NoticeEvent, keyof BaseEvent> & Pick<NoticeEvent, 'name'>): Promise<void> {
+  async emitNotice(input: VirtualNoticeInput): Promise<void> {
     this.host.emit({
       ...input,
       id: randomUUID(),

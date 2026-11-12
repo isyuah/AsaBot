@@ -186,11 +186,11 @@ interface BaseEvent {
 | `notice.message.recall` | `messageId`、`userId`（原消息作者）、`operatorId?`、`groupId?`（私聊时无） | `group_recall` / `friend_recall` |
 | `notice.poke` | `userId`（发起者）、`targetId`、`groupId?` | `notify.poke` |
 | `notice.<platform>.<type>[.<subType>]` | 通用 `PlatformNoticeEvent`：`platformType`、`subType?`、`userId?`、`groupId?`、`operatorId?` | 其余未映射的通知，例如 `notice.onebot11.group_upload` |
-| `request.friend` / `request.group.join` / `request.group.invite` | `userId`、`groupId?`、`comment`，带 `approve(remark?)` / `reject(reason?)` | `request.friend` / `request.group` 的 `add` / `invite` |
+| `request.friend` / `request.group.join` / `request.group.invite` | `userId`、`comment`，群请求另有必填的 `groupId`；带 `approve(remark?)` / `reject(reason?)` | `request.friend` / `request.group` 的 `add` / `invite` |
 | `meta.lifecycle` / `meta.heartbeat` | 元事件（适配器可以选择不派发） | `meta_event` |
 | 框架内部：`bot.online` / `bot.offline` / `bot.message.sent` / `plugin.state` | 框架自身派发。机器人自身相关的事件都放在 `bot` 下，不放进 `message`，以保证 `message` 监听器只会收到 Session | — |
 
-`ctx.on` 的事件名到事件类型通过 `EventMap` 获得精确类型。平台专属通知统一用 `notice.<platform>.*` 前缀，插件只有在显式订阅这个前缀时才会接触到平台细节。
+`ctx.on` 的事件名到事件类型通过 `EventMap` 获得精确类型。平台专属通知统一用 `notice.<platform>.*` 前缀：订阅具体的通用事件（如 `notice.member`）不会收到平台通知；订阅顶层 `notice` 会收到全部通知，类型为包含 `PlatformNoticeEvent` 的联合类型。平台名不得与通用通知分类重名，`member`、`message`、`poke` 为保留名。
 
 **Session（消息事件）**
 

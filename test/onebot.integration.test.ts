@@ -10,7 +10,7 @@ import { createApp } from '../src/bootstrap.ts'
 import { App } from '../src/core/app.ts'
 import { configSchema } from '../src/core/config/schema.ts'
 import { ApiTimeoutError, NotConnectedError } from '../src/core/errors.ts'
-import type { Session } from '../src/core/event/index.ts'
+import type { EventMap, NoticeEvent, RequestEvent, Session } from '../src/core/event/index.ts'
 import { createLogger } from '../src/core/logger.ts'
 import { seg } from '../src/core/message/index.ts'
 
@@ -272,28 +272,28 @@ describe('OneBot forward adapter', () => {
       received.push('notice')
       throw new Error('listener failure')
     })
-    app.events.on('notice.notify', async () => {
+    app.events.on('notice.member', async (event) => {
       await Promise.resolve()
-      received.push('notify')
+      received.push('member')
+      received.push(event.groupId)
     })
-    app.events.on('notice.notify.poke', (event) => received.push(event.targetId))
+    app.events.on('notice.member.join', (event) => received.push(event.userId))
     await app.events.emit({
       id: crypto.randomUUID(),
       platform: bot.platform,
       selfId: bot.selfId,
       time: Date.now(),
       kind: 'notice',
-      name: 'notice.notify.poke',
-      noticeType: 'notify',
-      subType: 'poke',
-      userId: '1',
-      targetId: bot.selfId,
+      name: 'notice.member.join',
+      joinType: 'approve',
+      groupId: '2',
+      userId: bot.selfId,
       raw: {},
       bot,
     })
-    expect(received).toEqual(expect.arrayContaining(['notice', 'notify', bot.selfId]))
+    expect(received).toEqual(expect.arrayContaining(['notice', 'member', '2', bot.selfId]))
     expect(logged).toHaveBeenCalledWith(
-      expect.objectContaining({ event: 'notice.notify.poke' }),
+      expect.objectContaining({ event: 'notice.member.join' }),
       'Event listener failed',
     )
     logged.mockRestore()
@@ -309,23 +309,155 @@ describe('OneBot forward adapter', () => {
       protocolVersion: 'v11',
     })
     expect(await bot.onebot.getMsg('123')).toMatchObject({ messageId: '123', sender: { userId: '10001' } })
-    const poke = new Promise<{ userId: string; targetId: string; groupId?: string }>((resolve) => {
-      app.events.on('notice.notify.poke', (event) => resolve(event))
+    const notices: NoticeEvent[] = []
+    const platformNotices: EventMap['notice.onebot11'][] = []
+    const platformTypes: string[] = []
+    const recalled: string[] = []
+    const muted: number[] = []
+    app.events.on('notice', (event) => notices.push(event))
+    app.events.on('notice.onebot11', (event) => {
+      platformNotices.push(event)
+      platformTypes.push(event.platformType)
     })
-    mock.emitNotice({
-      notice_type: 'notify',
-      sub_type: 'poke',
+    app.events.on('notice.message', (event) => recalled.push(event.messageId))
+    app.events.on('notice.member.mute', (event) => muted.push(event.duration))
+    const warn = vi.spyOn(app.logger, 'warn').mockImplementation(() => {})
+    const member = { group_id: 200, user_id: 300, operator_id: 400 }
+    const cases = [
+      {
+        raw: { ...member, notice_type: 'group_increase', sub_type: 'approve' },
+        expected: {
+          name: 'notice.member.join',
+          groupId: '200',
+          userId: '300',
+          operatorId: '400',
+          joinType: 'approve',
+        },
+      },
+      {
+        raw: { ...member, notice_type: 'group_increase', sub_type: 'invite' },
+        expected: { name: 'notice.member.join', joinType: 'invite' },
+      },
+      {
+        raw: { ...member, notice_type: 'group_decrease', sub_type: 'leave' },
+        expected: {
+          name: 'notice.member.leave',
+          groupId: '200',
+          userId: '300',
+          operatorId: '400',
+          reason: 'leave',
+        },
+      },
+      {
+        raw: { ...member, notice_type: 'group_decrease', sub_type: 'kick' },
+        expected: { name: 'notice.member.leave', userId: '300', reason: 'kick' },
+      },
+      {
+        raw: { ...member, notice_type: 'group_decrease', sub_type: 'kick_me' },
+        expected: { name: 'notice.member.leave', userId: '10001', reason: 'kick' },
+      },
+      {
+        raw: { ...member, notice_type: 'group_ban', sub_type: 'ban', duration: 60 },
+        expected: {
+          name: 'notice.member.mute',
+          groupId: '200',
+          userId: '300',
+          operatorId: '400',
+          duration: 60_000,
+        },
+      },
+      {
+        raw: { ...member, notice_type: 'group_ban', sub_type: 'lift_ban', duration: 0 },
+        expected: { name: 'notice.member.unmute', groupId: '200', userId: '300', operatorId: '400' },
+      },
+      {
+        raw: { ...member, notice_type: 'group_admin', sub_type: 'set' },
+        expected: { name: 'notice.member.role', groupId: '200', userId: '300', role: 'admin' },
+      },
+      {
+        raw: { ...member, notice_type: 'group_admin', sub_type: 'unset' },
+        expected: { name: 'notice.member.role', role: 'member' },
+      },
+      {
+        raw: { ...member, notice_type: 'group_recall', message_id: 500 },
+        expected: {
+          name: 'notice.message.recall',
+          groupId: '200',
+          userId: '300',
+          operatorId: '400',
+          messageId: '500',
+        },
+      },
+      {
+        raw: { notice_type: 'friend_recall', user_id: 300, message_id: 501 },
+        expected: { name: 'notice.message.recall', userId: '300', messageId: '501' },
+      },
+      {
+        raw: { notice_type: 'notify', sub_type: 'poke', group_id: 200, user_id: 300, target_id: 10001 },
+        expected: { name: 'notice.poke', userId: '300', targetId: '10001', groupId: '200' },
+      },
+      {
+        raw: { notice_type: 'notify', sub_type: 'poke', user_id: 300, target_id: 10001 },
+        expected: { name: 'notice.poke', userId: '300', targetId: '10001' },
+      },
+      {
+        raw: { ...member, notice_type: 'group_upload' },
+        expected: {
+          name: 'notice.onebot11.group_upload',
+          platformType: 'group_upload',
+          groupId: '200',
+          userId: '300',
+          operatorId: '400',
+        },
+      },
+      {
+        raw: { notice_type: 'notify', sub_type: 'lucky_king', group_id: 200, user_id: 300 },
+        expected: {
+          name: 'notice.onebot11.notify.lucky_king',
+          platformType: 'notify',
+          subType: 'lucky_king',
+          groupId: '200',
+          userId: '300',
+        },
+      },
+      {
+        raw: { notice_type: 'constructor', user_id: 300 },
+        expected: { name: 'notice.onebot11.constructor', platformType: 'constructor', userId: '300' },
+      },
+    ]
+    for (const { raw } of cases) mock.emitNotice(raw)
+    await vi.waitFor(() => expect(notices).toHaveLength(cases.length))
+    expect(notices).toMatchObject(cases.map(({ expected }) => expected))
+    expect(notices[6]).not.toHaveProperty('duration')
+    expect(notices[10]).not.toHaveProperty('groupId')
+    expect(notices[12]).not.toHaveProperty('groupId')
+    expect(platformNotices).toHaveLength(3)
+    expect(platformTypes).toEqual(['group_upload', 'notify', 'constructor'])
+    expect(recalled).toEqual(['500', '501'])
+    expect(muted).toEqual([60_000])
+
+    mock.emitNotice({ notice_type: 'group_increase', sub_type: 'approve', group_id: 200, operator_id: 400 })
+    mock.emitNotice({ ...member, notice_type: 'group_admin', sub_type: 'invalid' })
+    mock.emitNotice({ notice_type: 'notify', sub_type: 'poke', user_id: 300 })
+    mock.emitNotice({ ...member, notice_type: 'group_ban', sub_type: 'ban', duration: 'invalid' })
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(4))
+    expect(warn).toHaveBeenCalledWith(expect.anything(), 'Ignoring malformed OneBot notice')
+    expect(notices).toHaveLength(cases.length)
+    warn.mockRestore()
+
+    const requests: RequestEvent[] = []
+    const groupRequests: Array<'request.group.join' | 'request.group.invite'> = []
+    app.events.on('request', (event) => requests.push(event))
+    app.events.on('request.group', (event) => groupRequests.push(event.name))
+    mock.push({ post_type: 'request', request_type: 'friend', user_id: 300, comment: 'friend', flag: 'f' })
+    mock.push({
+      post_type: 'request',
+      request_type: 'group',
+      sub_type: 'add',
       group_id: 200,
       user_id: 300,
-      target_id: 10001,
-    })
-    expect(await poke).toMatchObject({ userId: '300', targetId: '10001', groupId: '200' })
-
-    const request = new Promise<void>((resolve) => {
-      app.events.on('request.group.invite', async (event) => {
-        await event.approve()
-        resolve()
-      })
+      comment: 'join',
+      flag: 'j',
     })
     mock.push({
       post_type: 'request',
@@ -333,11 +465,33 @@ describe('OneBot forward adapter', () => {
       sub_type: 'invite',
       group_id: 200,
       user_id: 300,
-      flag: 'flag',
+      comment: 'invite',
+      flag: 'i',
     })
-    await request
-    const call = await mock.waitForCall('set_group_add_request')
-    expect(call.params).toMatchObject({ flag: 'flag', sub_type: 'invite', approve: true })
+    await vi.waitFor(() => expect(requests).toHaveLength(3))
+    expect(requests).toMatchObject([
+      { name: 'request.friend', userId: '300', comment: 'friend' },
+      { name: 'request.group.join', groupId: '200', userId: '300', comment: 'join' },
+      { name: 'request.group.invite', groupId: '200', userId: '300', comment: 'invite' },
+    ])
+    expect(groupRequests).toEqual(['request.group.join', 'request.group.invite'])
+    const [friend, join, invite] = requests
+    if (friend === undefined || join === undefined || invite === undefined)
+      throw new Error('Missing requests')
+    await friend.approve('remark')
+    await join.reject('reason')
+    await invite.approve()
+    expect((await mock.waitForCall('set_friend_add_request')).params).toMatchObject({
+      flag: 'f',
+      approve: true,
+      remark: 'remark',
+    })
+    expect(
+      (await mock.waitForCall('set_group_add_request', (call) => call.params.flag === 'j')).params,
+    ).toMatchObject({ flag: 'j', sub_type: 'add', approve: false, reason: 'reason' })
+    expect(
+      (await mock.waitForCall('set_group_add_request', (call) => call.params.flag === 'i')).params,
+    ).toMatchObject({ flag: 'i', sub_type: 'invite', approve: true })
   })
 
   it('rejects pending calls on disconnect and reconnects the same bot', async () => {
