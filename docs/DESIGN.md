@@ -296,6 +296,43 @@ adapter.emit(event)
   - 超时返回 `null`。
   - 同一作用域同时只允许一个 prompt：新 prompt 会让旧 prompt 以 `null` 结束。
 
+### 9.1 实现约定（M2）
+
+**注册作用域**：插件系统要到 M3 才有，所以 M2 的分发器以“作用域”为单位注册所有内容，M3 的 `ctx` 只是在这层上包一层薄封装。
+```ts
+interface Scope { owner: string; signal?: AbortSignal }   // owner：插件名，框架自身用 'core'；signal：owner 生命周期结束时 abort
+dispatcher.on(scope, name, listener)               → Disposer
+dispatcher.middleware(scope, fn, { priority? })    → Disposer
+dispatcher.command(scope, decl)                    → CommandBuilder（可链式调用，另有 .dispose()）
+dispatcher.match(scope, pattern, handler, opts?)   → Disposer
+```
+- 当 `scope.signal` 已经 abort 时，注册会被拒绝。signal 在之后 abort 时，该作用域下的所有注册自动注销。
+- 原来的 `app.events` 并入分发器，成为观察者阶段。
+- 同一阶段内的执行顺序：先按 priority 降序，priority 相同时按注册顺序。
+
+**钩子**（M2 提供默认实现，M3 替换成基于存储的实现）
+- `accessFilter(event) → boolean`：黑白名单。默认全部放行。只作用于带 userId 的事件；超管永远放行。
+- `isEnabledFor(owner, event) → boolean`：按群开关。默认始终为 true。被关闭的 owner 在该事件中的所有处理器都会被跳过。
+
+**执行模型**
+- 观察者阶段以“发出后不等待”的方式启动，消息管线同时开始执行，两者互不阻塞。`dispatcher.dispatch(event)` 返回的 Promise 在两者都结束后才 resolve，方便测试使用。
+- 内部事件、meta 事件只经过观察者阶段。
+
+**处理器上下文与取消**
+- 每次调用处理器时，会合成一个 signal：`AbortSignal.any([scope.signal, app 退出信号, AbortSignal.timeout(handlerTimeout)])`。
+- 处理器拿到的是 **绑定了这个 signal 的 session 视图**：一个浅拷贝的对象，其中 `prompt` 已绑定该 signal。这样插件卸载时，它正在等待的 prompt 会自动 reject。
+- 处理器包装层的错误处理：
+  - 异常由 signal 中止引起（`signal.aborted` 且错误是 `signal.reason`，或者名称为 AbortError/TimeoutError）时，不记 error。只有超时的情况记一条 warn，内容为“处理器超时”，并附上 owner 和事件名。
+  - 其他异常记 error。
+
+**prompt 的注入**
+- `Session.prompt` 依赖分发器，但 Session 是适配器构造的。因此 AdapterHost 增加 `sessionServices`（由 App 实现），适配器把它传给 `createSession`，Session 的 `prompt` 再委托给它。适配器本身完全不感知 prompt 的存在。
+- `timeout` 的默认值取 `dispatch.promptTimeout`，上限为 `dispatch.maxPromptTimeout`。
+
+**返回值约定**：命令 action 和 matcher handler 返回 `Sendable` 时，框架用 `session.send` 发出，不引用原消息。需要引用时，由插件自己调用 `session.reply`。
+
+**框架内置的提示文本**（如权限不足、冷却中、参数错误、执行出错）集中放在 `src/core/dispatch/messages.ts`，方便以后做成可配置。
+
 ## 10. 命令系统
 
 ```ts
@@ -322,7 +359,11 @@ ctx.command('echo <text:rest>')
   - 群聊中 `toMe` 且 `mentionAsPrefix` 开启时，可以不带前缀。
   - 私聊中 `privateRequirePrefix` 为 false 时，可以不带前缀。
   - 不带前缀时只匹配命令名和别名，匹配不上就交给匹配器。
-- **返回值**：action 的返回值（`Sendable`）作为回复发出，返回 `undefined` 则不发。
+- **返回值**：action 的返回值（`Sendable`）通过 `session.send` 发出；返回 `undefined` 则不发。
+- **选项解析**：支持 `--key value`、`--key=value`、`-k value`，布尔选项写 `-s` 或 `--silent`。选项可以和位置参数交错出现。一旦开始解析 `rest` 参数，或遇到 `--`，后面的内容都按字面处理，不再识别为选项。未知选项报参数错误。
+- **命令名匹配**：精确匹配，区分大小写。别名只替换路径的最后一段，例如给 `plugin reload` 加别名 `重载插件`，就能用 `/重载插件 <name>` 调用。
+- **只有子命令的路径**：例如 `/plugin` 本身没有 action，但有子命令时，回复它的子命令列表。
+- **帮助数据**：提供 `formatUsage(command)` 和 `listCommands(session)`。后者按 scope、权限、hidden 以及按群开关过滤，供 M3 的 help 插件使用。
 - **错误提示**：参数错误时回复简短原因和用法，例如 `缺少参数 <text>。用法：/echo <text>`。带前缀但命令未知时默认不回复，因为群里可能有别的机器人。
 - **冲突检测**：命令路径或别名冲突时，后注册的插件加载失败，错误信息中写明冲突对象。
 
@@ -333,7 +374,7 @@ ctx.command('echo <text:rest>')
 - 字符串简写：`'superuser' | 'group.owner' | 'group.admin'`。
 - 超管通过所有内置角色检查。角色取自 `sender.role`。
 - 权限不足时，按 `replyOnDenied` 回复 `权限不足`。
-- 冷却按 命令 × 作用域键 在内存中计时。冷却期间只在第一次被拦截时回复 `冷却中，剩余 Ns`，之后静默。超管不受冷却限制。
+- 冷却按 命令 × 作用域键 在内存中计时。作用域键：`user` 为 `platform:userId`（跨群共享），`group` 为 `channelKey`，`global` 为命令本身。冷却期间只在第一次被拦截时回复 `冷却中，剩余 Ns`，之后静默。超管不受冷却限制。
 - 黑名单和白名单存 SQLite，由 admin 插件管理。白名单为空表示不启用。
 
 ## 12. 插件系统
