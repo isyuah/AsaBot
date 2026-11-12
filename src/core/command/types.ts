@@ -1,15 +1,26 @@
 import type { Session } from '../event/index.ts'
 import type { KnownSegment, Message, Sendable } from '../message/index.ts'
 
-export type ArgumentValue<T extends string> = T extends 'number' | 'integer' | 'duration'
+type EnumValues<T extends string> = T extends `${infer First}|${infer Rest}` ? First | EnumValues<Rest> : T
+
+export type ArgumentValue<T extends string> = T extends
+  | 'number'
+  | 'integer'
+  | 'posint'
+  | 'natural'
+  | 'duration'
   ? number
   : T extends 'boolean'
     ? boolean
-    : T extends 'image'
-      ? Extract<KnownSegment, { type: 'image' }>
-      : T extends 'rest'
-        ? Message
-        : string
+    : T extends 'date'
+      ? Date
+      : T extends 'image'
+        ? Extract<KnownSegment, { type: 'image' }>
+        : T extends 'rest'
+          ? Message
+          : T extends `${string}|${string}`
+            ? EnumValues<T>
+            : string
 
 type ParameterParts<S extends string> = S extends `${infer Name}:${infer Type}` ? [Name, Type] : [S, 'string']
 type Parameter<S extends string> =

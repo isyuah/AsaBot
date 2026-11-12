@@ -61,6 +61,25 @@ const logSchema = z
   })
   .strict()
 
+export const commandOverrideSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    aliases: z.array(z.string().trim().min(1)).optional(),
+    permission: z.enum(['everyone', 'superuser', 'group.admin', 'group.owner']).optional(),
+    cooldown: z
+      .union([
+        z.literal(false),
+        z
+          .object({ duration: durationSchema, scope: z.enum(['user', 'group', 'global']).optional() })
+          .strict(),
+      ])
+      .optional(),
+    hidden: z.boolean().optional(),
+  })
+  .strict()
+
+export type CommandOverride = z.output<typeof commandOverrideSchema>
+
 const commandSchema = z
   .object({
     prefixes: z.array(z.string()).default(['/']),
@@ -68,6 +87,8 @@ const commandSchema = z
     privateRequirePrefix: z.boolean().default(false),
     replyOnError: z.boolean().default(true),
     replyOnDenied: z.boolean().default(true),
+    suggest: z.enum(['off', 'direct', 'always']).default('direct'),
+    overrides: z.record(z.string(), commandOverrideSchema).default({}),
   })
   .strict()
 

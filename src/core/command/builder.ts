@@ -2,12 +2,17 @@ import type { Scope } from '../dispatch/types.ts'
 import { type Permission, type Rule, resolvePermission } from '../permission.ts'
 import type { CooldownScope } from '../ratelimit.ts'
 import { parseDuration } from '../utils/duration.ts'
-import { type ArgumentDefinition, type Declaration, parseArgument, parseDeclaration } from './declaration.ts'
+import {
+  type ArgumentDefinition,
+  type ArgumentSettings,
+  type Declaration,
+  parseArgument,
+  parseDeclaration,
+} from './declaration.ts'
 import type { CommandAction, CommandArgs, OptionValue } from './types.ts'
 
-export interface OptionSettings {
-  default?: unknown
-  description?: string
+export interface OptionSettings<T = unknown> extends ArgumentSettings<T> {
+  default?: T
 }
 
 export interface OptionDefinition {
@@ -16,6 +21,7 @@ export interface OptionDefinition {
   argument?: ArgumentDefinition
   defaultValue?: unknown
   description?: string
+  settings?: ArgumentSettings
 }
 
 export interface CommandDefinition extends Declaration {
@@ -37,7 +43,7 @@ export interface CommandRegistration {
   dispose(command: CommandDefinition): void
 }
 
-function parseOption(name: string, source: string, settings: OptionSettings): OptionDefinition {
+function parseOption<T>(name: string, source: string, settings: OptionSettings<T>): OptionDefinition {
   if (!/^[\w-]+$/.test(name)) throw new Error(`无效的选项名：${name}`)
   const match = /^\s*((?:--?[\w-]+\s*,\s*)*--?[\w-]+)(?:\s+(<[^>]+>|\[[^\]]+\]))?\s*$/.exec(source)
   if (!match) throw new Error(`无效的选项声明：${source}`)
@@ -52,25 +58,33 @@ function parseOption(name: string, source: string, settings: OptionSettings): Op
     } else {
       const type = argument.type
       const valid =
-        type === 'string' || type === 'user'
+        type === 'string' || type === 'user' || type.includes('|')
           ? typeof defaultValue === 'string' &&
-            (type !== 'user' || (defaultValue.length > 0 && !/\s/.test(defaultValue)))
-          : type === 'number' || type === 'integer' || type === 'duration'
-            ? typeof defaultValue === 'number' &&
-              Number.isFinite(defaultValue) &&
-              (type !== 'integer' || Number.isSafeInteger(defaultValue)) &&
-              (type !== 'duration' || defaultValue >= 0)
-            : type === 'boolean'
-              ? typeof defaultValue === 'boolean'
-              : typeof defaultValue === 'object' &&
-                defaultValue !== null &&
-                'type' in defaultValue &&
-                defaultValue.type === 'image' &&
-                'data' in defaultValue &&
-                typeof defaultValue.data === 'object' &&
-                defaultValue.data !== null &&
-                'file' in defaultValue.data &&
-                typeof defaultValue.data.file === 'string'
+            (type !== 'user' || (defaultValue.length > 0 && !/\s/.test(defaultValue))) &&
+            (!type.includes('|') || type.split('|').includes(defaultValue))
+          : type === 'date'
+            ? defaultValue instanceof Date && !Number.isNaN(defaultValue.getTime())
+            : type === 'number' ||
+                type === 'integer' ||
+                type === 'posint' ||
+                type === 'natural' ||
+                type === 'duration'
+              ? typeof defaultValue === 'number' &&
+                Number.isFinite(defaultValue) &&
+                (!['integer', 'posint', 'natural'].includes(type) || Number.isSafeInteger(defaultValue)) &&
+                (!['natural', 'duration'].includes(type) || defaultValue >= 0) &&
+                (type !== 'posint' || defaultValue > 0)
+              : type === 'boolean'
+                ? typeof defaultValue === 'boolean'
+                : typeof defaultValue === 'object' &&
+                  defaultValue !== null &&
+                  'type' in defaultValue &&
+                  defaultValue.type === 'image' &&
+                  'data' in defaultValue &&
+                  typeof defaultValue.data === 'object' &&
+                  defaultValue.data !== null &&
+                  'file' in defaultValue.data &&
+                  typeof defaultValue.data.file === 'string'
       if (!valid) throw new Error(`选项 ${name} 的默认值类型无效`)
     }
   } else if (argument === undefined) {
@@ -82,6 +96,7 @@ function parseOption(name: string, source: string, settings: OptionSettings): Op
     ...(argument === undefined ? {} : { argument }),
     ...(defaultValue === undefined ? {} : { defaultValue }),
     ...(settings.description === undefined ? {} : { description: settings.description }),
+    settings: settings as ArgumentSettings,
   }
 }
 
@@ -116,15 +131,25 @@ export class CommandBuilder<Decl extends string = string, Options = object> {
     return this
   }
 
+  arg<const Name extends keyof CommandArgs<Decl> & string>(
+    name: Name,
+    settings: ArgumentSettings<CommandArgs<Decl>[Name]>,
+  ): this {
+    const argument = this.definition.arguments.find((item) => item.name === name)
+    if (!argument) throw new Error(`未声明的参数：${name}`)
+    argument.settings = settings as ArgumentSettings
+    return this
+  }
+
   option<const Name extends string, const Spec extends string>(
     name: Name,
     spec: Spec,
-    settings: OptionSettings & { default: OptionValue<Spec> },
+    settings: OptionSettings<OptionValue<Spec>> & { default: OptionValue<Spec> },
   ): CommandBuilder<Decl, Options & Record<Name, OptionValue<Spec>>>
   option<const Name extends string, const Spec extends string>(
     name: Name,
     spec: Spec,
-    settings?: OptionSettings,
+    settings?: OptionSettings<OptionValue<Spec>> & { default?: never },
   ): CommandBuilder<
     Decl,
     Options &
@@ -134,7 +159,7 @@ export class CommandBuilder<Decl extends string = string, Options = object> {
         | (Spec extends `${string}<${string}>${string}` | `${string}[${string}]${string}` ? undefined : never)
       >
   >
-  option(name: string, spec: string, settings: OptionSettings = {}): CommandBuilder<Decl, Options> {
+  option<T>(name: string, spec: string, settings: OptionSettings<T> = {}): CommandBuilder<Decl, Options> {
     const option = parseOption(name, spec, settings)
     if (
       this.definition.options.some(

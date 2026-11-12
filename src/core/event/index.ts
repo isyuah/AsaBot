@@ -5,6 +5,7 @@ export type {
   BotOfflineEvent,
   BotOnlineEvent,
   DialogueOptions,
+  DispatchTraceEvent,
   EventMap,
   FriendRequestEvent,
   GroupInviteRequestEvent,

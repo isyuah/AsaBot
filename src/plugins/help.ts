@@ -17,10 +17,6 @@ function optionText(option: OptionDefinition): string {
   return `${option.flags.join(', ')}${parameter}${defaultValue}${description}`
 }
 
-function pathMatches(command: CommandDefinition, path: string): boolean {
-  return command.path.join(' ') === path || command.aliases.includes(path)
-}
-
 function descendants(commands: CommandDefinition[], path: string): CommandDefinition[] {
   return commands.filter((command) => command.path.join(' ').startsWith(`${path} `))
 }
@@ -48,14 +44,26 @@ export function createHelpPlugin(app: App) {
           path = path.split(/\s+/).filter(Boolean).join(' ')
 
           if (path) {
-            const command = commands.find((item) => pathMatches(item, path))
+            const command = commands.find(
+              (item) => item.path.join(' ') === path || app.dispatcher.aliases(item).includes(path),
+            )
             const children = descendants(commands, command?.path.join(' ') ?? path)
             if (!command && children.length === 0) return `未找到可用命令：${path}`
             const lines = command
               ? [
                   `用法：${formatUsage(command, prefix)}`,
                   ...(command.description ? [`说明：${command.description}`] : []),
-                  ...(command.aliases.length ? [`别名：${command.aliases.join('、')}`] : []),
+                  ...(command.arguments.some((arg) => arg.settings?.description)
+                    ? [
+                        '参数：',
+                        ...command.arguments
+                          .filter((arg) => arg.settings?.description)
+                          .map((arg) => `  ${arg.name}：${arg.settings?.description}`),
+                      ]
+                    : []),
+                  ...(app.dispatcher.aliases(command).length
+                    ? [`别名：${app.dispatcher.aliases(command).join('、')}`]
+                    : []),
                   ...(command.options.length
                     ? ['选项：', ...command.options.map((option) => `  ${optionText(option)}`)]
                     : []),

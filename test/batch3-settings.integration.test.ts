@@ -176,7 +176,9 @@ describe('batch 3 panel settings', () => {
       })
       expect(response.status).toBe(200)
       expect(await t.say('!protected', { user: '42', group: null })).toEqual(['allowed'])
-      expect(await t.say('/protected', { user: '42', group: null })).toEqual([])
+      expect(await t.say('/protected', { user: '42', group: null })).toEqual([
+        '没有这个命令，你是不是想用 !protected？',
+      ])
     } finally {
       await t.dispose()
     }

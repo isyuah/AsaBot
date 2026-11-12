@@ -23,6 +23,10 @@ const coreMigrations = [
   `CREATE TABLE plugin_tables (plugin TEXT NOT NULL, table_name TEXT PRIMARY KEY);`,
   `CREATE TABLE scheduled_tasks (plugin TEXT NOT NULL, name TEXT NOT NULL, key TEXT NOT NULL,
     run_at INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (plugin, name, key));`,
+  `CREATE TABLE plugin_group_config (plugin TEXT NOT NULL, group_key TEXT NOT NULL, config TEXT NOT NULL,
+    PRIMARY KEY (plugin, group_key));
+   CREATE TABLE command_group_state (command TEXT NOT NULL, group_key TEXT NOT NULL, enabled INTEGER NOT NULL,
+    PRIMARY KEY (command, group_key));`,
 ]
 
 export class Storage {
@@ -31,6 +35,7 @@ export class Storage {
   private readonly dataDir: string
   private readonly logger: Logger | undefined
   private readonly groups = new Map<string, boolean>()
+  private readonly commandGroups = new Map<string, boolean>()
   private readonly accessEntries = new Map<string, Set<string>>()
   readonly access: {
     add: (list: AccessList, subject: AccessSubject, key: string) => void
@@ -84,6 +89,9 @@ export class Storage {
       for (const row of db.prepare('SELECT plugin, group_key, enabled FROM plugin_group_state').all()) {
         this.groups.set(JSON.stringify([row.plugin, row.group_key]), row.enabled === 1)
       }
+      for (const row of db.prepare('SELECT command, group_key, enabled FROM command_group_state').all()) {
+        this.commandGroups.set(JSON.stringify([row.command, row.group_key]), row.enabled === 1)
+      }
       for (const row of db.prepare('SELECT list, subject, key FROM access_list').all()) {
         this.accessSet(row.list as AccessList, row.subject as AccessSubject).add(String(row.key))
       }
@@ -110,6 +118,7 @@ export class Storage {
     this.database?.close()
     this.database = undefined
     this.groups.clear()
+    this.commandGroups.clear()
     this.accessEntries.clear()
   }
 
@@ -175,11 +184,62 @@ export class Storage {
     return this.groups.get(JSON.stringify([owner, groupKey])) !== false
   }
 
-  listGroups(owner: string): { groupKey: string; enabled: boolean }[] {
-    return this.db
+  listGroups(owner: string): { groupKey: string; enabled?: boolean; config?: Record<string, unknown> }[] {
+    const groups = this.db
       .prepare('SELECT group_key, enabled FROM plugin_group_state WHERE plugin = ? ORDER BY group_key')
       .all(owner)
       .map((row) => ({ groupKey: String(row.group_key), enabled: row.enabled === 1 }))
+    const result: Map<string, { groupKey: string; enabled?: boolean; config?: Record<string, unknown> }> =
+      new Map(groups.map((group) => [group.groupKey, group]))
+    for (const row of this.db
+      .prepare('SELECT group_key, config FROM plugin_group_config WHERE plugin = ?')
+      .all(owner)) {
+      const groupKey = String(row.group_key)
+      const group = result.get(groupKey) ?? { groupKey }
+      group.config = JSON.parse(String(row.config)) as Record<string, unknown>
+      result.set(groupKey, group)
+    }
+    return [...result.values()].sort((a, b) => a.groupKey.localeCompare(b.groupKey))
+  }
+
+  getGroupConfig(owner: string, groupKey: string): Record<string, unknown> | undefined {
+    const row = this.db
+      .prepare('SELECT config FROM plugin_group_config WHERE plugin = ? AND group_key = ?')
+      .get(owner, groupKey)
+    return row ? (JSON.parse(String(row.config)) as Record<string, unknown>) : undefined
+  }
+
+  setGroupConfig(owner: string, groupKey: string, config: Record<string, unknown> | null): void {
+    if (config === null)
+      this.db
+        .prepare('DELETE FROM plugin_group_config WHERE plugin = ? AND group_key = ?')
+        .run(owner, groupKey)
+    else
+      this.db
+        .prepare(
+          'INSERT INTO plugin_group_config VALUES (?, ?, ?) ON CONFLICT(plugin, group_key) DO UPDATE SET config = excluded.config',
+        )
+        .run(owner, groupKey, JSON.stringify(config))
+  }
+
+  setCommandGroupEnabled(command: string, groupKey: string, enabled: boolean): void {
+    this.db
+      .prepare(
+        'INSERT INTO command_group_state VALUES (?, ?, ?) ON CONFLICT(command, group_key) DO UPDATE SET enabled = excluded.enabled',
+      )
+      .run(command, groupKey, enabled ? 1 : 0)
+    this.commandGroups.set(JSON.stringify([command, groupKey]), enabled)
+  }
+
+  isCommandGroupEnabled(command: string, groupKey: string): boolean {
+    return this.commandGroups.get(JSON.stringify([command, groupKey])) !== false
+  }
+
+  disabledCommandGroups(command: string): string[] {
+    return [...this.commandGroups]
+      .filter(([key, enabled]) => !enabled && (JSON.parse(key) as string[])[0] === command)
+      .map(([key]) => (JSON.parse(key) as string[])[1] as string)
+      .sort()
   }
 
   purgePlugin(owner: string): void {
@@ -187,7 +247,13 @@ export class Storage {
     db.exec('BEGIN IMMEDIATE')
     try {
       db.exec('PRAGMA defer_foreign_keys = ON')
-      for (const table of ['kv', 'migrations', 'plugin_group_state', 'scheduled_tasks']) {
+      for (const table of [
+        'kv',
+        'migrations',
+        'plugin_group_state',
+        'plugin_group_config',
+        'scheduled_tasks',
+      ]) {
         db.prepare(`DELETE FROM ${table} WHERE plugin = ?`).run(owner)
       }
       for (const row of db.prepare('SELECT table_name FROM plugin_tables WHERE plugin = ?').all(owner)) {

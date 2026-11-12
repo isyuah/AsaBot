@@ -11,7 +11,8 @@ import WebSocket, { WebSocketServer } from 'ws'
 import { z } from 'zod'
 import type { App, ServerService } from '../core/app.ts'
 import { type Bot, supports } from '../core/bot.ts'
-import { logLevelSchema } from '../core/config/schema.ts'
+import { commandOverrideSchema, logLevelSchema } from '../core/config/schema.ts'
+import { deleteConfigValue, writeConfigValue } from '../core/config/write.ts'
 import type { DispatchEvent } from '../core/dispatch/types.ts'
 import { NoBotOnlineError, PluginConfigError } from '../core/errors.ts'
 import type { MessageSentEvent } from '../core/event/index.ts'
@@ -511,16 +512,70 @@ export class HttpServer implements ServerService {
     panel.put('/plugins/:name/groups/:groupKey', async (c) => {
       const name = c.req.param('name')
       this.requirePlugin(name)
-      const input = await body(c, z.object({ enabled: z.boolean() }))
+      const input = await body(
+        c,
+        z
+          .object({
+            enabled: z.boolean().optional(),
+            config: z.record(z.string(), z.unknown()).nullable().optional(),
+          })
+          .strict()
+          .refine(
+            (value) => value.enabled !== undefined || value.config !== undefined,
+            'enabled or config is required',
+          ),
+      )
       const groupKey = c.req.param('groupKey')
       if (!/^[^:\s]+:[^\s]+$/.test(groupKey))
         throw new HttpError(400, 'BAD_REQUEST', 'Expected groupKey in platform:id format')
-      this.app.plugins.setGroupEnabled(name, groupKey, input.enabled)
+      if (input.config !== undefined) this.app.plugins.setGroupConfig(name, groupKey, input.config)
+      if (input.enabled !== undefined) this.app.plugins.setGroupEnabled(name, groupKey, input.enabled)
       return c.json({ ok: true })
     })
     panel.get('/commands', (c) =>
       c.json(this.app.dispatcher.registeredCommands().map((command) => commandView(this.app, command))),
     )
+    panel.put('/commands/override', async (c) => {
+      const input = await body(
+        c,
+        z.object({ path: z.string().min(1), override: commandOverrideSchema.nullable() }).strict(),
+      )
+      return this.app.plugins.serial(async () => {
+        const command = this.app.dispatcher
+          .registeredCommands()
+          .find((item) => item.path.join(' ') === input.path)
+        if (!command) throw new HttpError(404, 'NOT_FOUND', 'Command not found')
+        if (this.app.configPath) {
+          const key = ['command', 'overrides', input.path]
+          if (input.override === null) await deleteConfigValue(this.app.configPath, key)
+          else
+            await writeConfigValue(this.app.configPath, key, input.override, {
+              previousValue: this.app.config.command.overrides[input.path],
+            })
+        } else this.app.logger.debug({ command: input.path }, 'Command override changed in memory')
+        if (input.override === null) delete this.app.config.command.overrides[input.path]
+        else this.app.config.command.overrides[input.path] = input.override
+        return c.json(commandView(this.app, command))
+      })
+    })
+    panel.put('/commands/groups', async (c) => {
+      const input = await body(
+        c,
+        z
+          .object({
+            path: z.string().min(1),
+            groupKey: z.string().regex(/^[^:\s]+:[^\s]+$/),
+            enabled: z.boolean(),
+          })
+          .strict(),
+      )
+      const command = this.app.dispatcher
+        .registeredCommands()
+        .find((item) => item.path.join(' ') === input.path)
+      if (!command) throw new HttpError(404, 'NOT_FOUND', 'Command not found')
+      this.app.storage.setCommandGroupEnabled(input.path, input.groupKey, input.enabled)
+      return c.json({ ok: true })
+    })
     panel.get('/acl', (c) => c.json(this.app.storage.access.list()))
     panel.on(['POST', 'DELETE'], '/acl', async (c) => {
       const entry = await body(c, accessSchema)
@@ -538,10 +593,14 @@ export class HttpServer implements ServerService {
     panel.get('/logs', (c) => {
       const limit = Number(c.req.query('limit') ?? 200)
       const level = Number(c.req.query('level') ?? 30)
+      const eventId = c.req.query('eventId')
       if (!Number.isSafeInteger(limit) || limit < 0 || !Number.isFinite(level))
         throw new HttpError(400, 'BAD_REQUEST', 'Invalid log filter')
       const records = getRecentLogs().filter(
-        (record) => typeof record.level === 'number' && record.level >= level,
+        (record) =>
+          typeof record.level === 'number' &&
+          record.level >= level &&
+          (eventId === undefined || record.eventId === eventId),
       )
       return c.json(limit === 0 ? [] : records.slice(-limit))
     })

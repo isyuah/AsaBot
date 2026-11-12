@@ -22,6 +22,7 @@ const commandInput = z
     privateRequirePrefix: z.boolean().optional(),
     replyOnError: z.boolean().optional(),
     replyOnDenied: z.boolean().optional(),
+    suggest: z.enum(['off', 'direct', 'always']).optional(),
   })
   .strict()
 
@@ -155,7 +156,12 @@ export class SettingsService {
   }
 
   private async raw(): Promise<ConfigRecord> {
-    if (!this.app.configPath) this.memory.plugins = structuredClone(this.app.config.plugins)
+    if (!this.app.configPath) {
+      this.memory.plugins = structuredClone(this.app.config.plugins)
+      const command = isRecord(this.memory.command) ? this.memory.command : {}
+      command.overrides = structuredClone(this.app.config.command.overrides)
+      this.memory.command = command
+    }
     const value = this.app.configPath ? await readRawConfig(this.app.configPath) : this.memory
     if (!isRecord(value))
       throw new SettingsValidationError([{ path: '<root>', message: 'Expected an object' }])
@@ -166,10 +172,11 @@ export class SettingsService {
     const raw = await this.raw()
     const { config } = validate(raw)
     const configured = isRecord(raw.adapters) ? raw.adapters : {}
+    const { overrides: _overrides, ...command } = config.command
     return {
       superusers: config.superusers,
       timezone: config.timezone,
-      command: config.command,
+      command,
       adapters: Object.fromEntries(
         Object.entries(configured).map(([name, value]) => {
           const definition = adapters[name]

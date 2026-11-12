@@ -27,9 +27,11 @@ export function botView(app: App, bot: Bot) {
 }
 
 export function commandView(app: App, command: CommandDefinition) {
+  const path = command.path.join(' ')
+  const override = app.config.command.overrides[path]
   return {
     owner: command.owner,
-    path: command.path.join(' '),
+    path,
     usage: formatUsage(command, app.config.command.prefixes[0] ?? ''),
     description: command.description,
     aliases: [...command.aliases],
@@ -42,6 +44,9 @@ export function commandView(app: App, command: CommandDefinition) {
     permission: command.permission !== undefined,
     scope: command.messageScope,
     hidden: command.hidden,
+    ...(override === undefined ? {} : { override }),
+    disabledGroups: app.storage.disabledCommandGroups(path),
+    overrideIssues: app.dispatcher.overrideIssues(command),
   }
 }
 

@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import { dirname } from 'node:path'
 import { Writable } from 'node:stream'
 import pino, { type DestinationStream, type Logger, type StreamEntry } from 'pino'
+import { dispatchContext } from './dispatch/trace.ts'
 
 const logCapacity = 2_000
 const redactedFields = [
@@ -21,7 +22,7 @@ const subscriberErrorLogger = pino(
   process.stderr,
 )
 
-export type LogRecord = Readonly<Record<string, unknown>>
+export type LogRecord = Readonly<Record<string, unknown> & { eventId?: string }>
 export type LogSubscriber = (record: LogRecord) => void
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error'
 
@@ -167,6 +168,10 @@ export function createLogger(options: CreateLoggerOptions = {}): Logger {
     {
       level: options.level ?? 'info',
       redact: { paths: redactedFields, censor: '[Redacted]' },
+      mixin: () => {
+        const context = dispatchContext.getStore()
+        return context?.active.value ? { eventId: context.eventId } : {}
+      },
     },
     pino.multistream(streams),
   )

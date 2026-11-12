@@ -88,6 +88,8 @@ export class PluginManager {
   private readonly watchers: FSWatcher[] = []
   private readonly packageUpdateSubscribers = new Set<(state: PluginState) => void>()
   private readonly timers = new Map<string, NodeJS.Timeout>()
+  private readonly groupConfigCache = new Map<string, unknown>()
+  private readonly groupConfigWarnings = new Set<string>()
   private releaseRoots?: () => void
   private queue: Promise<void> = Promise.resolve()
   private started = false
@@ -199,6 +201,62 @@ export class PluginManager {
     const value = this.app.config.plugins[name]?.config
     const result = schema.safeParse(value === undefined ? {} : value)
     return result.success ? result.data : undefined
+  }
+
+  getGroupConfig(name: string, groupKey: string): Record<string, unknown> | undefined {
+    this.requireAvailable(name)
+    return this.app.storage.getGroupConfig(name, groupKey)
+  }
+
+  setGroupConfig(name: string, groupKey: string, override: Record<string, unknown> | null): void {
+    const entry = this.requireAvailable(name)
+    if (override !== null) {
+      if (!entry.definition?.config)
+        throw new PluginConfigError([
+          { path: `plugins.${name}.config`, message: 'Plugin has no configuration schema' },
+        ])
+      this.validateConfig(entry, {
+        ...(this.app.config.plugins[name]?.config as object | undefined),
+        ...override,
+      })
+    }
+    this.app.storage.setGroupConfig(name, groupKey, override)
+    const key = JSON.stringify([name, groupKey])
+    this.groupConfigCache.delete(key)
+    this.groupConfigWarnings.delete(key)
+  }
+
+  configFor(name: string, groupKey: string): unknown {
+    const key = JSON.stringify([name, groupKey])
+    if (this.groupConfigCache.has(key)) return this.groupConfigCache.get(key)
+    const entry = this.requireAvailable(name)
+    const override = this.app.storage.getGroupConfig(name, groupKey)
+    let result = this.getConfig(name)
+    if (override !== undefined) {
+      try {
+        result = this.validateConfig(entry, {
+          ...(this.app.config.plugins[name]?.config as object | undefined),
+          ...override,
+        })
+      } catch (error) {
+        if (!(error instanceof PluginConfigError)) throw error
+        if (!this.groupConfigWarnings.has(key)) {
+          this.groupConfigWarnings.add(key)
+          this.app.logger.warn(
+            { plugin: name, groupKey, issues: error.issues },
+            'Group configuration invalid; using global configuration',
+          )
+        }
+      }
+    }
+    this.groupConfigCache.set(key, result)
+    return result
+  }
+
+  private invalidateGroupConfigs(name: string): void {
+    for (const key of this.groupConfigCache.keys()) {
+      if ((JSON.parse(key) as string[])[0] === name) this.groupConfigCache.delete(key)
+    }
   }
 
   async start(): Promise<void> {
@@ -448,6 +506,7 @@ export class PluginManager {
       this.validateConfig(entry, value)
       await this.persist(name, 'config', value)
       this.entryConfig(name).config = value
+      this.invalidateGroupConfigs(name)
       await this.reloadEntry(entry)
     })
   }
@@ -628,6 +687,9 @@ export class PluginManager {
     if (this.configPath) await deleteConfigValue(this.configPath, ['plugins', name])
     delete this.app.config.plugins[name]
     this.app.storage.purgePlugin(name)
+    this.invalidateGroupConfigs(name)
+    for (const key of this.groupConfigWarnings)
+      if ((JSON.parse(key) as string[])[0] === name) this.groupConfigWarnings.delete(key)
     const path = join(this.app.config.dataDir, 'plugins', name)
     try {
       await this.ensureRealInside(this.app.config.dataDir, path)
@@ -1046,6 +1108,7 @@ export class PluginManager {
   }
 
   private async reloadEntry(entry: Entry): Promise<void> {
+    this.invalidateGroupConfigs(entry.state.name)
     let definition = entry.definition
     let files = entry.files
     let release: (() => void) | undefined

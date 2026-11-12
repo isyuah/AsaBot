@@ -10,6 +10,9 @@ dataDir: /app/data
 # 按需填写超管用户 ID（字符串）
 superusers: []
 
+command:
+  suggest: direct
+
 pluginLoader:
   dirs: [/app/plugins]
   uploadDir: /app/plugins

@@ -242,6 +242,8 @@ describe('HTTP service contract', () => {
           examples: [],
           aliases: [],
           description: '',
+          disabledGroups: [],
+          overrideIssues: [],
         },
       ]),
     })

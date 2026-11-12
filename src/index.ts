@@ -26,13 +26,20 @@ export type {
 export { BotRegistry, supports } from './core/bot.ts'
 export type { CommandDefinition, OptionDefinition, OptionSettings } from './core/command/builder.ts'
 export { CommandBuilder } from './core/command/builder.ts'
+export type { ArgumentSettings, ArgumentType } from './core/command/declaration.ts'
 export { formatUsage } from './core/command/parse.ts'
 export type { CommandAction, CommandArgs, CommandContext, OptionValue } from './core/command/types.ts'
 export { interpolateConfigValues, loadConfig } from './core/config/load.ts'
-export { type Config, configSchema } from './core/config/schema.ts'
+export {
+  type CommandOverride,
+  type Config,
+  commandOverrideSchema,
+  configSchema,
+} from './core/config/schema.ts'
 export { writeConfigValue } from './core/config/write.ts'
 export type { ApiCall, ApiInterceptor } from './core/dispatch/api.ts'
 export { Dispatcher } from './core/dispatch/dispatcher.ts'
+export type { DispatchTrace, TraceStep } from './core/dispatch/trace.ts'
 export type {
   AccessFilter,
   DispatchEvent,
@@ -43,6 +50,7 @@ export type {
   Middleware,
   Scope,
 } from './core/dispatch/types.ts'
+export { groupKeyOf } from './core/dispatch/types.ts'
 export {
   ApiTimeoutError,
   CommandConflictError,
@@ -61,6 +69,7 @@ export type {
   BotOfflineEvent,
   BotOnlineEvent,
   DialogueOptions,
+  DispatchTraceEvent,
   EventMap,
   FriendRequestEvent,
   GroupInviteRequestEvent,
@@ -112,7 +121,7 @@ export {
 } from './core/message/index.ts'
 export type { Permission, Rule } from './core/permission.ts'
 export { perm } from './core/permission.ts'
-export { Context } from './core/plugin/context.ts'
+export { Context, type FilteredContext } from './core/plugin/context.ts'
 export { definePlugin, type PluginDefinition } from './core/plugin/definition.ts'
 export { PluginManager } from './core/plugin/manager.ts'
 export type { TaskHandle, TaskHandler, TaskOptions } from './core/plugin/tasks.ts'

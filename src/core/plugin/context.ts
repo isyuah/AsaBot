@@ -9,7 +9,15 @@ import type { App } from '../app.ts'
 import type { Bot, SendResult } from '../bot.ts'
 import type { CommandBuilder } from '../command/builder.ts'
 import type { ApiInterceptor } from '../dispatch/api.ts'
-import type { Disposer, MatchHandler, MatchPattern, Middleware, Scope } from '../dispatch/types.ts'
+import {
+  type DispatchEvent,
+  type Disposer,
+  groupKeyOf,
+  type MatchHandler,
+  type MatchPattern,
+  type Middleware,
+  type Scope,
+} from '../dispatch/types.ts'
 import { NoBotOnlineError, PluginError } from '../errors.ts'
 import type {
   AnyEvent,
@@ -31,6 +39,7 @@ import type { PluginStateEvent } from './types.ts'
 type Listener = (event: AnyEvent | PluginStateEvent, signal: AbortSignal) => unknown | Promise<unknown>
 type PublicListener = Listener | ((event: never, signal: AbortSignal) => unknown | Promise<unknown>)
 type Cleanup = () => void | Promise<void>
+export type FilteredContext = Pick<Context, 'on' | 'middleware' | 'command' | 'match' | 'filter' | 'platform'>
 
 export class Context<Config = undefined> {
   private readonly app: App
@@ -73,6 +82,11 @@ export class Context<Config = undefined> {
   get config(): Readonly<Config> {
     this.assertActive()
     return this.value
+  }
+  configFor(target: string | { platform: string; groupId?: string }): Readonly<Config> {
+    this.assertActive()
+    const key = typeof target === 'string' ? target : groupKeyOf(target)
+    return key === undefined ? this.value : (this.app.plugins.configFor(this.owner, key) as Readonly<Config>)
   }
   get logger(): Logger {
     this.assertActive()
@@ -225,6 +239,47 @@ export class Context<Config = undefined> {
   ): Disposer {
     this.assertActive()
     return this.app.dispatcher.match(this.scope, pattern, handler, options)
+  }
+  filter(predicate: (event: DispatchEvent) => boolean): FilteredContext {
+    this.assertActive()
+    return this.filtered({ ...this.scope, filter: predicate })
+  }
+  platform(...names: string[]): FilteredContext {
+    return this.filter((event) => names.includes(event.platform))
+  }
+  private filtered(scope: Scope): FilteredContext {
+    return {
+      on: ((name: string, listener: Listener) => {
+        this.assertActive()
+        return this.app.dispatcher.on(scope, name, listener)
+      }) as Context['on'],
+      middleware: (handler, options) => {
+        this.assertActive()
+        return this.app.dispatcher.middleware(scope, handler, options)
+      },
+      command: (declaration) => {
+        this.assertActive()
+        return this.app.dispatcher.command(scope, declaration)
+      },
+      match: (pattern, handler, options) => {
+        this.assertActive()
+        return this.app.dispatcher.match(scope, pattern, handler, options)
+      },
+      filter: (predicate) => {
+        this.assertActive()
+        return this.filtered({
+          ...scope,
+          filter: (event) => (scope.filter?.(event) ?? true) && predicate(event),
+        })
+      },
+      platform: (...names) => {
+        this.assertActive()
+        return this.filtered({
+          ...scope,
+          filter: (event) => (scope.filter?.(event) ?? true) && names.includes(event.platform),
+        })
+      },
+    }
   }
   route(register: (app: Hono) => void): void {
     this.assertActive()

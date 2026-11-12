@@ -19,7 +19,9 @@ describe('commands', () => {
     await say('echo ignored')
     await say('/unknown')
     expect(sent(bot)).toEqual(['prefix', 'mention', 'private'])
-    const strict = dispatchFixture({ command: { mentionAsPrefix: false, privateRequirePrefix: true } })
+    const strict = dispatchFixture({
+      command: { mentionAsPrefix: false, privateRequirePrefix: true, suggest: 'off' },
+    })
     strict.app.dispatcher.command(scope, 'echo').action(() => 'ok')
     await strict.say([seg.at('10000'), seg.text(' echo')])
     await strict.say('echo', { group: null })
@@ -176,7 +178,7 @@ describe('commands', () => {
     app.dispatcher.command(scope, 'plugin config show').action(() => 'config')
     app.dispatcher.command(scope, 'go').action(() => 'parent')
     app.dispatcher.command(scope, 'go deeper').action(() => 'child')
-    app.dispatcher.match(scope, '', (session) => {
+    app.dispatcher.match(scope, '', ({ session }) => {
       matches.push(session.text)
     })
     await say('/plugin reload foo')

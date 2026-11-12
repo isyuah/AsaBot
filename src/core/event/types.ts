@@ -1,4 +1,5 @@
 import type { Bot, ForwardNode, SendResult } from '../bot.ts'
+import type { DispatchTrace } from '../dispatch/trace.ts'
 import type { Message, Sendable } from '../message/index.ts'
 import type { Target } from '../target.ts'
 
@@ -194,11 +195,18 @@ export interface BotOfflineEvent extends BaseEvent {
 export interface MessageSentEvent extends BaseEvent {
   readonly kind: 'internal'
   readonly name: 'bot.message.sent'
+  readonly eventId?: string
   readonly messageId: string
   readonly messageType: 'private' | 'group'
   readonly userId?: string
   readonly groupId?: string
   readonly message: Message
+}
+
+export interface DispatchTraceEvent extends BaseEvent {
+  readonly kind: 'internal'
+  readonly name: 'dispatch.trace'
+  readonly trace: DispatchTrace
 }
 
 export type AnyEvent =
@@ -209,6 +217,7 @@ export type AnyEvent =
   | BotOnlineEvent
   | BotOfflineEvent
   | MessageSentEvent
+  | DispatchTraceEvent
 
 export interface KnownEventMap {
   message: Session
@@ -239,6 +248,7 @@ export interface KnownEventMap {
   'bot.offline': BotOfflineEvent
   'bot.message': MessageSentEvent
   'bot.message.sent': MessageSentEvent
+  'dispatch.trace': DispatchTraceEvent
 }
 
 export interface EventMap extends KnownEventMap {

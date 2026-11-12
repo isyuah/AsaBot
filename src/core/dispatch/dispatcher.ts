@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { Logger } from 'pino'
 import { CommandBuilder, type CommandDefinition, type CommandRegistration } from '../command/builder.ts'
 import { formatUsage, parseArguments } from '../command/parse.ts'
@@ -18,12 +19,14 @@ import type {
 import { dialogueMethods, stripLeadingMention } from '../event/index.ts'
 import type { Message, Sendable } from '../message/index.ts'
 import { isSegment } from '../message/index.ts'
+import { resolvePermission } from '../permission.ts'
 import type { PluginStateEvent } from '../plugin/types.ts'
 import { RateLimiter } from '../ratelimit.ts'
 import { type Activity, ActivityTracker, trackPrompt } from './activity.ts'
 import { messages } from './messages.ts'
 import { PromptManager } from './prompt.ts'
 import { scheduleTimeout } from './timer.ts'
+import { type DispatchTrace, dispatchContext, type TraceStep } from './trace.ts'
 import type {
   AccessFilter,
   DispatchEvent,
@@ -34,6 +37,7 @@ import type {
   Middleware,
   Scope,
 } from './types.ts'
+import { groupKeyOf } from './types.ts'
 
 type Listener = (event: DispatchEvent, signal: AbortSignal) => unknown | Promise<unknown>
 type PublicListener =
@@ -79,18 +83,37 @@ function isCancellation(error: unknown, signal: AbortSignal): boolean {
   )
 }
 
-function matches(pattern: MatchPattern, session: Session): boolean {
-  if (typeof pattern === 'string') return session.text.includes(pattern)
+function matches(pattern: MatchPattern, session: Session): { match?: RegExpExecArray } | undefined {
+  if (typeof pattern === 'string') return session.text.includes(pattern) ? {} : undefined
   if (pattern instanceof RegExp) {
     pattern.lastIndex = 0
-    return pattern.test(session.text)
+    const match = pattern.exec(session.text)
+    return match ? { match } : undefined
   }
-  return pattern(session)
+  return pattern(session) ? {} : undefined
+}
+
+function editDistance(first: string, second: string): number {
+  let previous = Array.from({ length: second.length + 1 }, (_, index) => index)
+  for (let i = 0; i < first.length; i++) {
+    const current = [i + 1]
+    for (let j = 0; j < second.length; j++)
+      current.push(
+        Math.min(
+          (current[j] as number) + 1,
+          (previous[j + 1] as number) + 1,
+          (previous[j] as number) + Number(first[i] !== second[j]),
+        ),
+      )
+    previous = current
+  }
+  return previous[second.length] as number
 }
 
 export class Dispatcher implements SessionServices, CommandRegistration {
   accessFilter: AccessFilter = () => true
   isEnabledFor: EnabledFilter = () => true
+  isCommandEnabledFor: (path: string, groupKey: string) => boolean = () => true
   onDispatch: (event: DispatchEvent) => void = () => {}
   private readonly config: Config
   private readonly logger: Logger
@@ -105,6 +128,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
   private readonly limiter = new RateLimiter()
   private readonly prompts: PromptManager
   private readonly activity = new ActivityTracker()
+  private readonly warnedOverrideIssues = new Set<string>()
 
   constructor(config: Config, logger: Logger, shutdown: AbortSignal) {
     this.config = config
@@ -221,8 +245,9 @@ export class Dispatcher implements SessionServices, CommandRegistration {
   async listCommands(session: Session, parent?: Activity): Promise<CommandDefinition[]> {
     const result: CommandDefinition[] = []
     for (const command of this.commands) {
-      if (command.hidden || !this.commandEnabled(command, session)) continue
-      const permission = command.permission
+      const override = this.config.command.overrides[command.path.join(' ')]
+      if ((override?.hidden ?? command.hidden) || !this.commandEnabled(command, session)) continue
+      const permission = this.permission(command)
       if (permission !== undefined) {
         let permitted = false
         await this.invoke(
@@ -248,6 +273,55 @@ export class Dispatcher implements SessionServices, CommandRegistration {
     return [...this.commands].filter((command) => owner === undefined || command.owner === owner)
   }
 
+  private permission(command: CommandDefinition) {
+    const permission = this.config.command.overrides[command.path.join(' ')]?.permission
+    return permission === 'everyone'
+      ? undefined
+      : permission
+        ? resolvePermission(permission)
+        : command.permission
+  }
+
+  private effectivePaths(): { paths: CommandPath[]; issues: Map<CommandDefinition, string[]> } {
+    const paths = [...this.paths.values()]
+    const used = new Map(this.paths)
+    const issues = new Map<CommandDefinition, string[]>()
+    for (const command of this.commands) {
+      const aliases = this.config.command.overrides[command.path.join(' ')]?.aliases ?? []
+      for (const alias of aliases) {
+        const path = alias.trim().split(/\s+/).filter(Boolean)
+        const key = path.join(' ')
+        const conflict = used.get(key)
+        if (!key || conflict) {
+          const issue = `别名 "${alias}" 与命令 "${conflict?.command.path.join(' ') ?? ''}" 冲突`
+          const entries = issues.get(command) ?? []
+          entries.push(issue)
+          issues.set(command, entries)
+          const warning = `${command.path.join(' ')}:${issue}`
+          if (!this.warnedOverrideIssues.has(warning)) {
+            this.warnedOverrideIssues.add(warning)
+            this.logger.warn({ plugin: command.owner, command: command.path.join(' '), alias }, issue)
+          }
+          continue
+        }
+        const entry = { path, command }
+        used.set(key, entry)
+        paths.push(entry)
+      }
+    }
+    return { paths, issues }
+  }
+
+  overrideIssues(command: CommandDefinition): string[] {
+    return this.effectivePaths().issues.get(command) ?? []
+  }
+
+  aliases(command: CommandDefinition): string[] {
+    return this.effectivePaths()
+      .paths.filter((entry) => entry.command === command && entry.path.join(' ') !== command.path.join(' '))
+      .map((entry) => entry.path.join(' '))
+  }
+
   prompt(
     session: Session,
     text?: Sendable,
@@ -264,15 +338,66 @@ export class Dispatcher implements SessionServices, CommandRegistration {
 
   async dispatch(event: DispatchEvent): Promise<void> {
     if (this.shutdown.aborted) return
+    if (event.kind === 'internal' || event.kind === 'meta') {
+      const current = dispatchContext.getStore()
+      if (event.name === 'bot.message.sent' && 'messageId' in event && current?.active.value) {
+        current.trace.sent.push(event.messageId)
+        event = { ...event, eventId: current.eventId }
+      }
+      await this.dispatchEvent(event)
+      return
+    }
+    const trace: DispatchTrace = {
+      eventId: event.id,
+      name: event.name,
+      platform: event.platform,
+      selfId: event.selfId,
+      ...('channelKey' in event ? { channel: event.channelKey } : {}),
+      ...('userId' in event && event.userId !== undefined ? { userId: event.userId } : {}),
+      time: event.time,
+      duration: 0,
+      steps: [],
+      sent: [],
+    }
+    const active = { value: true }
+    const started = performance.now()
+    await dispatchContext.run({ eventId: event.id, trace, active }, async () => {
+      try {
+        await this.dispatchEvent(event)
+      } finally {
+        active.value = false
+        trace.duration = performance.now() - started
+        await dispatchContext.run(undefined, () =>
+          this.dispatch({
+            id: randomUUID(),
+            platform: event.platform,
+            selfId: event.selfId,
+            time: Date.now(),
+            kind: 'internal',
+            name: 'dispatch.trace',
+            raw: undefined,
+            bot: event.bot,
+            trace,
+          }),
+        )
+      }
+    })
+  }
+
+  private async dispatchEvent(event: DispatchEvent): Promise<void> {
     this.onDispatch(event)
+    const filterStarted = performance.now()
     if (
       ('userId' in event || 'groupId' in event) &&
       !(event.kind === 'message'
         ? event.isSuperuser
         : 'userId' in event && event.userId !== undefined && this.config.superusers.includes(event.userId)) &&
       !this.accessFilter(event)
-    )
+    ) {
+      const step = this.traceStep('filter', undefined, 'blocked')
+      if (step) step.duration = performance.now() - filterStarted
       return
+    }
     const observers = this.runObservers(event)
     let pipeline = Promise.resolve()
     if (event.kind === 'message') {
@@ -287,18 +412,55 @@ export class Dispatcher implements SessionServices, CommandRegistration {
     }
   }
 
+  private traceStep(
+    stage: TraceStep['stage'],
+    plugin?: string,
+    outcome: TraceStep['outcome'] = 'handled',
+    command?: string,
+  ): TraceStep | undefined {
+    const context = dispatchContext.getStore()
+    if (!context?.active.value) return undefined
+    const step: TraceStep = {
+      stage,
+      ...(plugin === undefined ? {} : { plugin }),
+      ...(command === undefined ? {} : { command }),
+      outcome,
+      duration: 0,
+    }
+    context.trace.steps.push(step)
+    return step
+  }
+
+  private scopeEnabled(scope: Scope, event: DispatchEvent): boolean {
+    if (!this.isEnabledFor(scope.owner, event)) return false
+    try {
+      return scope.filter?.(event) ?? true
+    } catch (error) {
+      this.logger.error(
+        { err: error, plugin: scope.owner, event: event.name, eventId: event.id },
+        'Scope filter failed',
+      )
+      return false
+    }
+  }
+
   private async runObservers(event: DispatchEvent): Promise<void> {
     const entries = this.observers.filter(
       (entry) => entry.active && (event.name === entry.name || event.name.startsWith(`${entry.name}.`)),
     )
     await Promise.allSettled(
       entries.map(async (entry) => {
-        if (!entry.active || !this.isEnabledFor(entry.scope.owner, event)) return
+        if (!entry.active || !this.scopeEnabled(entry.scope, event)) return
         await this.invoke(
           entry.scope,
           event,
           (view, signal) => entry.listener(view, signal),
           'Event listener failed',
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          'observer',
         )
       }),
     )
@@ -309,23 +471,30 @@ export class Dispatcher implements SessionServices, CommandRegistration {
     const run = async (index: number, parent: Activity): Promise<void> => {
       const entry = entries[index]
       if (entry === undefined) {
-        if (this.prompts.consume(session)) return
+        const started = performance.now()
+        const prompt = this.prompts.consume(session)
+        if (prompt) {
+          const step = this.traceStep('prompt', prompt.owner)
+          if (step) step.duration = performance.now() - started
+          return
+        }
         if (await this.runCommand(session, parent)) return
-        await this.runMatchers(session, parent)
+        if (!(await this.runMatchers(session, parent))) await this.runSuggest(session, parent)
         return
       }
-      if (!entry.active || !this.isEnabledFor(entry.scope.owner, session)) return run(index + 1, parent)
+      if (!entry.active || !this.scopeEnabled(entry.scope, session)) return run(index + 1, parent)
       let middlewareActivity: Activity
       await this.invoke(
         entry.scope,
         session,
-        async (view, signal) => {
+        async (view, signal, step) => {
           let nextPromise: Promise<void> | undefined
           let called = false
           const next = (): Promise<void> => {
             if (called) throw new Error('Middleware next() called more than once')
             signal.throwIfAborted()
             called = true
+            if (step) step.outcome = 'passed'
             nextPromise = run(index + 1, middlewareActivity)
             return nextPromise
           }
@@ -339,24 +508,29 @@ export class Dispatcher implements SessionServices, CommandRegistration {
           middlewareActivity = activity
         },
         parent,
+        'middleware',
       )
     }
     await run(0, activity)
   }
 
-  private async runMatchers(session: Session, parent: Activity): Promise<void> {
+  private async runMatchers(session: Session, parent: Activity): Promise<boolean> {
     const entries = [...this.matchers].sort((a, b) => b.priority - a.priority)
+    let anyMatched = false
     for (const entry of entries) {
-      if (!entry.active || !this.isEnabledFor(entry.scope.owner, session)) continue
+      if (!entry.active || !this.scopeEnabled(entry.scope, session)) continue
       let matched = false
       await this.invoke(
         entry.scope,
         session,
-        async (view, signal) => {
+        async (view, signal, _step, record) => {
           const bound = view as Session
-          matched = matches(entry.pattern, bound)
-          if (!matched) return
-          const result = await entry.handler(bound, signal)
+          const resultMatch = matches(entry.pattern, bound)
+          if (!resultMatch) return
+          matched = true
+          anyMatched = true
+          record()
+          const result = await entry.handler({ session: bound, signal, ...resultMatch })
           if (result !== undefined && !signal.aborted) await bound.send(result)
         },
         'Matcher failed',
@@ -364,9 +538,11 @@ export class Dispatcher implements SessionServices, CommandRegistration {
         undefined,
         undefined,
         parent,
+        'matcher',
       )
       if (matched && entry.block) break
     }
+    return anyMatched
   }
 
   private commandSource(session: Session): Message | undefined {
@@ -393,7 +569,9 @@ export class Dispatcher implements SessionServices, CommandRegistration {
     const message = this.commandSource(session)
     if (message === undefined) return false
     const source = tokenize(message)
-    const available = [...this.paths.values()].filter(({ command }) => this.commandEnabled(command, session))
+    const available = this.effectivePaths().paths.filter(({ command }) =>
+      this.commandEnabled(command, session),
+    )
     const candidates = available
       .filter(({ path }) =>
         path.every((part, index) => source.tokens[index]?.value === part && !source.tokens[index]?.error),
@@ -430,20 +608,23 @@ export class Dispatcher implements SessionServices, CommandRegistration {
     await this.invoke(
       command.scope,
       session,
-      async (view, signal) => {
+      async (view, signal, step) => {
         const bound = view as Session
-        if (command.permission !== undefined) {
-          const allowed = await command.permission(bound)
+        const permission = this.permission(command)
+        if (permission !== undefined) {
+          const allowed = await permission(bound)
           signal.throwIfAborted()
           if (!allowed) {
+            if (step) step.outcome = 'denied'
             if (this.config.command.replyOnDenied) await bound.send(messages.denied)
             return
           }
         }
         let parsed: ReturnType<typeof parseArguments>
         try {
-          parsed = parseArguments(command, source, candidate.path.length)
+          parsed = parseArguments(command, source, candidate.path.length, this.config.timezone)
         } catch (error) {
+          if (step) step.outcome = 'invalid'
           await bound.send(
             messages.argumentError(
               error instanceof Error ? error.message : String(error),
@@ -453,9 +634,17 @@ export class Dispatcher implements SessionServices, CommandRegistration {
           return
         }
         // Cooldown is charged only after arguments parse, so a typo does not burn the user's cooldown.
-        if (command.cooldown !== undefined) {
-          const limit = this.limiter.check(command, bound, command.cooldown.duration, command.cooldown.scope)
+        const override = this.config.command.overrides[command.path.join(' ')]
+        const cooldown =
+          override?.cooldown === false
+            ? undefined
+            : override?.cooldown
+              ? { duration: override.cooldown.duration, scope: override.cooldown.scope ?? ('user' as const) }
+              : command.cooldown
+        if (cooldown !== undefined) {
+          const limit = this.limiter.check(command, bound, cooldown.duration, cooldown.scope)
           if (limit !== null) {
+            if (step) step.outcome = 'cooldown'
             if (limit.notify && this.config.command.replyOnDenied)
               await bound.send(messages.cooldown(limit.remaining))
             return
@@ -471,6 +660,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
       },
       undefined,
       parent,
+      'command',
     )
     return true
   }
@@ -478,7 +668,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
   private async subcommands(path: string[], session: Session, parent: Activity): Promise<string[]> {
     const visible = new Set(await this.listCommands(session, parent))
     const result = new Set<string>()
-    for (const entry of this.paths.values()) {
+    for (const entry of this.effectivePaths().paths) {
       if (
         visible.has(entry.command) &&
         entry.path.length > path.length &&
@@ -491,13 +681,64 @@ export class Dispatcher implements SessionServices, CommandRegistration {
   }
 
   private commandEnabled(command: CommandDefinition, session: Session): boolean {
+    const path = command.path.join(' ')
+    const groupKey = groupKeyOf(session)
     return (
+      this.config.command.overrides[path]?.enabled !== false &&
       (command.messageScope === 'all' || command.messageScope === session.messageType) &&
-      this.isEnabledFor(command.owner, session)
+      (groupKey === undefined || this.isCommandEnabledFor(path, groupKey)) &&
+      this.scopeEnabled(command.scope, session)
     )
   }
 
-  private bindSession(session: Session, signal: AbortSignal, activity?: Activity): Session {
+  private async runSuggest(session: Session, parent: Activity): Promise<void> {
+    const mode = this.config.command.suggest
+    if (mode === 'off') return
+    const message = stripLeadingMention(session.message, session.selfId)
+    const first = message[0]
+    const text = first && isSegment(first, 'text') ? first.data.text : ''
+    const prefix = [...this.config.command.prefixes]
+      .sort((a, b) => b.length - a.length)
+      .find((item) => item.length > 0 && text.startsWith(item))
+    if (!(session.messageType === 'private' || session.toMe || (mode === 'always' && prefix))) return
+    if (prefix && first) message[0] = { type: 'text', data: { text: text.slice(prefix.length) } }
+    const token = tokenize(message).tokens[0]
+    if (!token || token.error || typeof token.value !== 'string' || !token.value) return
+    const visible = new Set(await this.listCommands(session, parent))
+    const names = new Set(
+      this.effectivePaths()
+        .paths.filter((entry) => visible.has(entry.command))
+        .map((entry) => entry.path.join(' ')),
+    )
+    let nearest = Infinity
+    const results: string[] = []
+    for (const name of names) {
+      if (Math.abs(token.value.length - name.length) > (name.length <= 4 ? 1 : 2)) continue
+      const distance = editDistance(token.value, name)
+      if (distance > (name.length <= 4 ? 1 : 2)) continue
+      if (distance < nearest) {
+        nearest = distance
+        results.length = 0
+      }
+      if (distance === nearest) results.push(name)
+    }
+    if (results.length !== 1) return
+    const started = performance.now()
+    const step = this.traceStep('suggest', 'core')
+    try {
+      await session.send(messages.suggest(`${prefix ?? this.config.command.prefixes[0] ?? ''}${results[0]}`))
+    } catch (error) {
+      if (step) {
+        step.outcome = 'error'
+        step.error = error instanceof Error ? error.message : String(error)
+      }
+      throw error
+    } finally {
+      if (step) step.duration = performance.now() - started
+    }
+  }
+
+  private bindSession(session: Session, signal: AbortSignal, activity?: Activity, owner?: string): Session {
     const view: Session = {
       ...session,
       ...dialogueMethods((work) => {
@@ -519,8 +760,9 @@ export class Dispatcher implements SessionServices, CommandRegistration {
                 pending = false
                 activity?.resume()
               },
+              owner,
             )
-            .then((answer) => (answer === null ? null : this.bindSession(answer, signal, activity))),
+            .then((answer) => (answer === null ? null : this.bindSession(answer, signal, activity, owner))),
         )
         if (!activity) return promise
         return trackPrompt(promise, () => {
@@ -535,14 +777,27 @@ export class Dispatcher implements SessionServices, CommandRegistration {
   private async invoke(
     scope: Scope,
     event: DispatchEvent,
-    handler: (event: DispatchEvent, signal: AbortSignal) => unknown | Promise<unknown>,
+    handler: (
+      event: DispatchEvent,
+      signal: AbortSignal,
+      step: TraceStep | undefined,
+      record: () => void,
+    ) => unknown | Promise<unknown>,
     message: string,
     command?: string,
     onError?: (event: DispatchEvent) => Promise<void>,
     setActivity?: (activity: Activity) => void,
     parent?: Activity,
+    stage?: TraceStep['stage'],
   ): Promise<void> {
     if (scope.signal?.aborted || this.shutdown.aborted) return
+    const started = performance.now()
+    let step: TraceStep | undefined
+    const record = (): void => {
+      if (!step && stage && event.kind !== 'internal' && event.kind !== 'meta')
+        step = this.traceStep(stage, scope.owner, 'handled', command)
+    }
+    if (stage !== 'matcher') record()
     const activity = this.activity.begin()
     parent?.pause()
     setActivity?.(activity)
@@ -555,7 +810,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
       this.shutdown,
       timeout.signal,
     ])
-    const view = event.kind === 'message' ? this.bindSession(event, signal, activity) : event
+    const view = event.kind === 'message' ? this.bindSession(event, signal, activity, scope.owner) : event
     let onAbort: () => void = () => {}
     const aborted = new Promise<never>((_resolve, reject) => {
       onAbort = () => reject(signal.reason)
@@ -577,7 +832,10 @@ export class Dispatcher implements SessionServices, CommandRegistration {
     let finished = false
     const work = Promise.resolve().then(() => {
       signal.throwIfAborted()
-      return handler(view, signal)
+      const current = dispatchContext.getStore()
+      return current
+        ? dispatchContext.run({ ...current, plugin: scope.owner }, () => handler(view, signal, step, record))
+        : handler(view, signal, step, record)
     })
     void work.catch((error: unknown) => {
       if (finished && !isCancellation(error, signal)) logError(error)
@@ -586,9 +844,15 @@ export class Dispatcher implements SessionServices, CommandRegistration {
       await Promise.race([work, aborted])
     } catch (error) {
       if (isCancellation(error, signal)) {
-        if (timeout.signal.aborted && signal.reason === timeout.signal.reason)
+        if (timeout.signal.aborted && signal.reason === timeout.signal.reason) {
+          if (step) step.outcome = 'timeout'
           this.logger.warn({ plugin: scope.owner, event: event.name, eventId: event.id }, '处理器超时')
+        }
       } else {
+        if (step) {
+          step.outcome = 'error'
+          step.error = error instanceof Error ? error.message : String(error)
+        }
         logError(error)
         if (onError !== undefined && !(error instanceof SendBlockedError)) {
           try {
@@ -603,6 +867,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
       }
     } finally {
       finished = true
+      if (step) step.duration = performance.now() - started
       cancelTimer()
       signal.removeEventListener('abort', onAbort)
       parent?.resume()

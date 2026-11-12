@@ -181,6 +181,8 @@ export default definePlugin({
 | `ctx.middleware(fn, { priority })` | 注册中间件；调用 `next()` 才继续处理 |
 | `ctx.command(declaration)` | 注册命令并链式设置选项、权限和 action |
 | `ctx.match(pattern, handler, options)` | 按字符串、正则或函数匹配消息 |
+| `ctx.filter(predicate)`、`ctx.platform(...names)` | 只在符合条件的事件中启用注册的处理器 |
+| `ctx.configFor(session)` | 获取当前群合并并校验后的插件配置 |
 | `ctx.route(app => ...)` | 注册插件的 Hono HTTP 路由，插件卸载时回收 |
 | `ctx.cron`、`ctx.interval`、`ctx.timeout` | 注册定时任务 |
 | `ctx.store`、`ctx.db`、`ctx.migrate(steps)` | 插件独立 KV、共享 SQLite 句柄、按插件版本管理的迁移 |
@@ -230,7 +232,9 @@ ctx.command('repeat <text:rest>')
   })
 ```
 
-命令路径在参数之前，例如 `plugin reload <name>`；最长路径优先。另行声明 `ctx.command('tool info')` 即可注册子命令，别名也可以是完整路径。`<name:type>` 表示必填，`[name:type]` 表示可选，`[name:integer=3]` 表示有默认值；省略类型时为 `string`。类型包括 `string`、`number`、`integer`、`boolean`、`user`、`duration`、`image` 和 `rest`：`user` 接受单个非空用户 ID 或 @用户并返回 ID 字符串，`image` 接受图片段，`duration` 返回毫秒数，`rest` 返回保留非文本段的消息数组，只能放在最后。
+命令路径在参数之前，例如 `plugin reload <name>`；最长路径优先。另行声明 `ctx.command('tool info')` 即可注册子命令，别名也可以是完整路径。`<name:type>` 表示必填，`[name:type]` 表示可选，`[name:integer=3]` 表示有默认值；省略类型时为 `string`。类型包括 `string`、`number`、`integer`、`posint`（正整数）、`natural`（非负整数）、`date`、`boolean`、`user`、`duration`、`image` 和 `rest`。`date` 按配置的 `timezone` 解析日期和时间，返回 `Date`；`<mode:on|off>` 声明枚举。`user` 接受单个非空用户 ID 或 @用户并返回 ID 字符串，`image` 接受图片段，`duration` 返回毫秒数，`rest` 返回保留非文本段的消息数组，只能放在最后。
+
+参数通过 `.arg('count', { min: 1, max: 5, description: '次数' })` 设置约束，选项的第三个参数也支持 `min`、`max`、`pattern`、`validate` 和 `description`；`validate` 返回 `true` 或错误原因。正则匹配器的捕获组从 `ctx.match(/hello (\w+)/, ({ match }) => match?.[1])` 取得。
 
 选项支持 `-n 2`、`--times 2`、`--times=2`；无参数选项可声明为 `.option('silent', '-s, --silent')`。选项与普通位置参数可以交错，但一旦开始读取 `rest`，之后都视为内容；`--` 也会结束选项解析。命令路径和别名区分大小写。action 返回字符串或消息段时，框架会发送它；返回 `undefined` 则不自动发送。
 
@@ -332,6 +336,10 @@ ctx.db.prepare('INSERT OR REPLACE INTO p_scores_best (user_id, score) VALUES (?,
 定时任务可以用 `ctx.cron('0 9 * * *', fn)`、`ctx.interval('10m', fn)` 或 `ctx.timeout('30s', fn)`。回调接收 `AbortSignal`，插件卸载时信号会中止并自动停止任务；同一任务上次尚未结束时会跳过本次，任务异常会记录日志。cron 默认使用配置的 `timezone`，也可用第三个参数 `{ timezone: 'Europe/London' }` 单独指定。
 
 ### 按群开关与热重载
+
+`ctx.platform('onebot11').filter(event => groupKeyOf(event) === 'onebot11:123').command('hello')` 只在对应平台和群生效；`groupKeyOf` 从 `@asabot/core` 导入，过滤条件可以链式组合。过滤上下文支持注册观察者、中间件、命令和匹配器，资源仍随插件卸载回收。
+
+声明配置 schema 的插件可以在处理器中调用 `ctx.configFor(session)` 读取按群配置；也可传入 `platform:groupId` 字符串。群覆盖项浅合并到全局配置的顶层，再由 schema 校验；私聊返回全局配置。
 
 群主、群管理员或超管可在群内发送 `/plugin off echo` 和 `/plugin on echo`，只影响当前平台和群；该插件的观察者、中间件、命令和匹配器都会受开关影响。全局启停由超管使用 `/plugin disable echo` 和 `/plugin enable echo`。
 

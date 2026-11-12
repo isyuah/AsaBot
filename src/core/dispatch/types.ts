@@ -7,6 +7,11 @@ export type DispatchEvent = AnyEvent | PluginStateEvent
 export interface Scope {
   owner: string
   signal?: AbortSignal
+  filter?: (event: DispatchEvent) => boolean
+}
+
+export function groupKeyOf(event: { platform: string; groupId?: string }): string | undefined {
+  return event.groupId === undefined ? undefined : `${event.platform}:${event.groupId}`
 }
 
 export type Disposer = () => void
@@ -16,9 +21,10 @@ export type Middleware = (
   signal: AbortSignal,
 ) => void | Promise<void>
 export type MatchPattern = string | RegExp | ((session: Session) => boolean)
-export type MatchHandler = (
-  session: Session,
-  signal: AbortSignal,
-) => Sendable | void | Promise<Sendable | undefined> | Promise<void>
+export type MatchHandler = (context: {
+  session: Session
+  signal: AbortSignal
+  match?: RegExpExecArray
+}) => Sendable | void | Promise<Sendable | undefined> | Promise<void>
 export type AccessFilter = (event: DispatchEvent) => boolean
 export type EnabledFilter = (owner: string, event: DispatchEvent) => boolean

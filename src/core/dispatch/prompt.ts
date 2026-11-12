@@ -2,8 +2,10 @@ import type { PromptOptions, Session } from '../event/index.ts'
 import type { Sendable } from '../message/index.ts'
 import { parseDuration } from '../utils/duration.ts'
 import { scheduleTimeout } from './timer.ts'
+import { dispatchContext } from './trace.ts'
 
 interface Waiter {
+  owner: string
   key: string
   channel: string
   user?: string
@@ -35,6 +37,7 @@ export class PromptManager {
     options: PromptOptions = {},
     onWaiting?: () => void,
     onResume?: () => void,
+    owner = dispatchContext.getStore()?.plugin ?? 'core',
   ): Promise<Session | null> {
     if (signal.aborted) return Promise.reject(signal.reason)
     const timeout = Math.min(
@@ -61,6 +64,7 @@ export class PromptManager {
         if (cleanup()) reject(signal.reason)
       }
       const waiter: Waiter = {
+        owner,
         key,
         channel: session.channelKey,
         ...(user === undefined ? {} : { user }),
@@ -90,7 +94,7 @@ export class PromptManager {
     })
   }
 
-  consume(session: Session): boolean {
+  consume(session: Session): { owner: string } | undefined {
     // A user-scoped prompt is more specific than a channel-scoped one, so it gets the message first.
     const candidates = [...this.waiters.values()]
       .filter(
@@ -107,8 +111,8 @@ export class PromptManager {
         continue
       }
       waiter.finish(session)
-      return true
+      return { owner: waiter.owner }
     }
-    return false
+    return undefined
   }
 }

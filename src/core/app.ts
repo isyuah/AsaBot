@@ -130,6 +130,8 @@ export class App implements AdapterHost {
     this.plugins = new PluginManager(this, options.configPath, options.packages)
     this.dispatcher.accessFilter = (event) => this.storage.allows(event)
     this.dispatcher.isEnabledFor = (owner, event) => this.plugins.isEnabledFor(owner, event)
+    this.dispatcher.isCommandEnabledFor = (path, groupKey) =>
+      this.storage.isCommandGroupEnabled(path, groupKey)
     this.dispatcher.onDispatch = (event) => {
       if (!event.bot || !this.untrackedBots.has(event.bot)) {
         if (event.kind === 'message') this.stats.record('received')

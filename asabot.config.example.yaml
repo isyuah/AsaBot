@@ -24,6 +24,10 @@ command:
   replyOnError: true
   # 权限不足或首次进入冷却时回复提示
   replyOnDenied: true
+  # 相似命令提示：off、direct（私聊或 @机器人）、always（包括带前缀的群消息）
+  suggest: direct
+  # overrides:
+  #   echo: { enabled: false }
 
 dispatch:
   # 单次处理安全上限，应大于多轮会话可能持续的时间

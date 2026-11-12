@@ -17,3 +17,12 @@ app.dispatcher
     expectTypeOf(options.image).toEqualTypeOf<Extract<Segment, { type: 'image' }> | undefined>()
     expectTypeOf(signal).toEqualTypeOf<AbortSignal>()
   })
+
+app.dispatcher
+  .command({ owner: 'typecheck' }, 'switch <mode:on|off> <when:date>')
+  .option('mode', '--mode <mode:on|off>')
+  .action(({ args, options }) => {
+    expectTypeOf(args.mode).toEqualTypeOf<'on' | 'off'>()
+    expectTypeOf(options.mode).toEqualTypeOf<'on' | 'off' | undefined>()
+    expectTypeOf(args.when).toEqualTypeOf<Date>()
+  })

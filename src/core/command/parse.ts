@@ -1,9 +1,31 @@
 import { messages } from '../dispatch/messages.ts'
 import type { CommandDefinition } from './builder.ts'
-import { parseValue } from './declaration.ts'
+import { type ArgumentDefinition, type ArgumentSettings, parseValue } from './declaration.ts'
 import type { Token, TokenizedMessage } from './tokenizer.ts'
 
 export type ParsedArguments = { args: Record<string, unknown>; options: Record<string, unknown> }
+
+function validate(name: string, value: unknown, settings?: ArgumentSettings): void {
+  if (value === undefined || settings === undefined) return
+  if (typeof value === 'number') {
+    if (settings.min !== undefined && value < settings.min)
+      throw new Error(messages.invalid(name, messages.minimum(settings.min)))
+    if (settings.max !== undefined && value > settings.max)
+      throw new Error(messages.invalid(name, messages.maximum(settings.max)))
+  }
+  if (typeof value === 'string' && settings.pattern) {
+    settings.pattern.lastIndex = 0
+    if (!settings.pattern.test(value)) throw new Error(messages.invalid(name, messages.pattern))
+  }
+  const result = settings.validate?.(value)
+  if (typeof result === 'string') throw new Error(messages.validation(name, result))
+}
+
+function defaultValue(argument: ArgumentDefinition, timezone: string): unknown {
+  return argument.defaultSource === undefined
+    ? argument.defaultValue
+    : parseValue(argument.type, argument.defaultSource, timezone)
+}
 
 export function formatUsage(
   command: CommandDefinition | { definition: CommandDefinition },
@@ -43,10 +65,13 @@ export function parseArguments(
   command: CommandDefinition,
   source: TokenizedMessage,
   pathLength: number,
+  timezone = 'UTC',
 ): ParsedArguments {
   const args: Record<string, unknown> = Object.create(null)
   const options: Record<string, unknown> = Object.create(null)
-  for (const option of command.options) options[option.name] = option.defaultValue
+  for (const option of command.options)
+    options[option.name] =
+      option.defaultValue ?? (option.argument ? defaultValue(option.argument, timezone) : undefined)
   const tokens = source.tokens
   let argIndex = 0
   let index = pathLength
@@ -75,7 +100,19 @@ export function parseArguments(
       if (next === undefined || next.value === '--') throw new Error(messages.missingOption(flag))
       if (next.error) throw new Error(messages.unmatchedQuote)
       try {
-        options[option.name] = parseValue(option.argument.type, next.value)
+        let input = next.value
+        const following = tokens[index + 1]
+        if (
+          option.argument.type === 'date' &&
+          typeof input === 'string' &&
+          /^\d{4}-\d{2}-\d{2}$/.test(input) &&
+          typeof following?.value === 'string' &&
+          /^\d{2}:\d{2}$/.test(following.value)
+        ) {
+          input += ` ${following.value}`
+          index += 1
+        }
+        options[option.name] = parseValue(option.argument.type, input, timezone)
       } catch (error) {
         throw new Error(
           messages.invalid(option.argument.name, error instanceof Error ? error.message : String(error)),
@@ -89,7 +126,7 @@ export function parseArguments(
     if (!argument.required) {
       const requiredAfter = command.arguments.slice(argIndex + 1).filter((item) => item.required).length
       if (requiredAfter > 0 && remainingPositionals(command, tokens, index, literal) <= requiredAfter) {
-        args[argument.name] = argument.defaultValue
+        args[argument.name] = defaultValue(argument, timezone)
         argIndex += 1
         continue
       }
@@ -102,7 +139,19 @@ export function parseArguments(
     }
     if (token.error) throw new Error(messages.unmatchedQuote)
     try {
-      args[argument.name] = parseValue(argument.type, value)
+      let input = value
+      const following = tokens[index + 1]
+      if (
+        argument.type === 'date' &&
+        typeof input === 'string' &&
+        /^\d{4}-\d{2}-\d{2}$/.test(input) &&
+        typeof following?.value === 'string' &&
+        /^\d{2}:\d{2}$/.test(following.value)
+      ) {
+        input += ` ${following.value}`
+        index += 1
+      }
+      args[argument.name] = parseValue(argument.type, input, timezone)
     } catch (error) {
       throw new Error(messages.invalid(argument.name, error instanceof Error ? error.message : String(error)))
     }
@@ -111,7 +160,10 @@ export function parseArguments(
   }
   for (const argument of command.arguments.slice(argIndex)) {
     if (argument.required) throw new Error(messages.missing(argument.name))
-    args[argument.name] = argument.defaultValue
+    args[argument.name] = defaultValue(argument, timezone)
   }
+  for (const argument of command.arguments) validate(argument.name, args[argument.name], argument.settings)
+  for (const option of command.options)
+    validate(option.argument?.name ?? option.name, options[option.name], option.settings)
   return { args, options }
 }
