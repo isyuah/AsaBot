@@ -578,6 +578,7 @@ t.app; t.mock; await t.dispose()
 | M5c | 协议无关的事件命名（第 6 节）：核心 EventMap 改用框架自己的通知和请求事件名，OneBot 适配器负责映射，未映射的通知以 `notice.<platform>.*` 透传 | 核心事件类型中不再出现 OneBot 的 notice_type 命名；示例插件和文档同步更新 |
 | M6 | Web 面板（第 19 节，由主控 Agent 亲自编写） | 用真实后端走通所有页面 |
 | M7 | Dockerfile、compose（只运行 AsaBot 本身，不包含任何 OneBot 实现）、部署文档。原计划的终端沙盒由面板“调试台”取代，不再单独实现 | `docker compose up` 后面板可访问，能通过正向或反向 WS 连上已有的 OneBot 服务 |
+| M8 | 插件管理（第 20 节）：重新扫描、上传、卸载与数据清理；npm 包插件（安装、升级、卸载、搜索、兼容性检查、操作进度推送）；对应的聊天命令和面板界面（面板由主控 Agent 编写） | 用本地 registry 夹具完成一次包插件的安装、升级、卸载；上传和卸载文件插件；purge 后数据被清理 |
 
 ## 18. HTTP 服务（M4）
 
@@ -652,6 +653,106 @@ type Target = { type: 'group' | 'private'; id: string }
 - 字体：英文和数字用 Geist，等宽用 Geist Mono，中文用 Noto Sans SC（按 unicode-range 分片），全部打包在本地。
 - 页面：登录、概览（Bot 状态、消息趋势图、插件统计、实时消息流）、插件（列表、启停和重载、由 JSON Schema 生成的配置表单、按群开关、命令列表）、命令速查、日志（实时、按级别和插件过滤、搜索、暂停）、访问控制、机器人（账号、群列表、发送消息）、调试台（聊天界面模拟用户和群）。另有全局 ⌘K 命令面板。
 - 开发时 Vite 把 `/api` 和 WebSocket 代理到 `127.0.0.1:5140`；生产构建产物在 `web/dist`，由 M4 的服务托管。
+
+## 20. 插件管理（M8）
+
+插件有三种来源，统一由 PluginManager 管理，状态对象 `source` 取 `builtin | file | package`：
+
+| 来源 | 位置 | 安装 / 卸载 |
+|---|---|---|
+| builtin | 框架内置（help、status、admin） | 不可卸载，只能停用（admin 在聊天中不能停用） |
+| file | `pluginLoader.dirs` 中的 `<name>.ts` / `<name>/index.ts` | 手动放文件或在面板上传；卸载即删除文件 |
+| package | 插件包目录（默认 `<dataDir>/packages`）中通过 npm 安装的包 | 在面板或聊天命令中安装、升级、卸载 |
+
+### 20.1 文件型插件的管理
+
+- **重新扫描**：`manager.rescan()` 发现新增文件并加载，移除已经删除的文件对应的插件，对已修改的文件不做处理（修改由热重载或手动 reload 负责）。生产环境（热重载关闭）也可用。返回 `{ added, removed }`。
+- **上传**：接收单个 `.ts`/`.js` 文件或 `.zip` 包，写入 `pluginLoader.uploadDir`（默认是 `dirs[0]`）。
+  - 文件名和插件名需符合 `/^[a-z0-9][a-z0-9_-]*$/`。zip 解压到 `<uploadDir>/<name>/`，要求根目录或唯一的顶层目录里有 `index.ts` 或 `index.js`。
+  - 严格防止路径穿越（拒绝绝对路径、`..`、符号链接条目）；解压后总大小不超过 5 MB，单个上传请求不超过 2 MB。
+  - 目标已存在时返回 409，除非请求带 `overwrite: true`；覆盖等同于重载。
+  - 写入完成后执行重新扫描或重载，返回最新的 PluginView。导入或 setup 失败时，插件文件保留，状态为 failed，并带上原因。
+- **卸载**：只能卸载 `file` 和 `package` 来源的插件。先卸载运行中的实例（依赖它的插件按状态协调规则处理），再删除文件或目录；删除前确认路径确实位于插件目录内。
+
+### 20.2 包插件（npm）
+
+- **插件包约定**：
+  - 一个普通的 npm 包，`package.json` 的 `keywords` 包含 `asabot-plugin`，类型为 ESM，入口（`exports['.']` 或 `main`）默认导出 `definePlugin(...)` 的结果。
+  - 入口**必须是 JS**：Node 不对 `node_modules` 下的文件做 TypeScript 类型剥离。插件作者需要先编译后发布，并附带 `.d.ts`。
+  - 通过 `peerDependencies.asabot` 声明兼容的框架版本范围（semver）。运行时 `import 'asabot'` 始终解析到当前运行的框架实例（由加载钩子保证），不会使用包自带的 asabot 副本。
+- **插件包目录**：`packages.dir`（默认 `<dataDir>/packages`），由框架管理一个 `package.json`（`{ "name": "asabot-packages", "private": true, "type": "module", "dependencies": {} }`），其中的 dependencies 就是“已安装插件包”的唯一事实来源。启动时加载其中所有带 `asabot-plugin` 关键词的包。在 Docker 里，这个目录随数据卷持久化，不需要重新构建镜像。
+- **安装、升级、卸载**通过子进程执行 npm：
+  - 命令：`npm install <spec> --save --omit=peer --ignore-scripts --no-audit --no-fund --registry <registry>`（升级时用 `<name>@latest`，卸载时用 `npm uninstall <name>`），工作目录是插件包目录。
+  - `--ignore-scripts` 禁止包的安装脚本运行。
+  - 超时时间为 `packages.installTimeout`，超时后杀掉子进程，并回滚 `package.json`（操作前备份）。
+  - 所有包操作串行执行。
+- **安装前检查**：
+  - 先从 registry 读取包的元数据：必须带 `asabot-plugin` 关键词。
+  - `peerDependencies.asabot` 必须包含当前框架版本，不包含时拒绝安装，返回 409 并写明需要的版本范围；请求可以带 `force: true` 跳过版本检查。
+  - 安装后导入入口：导出不合法或插件名与已有插件冲突时，自动卸载并报错。
+- **搜索**：调用 registry 的 `/-/v1/search?text=keywords:asabot-plugin <q>`，结果标注是否已安装以及已安装的版本。
+- **更新检查**：PluginView 的 `package.latest` 为 registry 上的最新版本，缓存 1 小时，失败时省略。
+- **安全**：包插件与框架运行在同一个进程中，拥有完整权限。安装入口只开放给已登录的面板和超管的聊天命令；面板安装确认框中写明这一点。
+
+### 20.3 卸载时的数据清理（purge）
+
+卸载请求可以带 `purge: true`，此时额外清理：
+- YAML 中的 `plugins.<name>` 段；
+- KV 中该插件的全部数据；
+- migrations 记录；
+- 名称以 `p_<name>_` 开头的表（从 sqlite_master 读出表名，带引号执行 DROP）；
+- plugin_group_state 中该插件的记录；
+- `<dataDir>/plugins/<name>/` 目录。
+
+不带 purge 时只移除代码，以后重新安装可以沿用原来的数据。
+
+### 20.4 配置
+
+```yaml
+pluginLoader:
+  dirs: [./plugins]
+  uploadDir: ./plugins          # 面板上传的插件写到这里，默认 dirs[0]
+packages:
+  dir: ./data/packages          # 默认 <dataDir>/packages
+  registry: https://registry.npmjs.org   # 国内可改为 https://registry.npmmirror.com
+  npm: npm                      # npm 可执行文件
+  installTimeout: 5m
+```
+
+### 20.5 接口（面板 API 增量）
+
+```ts
+type PluginView = PluginState & {
+  commands: CommandView[]; config?: unknown
+  source: 'builtin' | 'file' | 'package'
+  removable: boolean                                   // file 和 package 为 true
+  package?: { name: string; version: string; latest?: string; peerRange?: string; compatible: boolean }
+}
+type PackageOperation = {
+  id: string; kind: 'install' | 'update' | 'uninstall'; name: string
+  status: 'queued' | 'running' | 'succeeded' | 'failed'
+  startedAt: number; finishedAt?: number
+  log: string[]                                        // npm 输出（去掉 token 等敏感内容），最多 200 行
+  error?: string; plugin?: PluginView
+}
+type PackageSearchItem = { name: string; version: string; description?: string; author?: string; date?: string; links: { npm: string; homepage?: string; repository?: string }; installed: boolean; installedVersion?: string }
+```
+
+| 方法与路径 | 说明 |
+|---|---|
+| `POST /plugins/rescan` | → `{ added: string[]; removed: string[]; plugins: PluginView[] }` |
+| `POST /plugins/upload` | `{ filename, content /* base64 */, overwrite? }` → 201 `PluginView`；冲突 409；格式错误 400 |
+| `POST /plugins/:name/uninstall` | `{ purge: boolean }` → `{ ok: true }`；builtin 返回 409 |
+| `GET /packages/search?q=&from=0` | → `{ total: number; items: PackageSearchItem[] }` |
+| `POST /packages/install` | `{ name, version?, force? }` → 202 `PackageOperation` |
+| `POST /packages/update` | `{ name }` → 202 `PackageOperation` |
+| `POST /packages/uninstall` | `{ name, purge }` → 202 `PackageOperation` |
+| `GET /packages/operations` | 最近 20 条 `PackageOperation`（内存中保存） |
+
+- 实时推送新增帧 `{ type: 'package', operation: PackageOperation }`：状态变化或新增日志行时推送，日志节流到每 300ms 最多一帧。
+- 插件包的 npm 包名可能带 `/`（scope），所以一律放在请求体里传，不放路径参数。
+
+**聊天命令**（admin 插件，仅超管可用）：`/plugin scan`、`/plugin install <package> [-f]`、`/plugin update <package>`、`/plugin uninstall <name> [--purge]`。安装、升级在后台执行，开始和结束时各回复一条消息。
 
 ## 已知限制
 
