@@ -83,6 +83,7 @@ export function SetupPage() {
     if (step === 0 && !/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code))
       return { code: '设置码是 8 位字符，形如 ABCD-EFGH' }
     if (step === 1 && password.length < 8) return { password: '至少 8 个字符' }
+    if (step === 1 && password.includes('${')) return { password: '密码不能包含 ${' }
     if (step === 1 && confirm !== password) return { confirm: '两次输入的密码不一致' }
     if (step === 3 && mode === 'forward' && !wsUrl.test(url.trim()))
       return { url: '请填写 ws:// 或 wss:// 开头的地址' }
