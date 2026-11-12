@@ -909,6 +909,100 @@ export default definePlugin({ name: 'shop', inject: ['coins'], setup(ctx) { cons
   5. 以 `./` 或 `../` 开头 → 抛出 TypeError，提示改用 `new URL(…, import.meta.url)` 或绝对路径。插件不应依赖进程的工作目录。
   6. 其他字符串 → 当作平台文件标识原样透传，例如收到的图片段中的 `file`。
 
+## 23. 改进批次 3（面板设置与插件市场）
+
+本节修订前面相关章节，以本节为准。
+
+**C4 面板设置（修订 4、7、18、19）**
+
+可以在面板里编辑的范围：
+| 配置 | 生效方式 |
+|---|---|
+| `superusers` | 立即生效 |
+| `command.*` | 立即生效 |
+| `adapters.<platform>` | 立即生效：重新配置适配器，见下文 |
+| `timezone` | 写回配置，重启后生效 |
+
+`dataDir`、`pluginLoader`、`packages`、`server`（端口、密码、API token）、`log.file` 不在面板中编辑。这些项改错可能导致面板自身无法访问，或者数据目录错位，仍然通过修改配置文件来调整。
+
+**接口**
+- `GET /settings` 返回：
+  ```ts
+  {
+    superusers: string[]
+    timezone: string
+    command: { prefixes: string[]; mentionAsPrefix: boolean; privateRequirePrefix: boolean; replyOnError: boolean; replyOnDenied: boolean }
+    adapters: Record<string, { value: unknown; schema: JSONSchema }>   // 已配置的适配器
+    available: string[]                                                // 注册表中所有可用的适配器平台
+    restartRequired: string[]                                          // 已写回但要重启才生效的项，例如 ['timezone']
+  }
+  ```
+  - `adapters.*.value` 取配置文件中的**原始值**，也就是插值之前的值，因此 `${ONEBOT_TOKEN}` 这类引用会原样显示。
+  - `schema` 用 `z.toJSONSchema(definition.configSchema, { io: 'input' })` 生成。
+- 敏感字段：键名为 `accessToken`、`token`、`password`、`apiToken` 时：
+  - 原始值是 `${…}` 引用的，原样返回；
+  - 原始值是非空字面量的，返回占位符 `********`；
+  - PUT 时该位置仍然是占位符，表示保持原值不变。
+- `PUT /settings`：请求体是上面可编辑字段的部分集合，其中 `adapters` 的值为 `null` 时表示移除该适配器。处理步骤：
+  1. 合并到原始配置，还原占位符；
+  2. 对整份配置做插值，再用 `configSchema` 和各适配器的 schema 校验；失败时返回 400 `BAD_REQUEST`，`issues` 指出具体路径；
+  3. 写回 YAML，只改动变化的键，保留注释（复用 `writeConfigValue`）；
+  4. 应用到运行中的 App；
+  5. 返回与 GET 相同的结构。
+- 没有 `configPath` 时（例如测试），修改只在内存中生效。
+- 设置的修改与插件管理一样串行执行。
+
+**适配器热更新**
+- `Adapter` 接口新增 `reconfigure(config: unknown): Promise<void>`，参数已经过注册表 schema 校验。
+- OneBot 适配器的实现：关闭所有连接、停止反向连接的接收，换上新配置后重新启动。Bot 实例按 selfId 保留，遵守第 7 节“同一 selfId 只对应一个 Bot 实例”。状态会先变为 offline 再变回 online，`bot.offline` / `bot.online` 照常派发。
+- 新增一个平台时，创建并启动对应的适配器；移除一个平台时，停止它的适配器并注销它的所有 Bot。
+- App 新增 `reconfigureAdapters(next: Record<string, unknown>)`，供设置接口调用。
+
+**首次运行向导**
+- **触发条件**（只在 `main.ts` 中判断，`createApp` 和测试不受影响）：
+  - `ASABOT_CONFIG`（或默认路径）指向的配置文件不存在；
+  - 或者配置中 `server.panelPassword` 为空、`adapters` 也为空。
+- **生成配置**：文件不存在时，先生成一份最小配置，然后进入设置模式。
+  - 文件内容包括注释（指向 `asabot.config.example.yaml`）、`superusers: []`、`adapters: {}`，以及 `server` 的 host、port、`panelPassword: ''`。
+  - host 和 port 取环境变量 `ASABOT_HOST`、`ASABOT_PORT`，缺省为 `127.0.0.1` 和 `5140`。这两个变量只在生成配置时使用。
+  - Docker 镜像设置 `ASABOT_HOST=0.0.0.0`。
+- **设置码**：进入设置模式时生成一次性设置码，格式为 `XXXX-XXXX`，使用不含易混淆字符的 base32 字母表。
+  - 设置码用 `process.stderr.write` 直接打印到控制台，**不经过 logger**，因此不会进入日志文件、内存日志和面板。
+  - 设置码只在本次进程中有效。
+- **设置模式下的接口**：
+  - `GET /session` 返回 `{ authenticated: false, setup: true }`；
+  - 除了 `/session`、`/setup` 和静态页面以外，面板 API 一律返回 401；
+  - 对外 API 不启用。
+- **`POST /setup { code, password, superusers, adapters? }`**：
+  - 设置码用常量时间比较，失败次数计入登录限流；
+  - `password` 至少 8 个字符；
+  - 处理顺序：写回配置（`server.panelPassword` 以明文写入配置文件，与手写配置相同；文档建议之后改用环境变量引用）→ 应用适配器配置 → 退出设置模式 → 设置登录 cookie 并返回 `{ ok: true }`。
+- **面板向导的步骤**：设置码 → 面板密码 → 超管 → 首个连接（可跳过；OneBot 正向 WS 填 URL 和 token，选反向则展示需要在 OneBot 实现中填写的地址）→ 完成后进入概览页。
+
+**D4 插件市场（修订 20.2、20.5）**
+- **搜索**：`GET /packages/search?q=&from=&sort=`，其中 `sort` 取 `relevance`（默认）、`updated` 或 `name`。
+  - 后端向 registry 一次请求最多 250 条结果，缓存 5 分钟（缓存键为 `q`），在本地排序后按每页 20 条分页。
+  - `total` 取 registry 总数和 250 中的较小值。
+  - 生态规模较小，通常一次就能取全；超出 250 条的部分不参与排序，列入已知限制。
+- **详情**：新增 `GET /packages/info?name=`，返回：
+  ```ts
+  {
+    name: string; description?: string; license?: string; links: {...}
+    readme?: string                                   // Markdown，超过 200KB 时截断
+    latest?: string
+    installed?: string                                // 已安装的版本
+    versions: { version: string; date?: string; peerRange?: string; compatible: boolean; deprecated?: string }[]  // 新版本在前，最多 50 个
+  }
+  ```
+  - 数据来自 registry 的完整 packument（`accept: application/json`），缓存 10 分钟。
+  - 安装时的元数据仍然使用现有的精简格式。
+- **安装指定版本**：沿用 `POST /packages/install { name, version, force? }`。版本不兼容时返回 409，面板确认后带 `force` 重试，与 20.5 一致。
+- **面板**：
+  - 点击市场卡片打开详情抽屉。
+  - README 用 react-markdown 加 remark-gfm 渲染，不渲染原始 HTML；链接在新标签页打开（`rel="noopener noreferrer"`）；图片只加载 `https:` 地址。
+  - 版本下拉框中标出兼容的版本。
+  - 搜索框旁边增加排序切换。
+
 ## 已知限制
 
 - **取消是协作式的**：插件代码如果不理会 `signal`，被取消（超时、卸载、退出）后仍会继续执行；框架只是不再等待它，也不会自动发送它的返回值。
@@ -916,4 +1010,5 @@ export default definePlugin({ name: 'shop', inject: ['coins'], setup(ctx) { cons
 - **超大数字 ID**：OneBot JSON 中的数字按 JavaScript `Number` 解析，超过 2^53 的 ID 会丢失精度。QQ 号、群号和常见 OneBot 实现的 message_id（int32）都远小于这个范围，暂不处理。
 - **whenIdle**：见 12.1，处理器把 prompt 与其他异步任务并行等待时可能提前 resolve，只影响测试辅助。
 - **`bot.call()` 不经过发送前钩子**：透传的平台 API 由插件自己负责，框架不解析其中是否在发送消息。
+- **插件市场排序范围**：搜索结果最多取 250 条参与排序和分页，超出部分需要更精确的关键词。
 - **删除插件文件**：入口文件删除后插件会被卸载并从列表中移除；依赖它的插件进入 failed，入口恢复后自动恢复。
