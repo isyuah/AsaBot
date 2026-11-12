@@ -83,7 +83,13 @@ docs/
 - **写回**（M3 起）：基于 `yaml` 的 Document AST 修改指定路径，保留注释与 `${VAR}` 原文，原子写入（写临时文件后 rename）。
 
 ```yaml
-logLevel: info              # trace|debug|info|warn|error
+log:
+  level: info               # trace|debug|info|warn|error；面板上可以临时调整，重启后恢复为这里的值
+  file:                     # 可选：写入日志文件，按大小轮转
+    path: ./data/logs/asabot.log
+    maxSize: 10MB
+    maxFiles: 5
+timezone: Asia/Shanghai     # IANA 时区；cron 和“今日”统计都按它计算。省略时取环境变量 TZ，再没有就用系统时区
 dataDir: ./data
 superusers: ['10001']       # 平台用户 ID（字符串）
 
@@ -753,6 +759,32 @@ type PackageSearchItem = { name: string; version: string; description?: string; 
 - 插件包的 npm 包名可能带 `/`（scope），所以一律放在请求体里传，不放路径参数。
 
 **聊天命令**（admin 插件，仅超管可用）：`/plugin scan`、`/plugin install <package> [-f]`、`/plugin update <package>`、`/plugin uninstall <name> [--purge]`。安装、升级在后台执行，开始和结束时各回复一条消息。
+
+## 21. 改进批次 1（缺陷与运维）
+
+本节修订前面相关章节，以本节为准。
+
+**E1 数据表归属（修订 13、20.3）**：purge 不再按 `p_<name>_` 前缀匹配，因为插件名允许下划线，`foo` 会误删 `foo_bar` 的表。改为记录表的归属：`ctx.migrate()` 执行每一步迁移的前后各对比一次 sqlite_master，新出现的表记入 `plugin_tables(plugin, table_name)`，迁移中被删掉的表从记录里移除。purge 只 DROP 记录在该插件名下的表。直接用 `ctx.db.exec` 建的表不在记录里，文档说明建表应通过 migrate。
+
+**E3 不吞异常（修订 14、18）**：HTTP 的 onError 在日志中带上 `err`、请求方法和路径；dispatch 订阅者等内部回调中不允许出现空 catch，异常一律带上下文记录 error 日志。
+
+**A5 时区（修订 4、12、18）**：
+- 新增 `timezone` 配置。croner 任务默认使用它，`ctx.cron(expr, fn, { timezone? })` 可单独覆盖。
+- cron、interval、timeout 的回调都会收到一个 `AbortSignal`，插件卸载时 abort。
+- 面板“今日收到/发出”和 24 小时统计的日界线按 `timezone` 计算。
+- Docker 镜像安装 tzdata；compose 示例里给出 `TZ` 的设置方法。
+
+**C2 日志（修订 4、14、19）**：
+- 配置从 `logLevel` 改为 `log.level`，新增可选的 `log.file`。日志文件由框架自己的写入流按大小轮转（`asabot.log` → `asabot.log.1` … 最多 `maxFiles` 个），不引入新依赖。轮转失败时记 warn 并继续写 stdout，不影响运行。
+- 插件相关日志统一使用 `plugin` 字段（分发器、Context、调度器、PluginManager 中原来用 `owner` 的地方都改过来），面板按插件筛选时就能看到处理器的异常。
+- 面板 API 新增 `GET /logs/level` → `{ level }`、`PUT /logs/level { level }` → `{ level }`，运行时调整日志级别，不写回配置。
+
+**E4 插件管理不阻塞（修订 12、20）**：
+- `pluginLoader.setupTimeout`（默认 30s）：setup 超时后插件记为 failed，原因写“setup 超时”，并回收它已注册的资源（setup 中的 Promise 继续运行也不再影响状态）。
+- 包操作中的 npm 执行在插件管理的串行队列之外进行，只有安装完成后的加载、卸载前的停止这两步进入队列。安装期间仍然可以启停插件、重载、保存配置。
+- `GET /plugins` 不再等待 registry：`package.latest` 只返回缓存中的值，缓存缺失或过期时在后台刷新，刷新完成后通过 `plugin` 推送帧更新。
+
+**B4 插件发现规则（修订 12）**：插件目录顶层扫描时忽略以 `_` 或 `.` 开头的文件和目录，以及 `*.test.*`、`*.spec.*`、`*.d.ts`。热重载监听和 rescan 使用同一套规则。
 
 ## 已知限制
 
