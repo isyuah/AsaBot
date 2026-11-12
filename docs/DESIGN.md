@@ -223,6 +223,7 @@ interface Bot {
   getGroupMember(groupId: string, userId: string): Promise<GroupMemberInfo>
   getFriendList(): Promise<UserInfo[]>
   call(action: string, params?: Record<string, unknown>): Promise<unknown>  // 透传平台 API
+  getAvatarUrl?(userId: string): string | undefined  // 平台头像地址（适配器知道规则，例如 OneBot/QQ 的头像 CDN）；不支持的平台不实现
 }
 type SendResult = { messageId: string }
 
@@ -586,7 +587,7 @@ t.app; t.mock; await t.dispose()
 **面板 API**（前缀 `/api/panel`，下面的类型就是契约，前后端都按它实现）
 
 ```ts
-type BotView = { platform: string; selfId: string; nickname?: string; status: 'connecting' | 'online' | 'offline'; connection: 'forward' | 'reverse'; url?: string }
+type BotView = { platform: string; selfId: string; nickname?: string; avatar?: string; status: 'connecting' | 'online' | 'offline'; connection: string; url?: string }   // connection 为适配器提供的展示文本；avatar 来自 bot.getAvatarUrl(selfId)
 type PluginView = PluginState & { commands: CommandView[]; config?: unknown }   // PluginState 见 12.1；config 为当前生效的配置（经 schema 解析后，没有 schema 时省略）
 type CommandView = { owner: string; path: string; usage: string; description: string; aliases: string[]; options: { flags: string[]; description?: string; default?: unknown }[]; examples: string[]; permission: boolean; scope: 'all' | 'group' | 'private'; hidden: boolean }
 type StatsPoint = { t: number; received: number; sent: number }   // t：分钟起点的毫秒时间戳
@@ -615,7 +616,7 @@ type Target = { type: 'group' | 'private'; id: string }
 - `{ type: 'log', record: LogRecord }`
 - `{ type: 'bot', bot: BotView }`：上线、掉线、状态变化
 - `{ type: 'plugin', plugin: PluginView }`：插件状态变化
-- `{ type: 'message', direction: 'in' | 'out', platform, selfId, channel: Target, userId?, nickname?, preview: string, time }`：用于面板的实时消息流，preview 为纯文本摘要，最长 120 字
+- `{ type: 'message', direction: 'in' | 'out', platform, selfId, channel: Target, userId?, nickname?, avatar?, preview: string, time }`（avatar：收到的消息取发送者头像，发出的消息取机器人自己的头像，均来自 `bot.getAvatarUrl`）：用于面板的实时消息流，preview 为纯文本摘要，最长 120 字
 - `{ type: 'stats', point: StatsPoint }`：每分钟一次，推送刚结束的那一分钟
 - 连接建立后，服务端先推送一帧 `{ type: 'hello', overview }`。客户端不发送业务消息；服务端每 30s ping 一次。
 
@@ -624,6 +625,8 @@ type Target = { type: 'group' | 'private'; id: string }
 - 服务端构造一个虚拟的 Session（platform 为 `playground`，selfId 为 `playground`），投入真实的分发器；它的 Bot 是一个记录发送内容的 PlaygroundBot，不会发到 QQ。`bot.call` 等平台 API 抛出明确的“调试台不支持该操作”错误。
 - 返回 `{ replies: { message: Segment[]; text: string }[] }`：等这次分发进入空闲（`whenIdle` 的语义）后，返回期间产生的全部回复。多轮对话就是连续调用该接口，prompt 会正常消费后续消息。
 - 调试台的 Session 同样经过黑白名单、按群开关、权限和冷却。超管身份由请求里的 `superuser` 决定，只在调试台内有效。
+
+**健康检查** `GET /healthz`：只要 HTTP 服务在运行就可用，不需要鉴权。返回 `{ ok: true, bots: { online, total } }`，不包含任何敏感信息。供 Docker 的 HEALTHCHECK 和外部监控使用。
 
 **对外 API**（`Authorization: Bearer <server.apiToken>`）
 - `POST /api/v1/send`：请求体同面板的 `/send` → `{ messageId }`
