@@ -766,7 +766,7 @@ type PackageSearchItem = { name: string; version: string; description?: string; 
 
 **E1 数据表归属（修订 13、20.3）**：purge 不再按 `p_<name>_` 前缀匹配，因为插件名允许下划线，`foo` 会误删 `foo_bar` 的表。改为记录表的归属：`ctx.migrate()` 执行每一步迁移的前后各对比一次 sqlite_master，新出现的表记入 `plugin_tables(plugin, table_name)`，迁移中被删掉的表从记录里移除。purge 只 DROP 记录在该插件名下的表。直接用 `ctx.db.exec` 建的表不在记录里，文档说明建表应通过 migrate。
 
-**E2 接口不得读取本地文件（修订 18）**：面板的 `/send`、对外 API 的 `/api/v1/send`、调试台的 `message`，这些来自 HTTP 请求的消息段中，`image`、`audio`、`video`、`file` 的 `file` 字段不允许以 `file:` 开头（大小写不敏感），违反时返回 400 `BAD_REQUEST`，`issues` 指出具体的段。只有插件代码中的 `seg.image('/本地路径')` 这类受信任的调用才会让适配器读取本地文件。
+**E2 接口不得读取本地文件（修订 18）**：面板的 `/send`、对外 API 的 `/api/v1/send`、调试台的 `message`，这些来自 HTTP 请求的消息段中，`image`、`audio`、`video`、`file` 的 `file` 字段不允许以 `file:` 开头（大小写不敏感），也不允许是绝对路径（POSIX 的 `/…`、Windows 的 `C:\…` 或 `C:/…`、UNC 路径），因为 OneBot 实现会把绝对路径当作它所在主机上的文件来读。违反时返回 400 `BAD_REQUEST`，`issues` 指出具体的段。只有插件代码中的 `seg.image('/本地路径')` 这类受信任的调用才会让适配器读取本地文件。
 
 **E3 不吞异常（修订 14、18）**：HTTP 的 onError 在日志中带上 `err`、请求方法和路径；dispatch 订阅者等内部回调中不允许出现空 catch，异常一律带上下文记录 error 日志。
 
@@ -788,10 +788,132 @@ type PackageSearchItem = { name: string; version: string; description?: string; 
 
 **B4 插件发现规则（修订 12）**：插件目录顶层扫描时忽略以 `_` 或 `.` 开头的文件和目录，以及 `*.test.*`、`*.spec.*`、`*.d.ts`。热重载监听和 rescan 使用同一套规则。
 
+## 22. 改进批次 2（插件能力）
+
+本节修订前面相关章节，以本节为准。新增的公开名称都从 `asabot` 导出。
+
+**A2 对话助手（修订 6 的 Session）**
+- `session.prompt(text?, opts)` 新增两个选项：
+  - `validate?: (reply: Session) => true | string | Promise<true | string>`：返回字符串表示回答无效，框架把这个字符串回复给用户并重新等待；
+  - `retries?: number`：只在提供了 `validate` 时生效，默认 2。重试用尽后返回 `null`。
+  - 每次等待都单独计时，超时同样返回 `null`。
+- 取消：提供了 `validate` 的 prompt，以及下面的 `confirm`、`choose`，在用户回复 `取消` 或 `cancel` 时（去掉首尾空白后整句匹配，忽略大小写）立即返回 `null`，框架不发送任何内容。不带 `validate` 的 prompt 行为不变，原样返回回复。
+- `session.confirm(text, opts?)` → `Promise<boolean | null>`：
+  - 回复 `是`、`是的`、`好`、`好的`、`确认`、`确定`、`y`、`yes`、`ok` 时返回 `true`；
+  - 回复 `否`、`不`、`不要`、`不是`、`n`、`no` 时返回 `false`；
+  - 判断时去掉首尾空白，整句匹配，忽略大小写；
+  - 其他回答提示 `请回复“是”或“否”` 并重问，重试规则与 `validate` 相同。
+  - `opts` 支持 `timeout`、`scope`、`retries`。
+- `session.choose(text, choices, opts?)`：
+  - 发送 `text`，后面附上 `1. 选项` 形式的编号列表；
+  - `choices` 为 `string[]`，或 `{ label: string; value: T }[]`；
+  - 回复编号或完整的 label 都算选中，返回对应的 value（`string[]` 时返回该字符串）；
+  - 无效回答提示 `请回复 1-N 的编号` 并重问；
+  - 超时、取消、重试用尽时返回 `null`。
+- 三者都基于现有 prompt 实现，`whenIdle` 的语义不变。
+
+**A3 协议无关的群管理（修订 7 的 Bot）**
+```ts
+interface Bot {
+  // ……原有方法
+  getMessage(messageId: string): Promise<MessageInfo>
+  getGroupMembers(groupId: string): Promise<GroupMemberInfo[]>
+  muteMember(groupId: string, userId: string, duration: number): Promise<void>   // 毫秒，0 表示解除禁言
+  kickMember(groupId: string, userId: string, options?: { rejectRequest?: boolean }): Promise<void>
+  setMemberCard(groupId: string, userId: string, card: string): Promise<void>     // 空字符串表示清除群名片
+}
+interface MessageInfo {
+  messageId: string; messageType: 'private' | 'group'; userId: string; groupId?: string; time: number
+  message: Message; sender: { userId: string; nickname: string; card?: string; role?: 'owner' | 'admin' | 'member' }
+}
+```
+- 平台不支持某项操作时，抛出 `UnsupportedError`。它定义在 core，带 `platform` 和 `operation` 字段，消息为 `<platform> 不支持 <operation>`。权限不足之类的平台错误照常以 `ApiError` 抛出，框架不预先检查权限。
+- OneBot：禁言时长从毫秒转为秒，向上取整，0 表示解除；`getMessage` 基于 `get_msg`，转换成中立的消息段。
+- 虚拟适配器：
+  - 原来抛 `Error('虚拟适配器不支持该操作')` 的地方统一改为 `UnsupportedError`；
+  - 群管理操作记入 `bot.actions: { action: string; params: Record<string, unknown> }[]` 后直接成功，供插件测试断言；
+  - `getMessage` 只能查到虚拟 Bot 自己发出或收到过的消息，查不到时 reject。
+
+**A4 合并转发（修订 5、7）**
+```ts
+interface ForwardNode { userId: string; nickname: string; message: Sendable }        // 发送用
+interface ForwardMessage { userId: string; nickname: string; time?: number; message: Message }  // 读取结果
+bot.sendForward(target: { type: 'group' | 'private'; id: string }, nodes: ForwardNode[]): Promise<SendResult>
+bot.getForward(id: string): Promise<ForwardMessage[]>   // id 取自收到的 forward 段
+session.sendForward(nodes): Promise<SendResult>          // 发到当前会话
+```
+- 节点内容可以再包含 `forward` 段（是否支持嵌套由平台决定）。
+- OneBot：发送用 `send_group_forward_msg` / `send_private_forward_msg`，读取用 `get_forward_msg`，两个方向都做中立段转换。
+- 发送成功后派发 `bot.message.sent`，其中 `message` 为 `[seg.forward(messageId)]`，面板显示为合并转发。
+- 不支持的平台抛 `UnsupportedError`。
+
+**A6 可持久化的一次性任务（修订 12、13、20.3）**
+```ts
+const remind = ctx.task<{ channel: string; text: string }>('remind', async (payload, { signal, key, runAt }) => { … })
+remind.schedule(payload, { at?: Date | number; delay?: Duration; key?: string }): string   // at 与 delay 必须且只能给一个；返回 key
+remind.cancel(key): boolean
+remind.list(): { key: string; runAt: number; payload: T }[]
+```
+- **存储**：新表 `scheduled_tasks(plugin, name, key, run_at, payload)`，主键为 `(plugin, name, key)`，通过新增一步 core 迁移创建。`key` 缺省时用随机 UUID；用已存在的 key 再次调用 schedule 会覆盖原任务。`payload` 以 JSON 保存。
+- **装载**：`ctx.task` 注册处理函数时，立刻为该插件下该名称的所有行设置定时器。已经到期的任务（包括停机期间错过的）立即执行。延迟超过 setTimeout 的上限（2^31−1 毫秒）时分段设置。
+- **执行**：处理函数正常结束或抛出异常后，都删除这一行。异常带上插件名、任务名和 key 记 error。如果进程在执行中途退出，这一行仍然保留，下次启动会再执行一次，即**至少一次**语义。同一行在执行期间不会被重复触发。
+- **卸载**：插件卸载时清掉定时器并 abort `signal`，表中的行保留，插件重新激活后恢复。setup 完成后，如果表中有某个任务名的行、但插件没有注册这个名称，记一次 warn。
+- purge 时删除该插件的全部任务行（修订 20.3）。
+- 任务时间是绝对时间戳，与 `timezone` 无关。
+
+**A9 发送前钩子（修订 7、12）**
+```ts
+ctx.beforeSend(
+  (input: { bot: Bot; target: { type: 'group' | 'private'; id: string }; message: Message }) =>
+    Message | false | undefined | Promise<Message | false | undefined>,
+  { priority?: number },
+): Disposer
+```
+- 返回值：新的 `Message` 表示替换内容，`false` 表示拦截，`undefined` 表示保持不变。
+- **顺序**：按 priority 降序，同一优先级按注册顺序。前一个钩子的输出作为后一个的输入。
+- **拦截**：被拦截的发送调用以 `SendBlockedError` reject，错误中带上拦截它的插件名。分发器遇到这种错误记 info，不记 error。
+- **钩子出错**：钩子抛出异常记 error，超过 3 秒没有返回记 warn，两种情况都跳过这个钩子，发送继续进行（失败时放行）。
+- **实现位置**：`AdapterHost` 新增 `prepareOutgoing({ bot, target, message }): Promise<Message>`。
+  - 适配器必须在每条中立发送路径上调用一次：`sendPrivate`、`sendGroup`、Session 的 `send` 和 `reply`，以及 `sendForward` 的每个节点（任意一个节点被拦截，整条转发都不发送）。
+  - OneBot 专属的 `bot.onebot.send*` 同样经过钩子。
+  - `bot.call()` 透传不经过钩子，列入已知限制。
+- **防止递归**：钩子内部发出的消息不再经过钩子，用 AsyncLocalStorage 标记。
+- `bot.message.sent` 中带的是经过钩子处理后的最终内容。
+
+**A10 插件间服务（修订 12、12.1）**
+```ts
+// 提供方
+declare module 'asabot' { interface Services { coins: CoinService } }
+export default definePlugin({ name: 'sign-in', setup(ctx) { ctx.provide('coins', service) } })
+// 使用方
+export default definePlugin({ name: 'shop', inject: ['coins'], setup(ctx) { const coins = ctx.inject('coins') } })
+```
+- **类型**：`Services` 是一个空接口，靠声明合并补充类型。`provide` / `inject` 的类型取 `K extends keyof Services ? Services[K] : unknown`。
+- **提供**：同一个服务名同一时刻只能有一个提供方，后一个提供方的 setup 失败，原因与命令冲突一样写明冲突对象。服务作为提供方的 ctx 资源，插件卸载时撤销。
+- **使用**：`definePlugin` 新增 `inject?: string[]`。所列服务全部可用时，插件才会加载。
+  - 有服务不可用时，插件状态为 `failed`，原因写 `服务 coins 不可用`。服务恢复后，由 reconcile 自动加载它，规则与 depends 相同。
+  - 提供方卸载时，使用方级联卸载；提供方重载时，使用方级联重载。
+- `ctx.inject(name)` 只能获取 `inject` 中声明过的服务，否则直接抛错，以保证生命周期可以追踪。
+- **加载顺序**：先按 `depends` 做拓扑排序；因为只有插件 setup 之后才知道它提供了哪些服务，所以 reconcile 会反复执行，直到状态不再变化。
+- `depends` 保留，用于依赖某个具体的插件；`inject` 用于依赖某种能力，不关心由哪个插件提供。
+- `PluginState` 和面板的插件视图新增 `provides: string[]`、`inject: string[]`。
+
+**B5 消息段类型与媒体来源（修订 5、7）**
+- 消息段类型拆成 `Segment = KnownSegment | UnknownSegment`，其中 `UnknownSegment = { type: string; data: Record<string, unknown> }`。
+  - 因为联合类型中有 `type: string`，直接比较 `segment.type === 'image'` 无法收窄类型。为此提供类型守卫 `isSegment(segment, 'image')`，配合 `message.filter((s) => isSegment(s, 'image'))` 使用。
+- `seg.image / audio / video / file` 的 `source` 判定规则，按顺序：
+  1. `Buffer` → 转成 `base64://`。
+  2. `URL` 对象 → 使用 `href`。推荐写法是 `seg.image(new URL('./assets/cat.png', import.meta.url))`，路径相对于插件文件，热重载也不受影响。
+  3. 以 `http://`、`https://`、`base64://`、`file://` 开头的字符串 → 原样使用。
+  4. 绝对路径（POSIX 的 `/…`、Windows 的 `C:\…` 或 `C:/…`、UNC 路径）→ 转成 `file://` URL，由适配器读取本地文件。
+  5. 以 `./` 或 `../` 开头 → 抛出 TypeError，提示改用 `new URL(…, import.meta.url)` 或绝对路径。插件不应依赖进程的工作目录。
+  6. 其他字符串 → 当作平台文件标识原样透传，例如收到的图片段中的 `file`。
+
 ## 已知限制
 
 - **取消是协作式的**：插件代码如果不理会 `signal`，被取消（超时、卸载、退出）后仍会继续执行；框架只是不再等待它，也不会自动发送它的返回值。
 - **热重载的内存代价**：Node 的 ESM 模块缓存无法清除，每次重载都会保留一份旧模块，长时间频繁重载后应重启进程。
 - **超大数字 ID**：OneBot JSON 中的数字按 JavaScript `Number` 解析，超过 2^53 的 ID 会丢失精度。QQ 号、群号和常见 OneBot 实现的 message_id（int32）都远小于这个范围，暂不处理。
 - **whenIdle**：见 12.1，处理器把 prompt 与其他异步任务并行等待时可能提前 resolve，只影响测试辅助。
+- **`bot.call()` 不经过发送前钩子**：透传的平台 API 由插件自己负责，框架不解析其中是否在发送消息。
 - **删除插件文件**：入口文件删除后插件会被卸载并从列表中移除；依赖它的插件进入 failed，入口恢复后自动恢复。
