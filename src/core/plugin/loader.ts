@@ -17,6 +17,21 @@ export function registerPluginRoots(dirs: string[]): () => void {
   if (!registered) {
     registered = true
     registerHooks({
+      // Plugin directories may live outside any package with "type": "module" (for example a deployment
+      // folder). Without this, Node guesses CommonJS for their .ts files, re-parses them and prints
+      // MODULE_TYPELESS_PACKAGE_JSON on every load.
+      load(url, context, nextLoad) {
+        if (url.startsWith('file:')) {
+          const file = resolve(fileURLToPath(new URL(url)))
+          if (
+            file.endsWith('.ts') &&
+            !file.endsWith('.d.ts') &&
+            [...roots.keys()].some((root) => inside(root, file))
+          )
+            return nextLoad(url, { ...context, format: 'module-typescript' })
+        }
+        return nextLoad(url, context)
+      },
       resolve(specifier, context, nextResolve) {
         if (specifier === 'asabot' && context.parentURL?.startsWith('file:')) {
           const parent = new URL(context.parentURL)

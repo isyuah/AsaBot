@@ -288,7 +288,7 @@ class OneBotConnection {
       selfId: bot.selfId,
       time: Date.now(),
       kind: 'internal',
-      name: 'message.sent',
+      name: 'bot.message.sent',
       raw: undefined,
       bot,
       messageId: input.messageId,
@@ -759,6 +759,10 @@ class OneBotConnection {
   }
 
   private emitBotOnline(bot: OneBotBotImpl): void {
+    this.host.logger.info(
+      { platform: bot.platform, selfId: bot.selfId, url: sanitizedUrl(this.config.url) },
+      'Bot online',
+    )
     const event: BotOnlineEvent = {
       id: randomUUID(),
       platform: 'onebot11',
@@ -774,6 +778,10 @@ class OneBotConnection {
   }
 
   private emitBotOffline(bot: OneBotBotImpl): void {
+    this.host.logger.warn(
+      { platform: bot.platform, selfId: bot.selfId, url: sanitizedUrl(this.config.url) },
+      this.stopped ? 'Bot offline (stopping)' : 'Bot offline; reconnecting',
+    )
     const event: BotOfflineEvent = {
       id: randomUUID(),
       platform: 'onebot11',

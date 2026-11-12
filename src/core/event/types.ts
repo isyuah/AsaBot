@@ -177,7 +177,7 @@ export interface BotOfflineEvent extends BaseEvent {
 
 export interface MessageSentEvent extends BaseEvent {
   readonly kind: 'internal'
-  readonly name: 'message.sent'
+  readonly name: 'bot.message.sent'
   readonly messageId: string
   readonly messageType: 'private' | 'group'
   readonly userId?: string
@@ -196,7 +196,7 @@ export type AnyEvent =
   | MessageSentEvent
 
 export interface EventMap {
-  message: Session | MessageSentEvent
+  message: Session
   'message.private': PrivateSession
   'message.group': GroupSession
   notice: NoticeEvent
@@ -225,8 +225,11 @@ export interface EventMap {
   meta: MetaEvent
   'meta.lifecycle': MetaEvent
   'meta.heartbeat': MetaEvent
-  bot: BotOnlineEvent | BotOfflineEvent
+  // Things the bot itself does or undergoes. Kept out of the `message` namespace on purpose: a
+  // `message` listener must only ever receive Sessions.
+  bot: BotOnlineEvent | BotOfflineEvent | MessageSentEvent
   'bot.online': BotOnlineEvent
   'bot.offline': BotOfflineEvent
-  'message.sent': MessageSentEvent
+  'bot.message': MessageSentEvent
+  'bot.message.sent': MessageSentEvent
 }

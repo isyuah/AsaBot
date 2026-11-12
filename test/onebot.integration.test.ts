@@ -114,7 +114,7 @@ describe('OneBot forward adapter', () => {
     const bot = app.bots.list()[0]
     if (bot === undefined || !isOneBot(bot)) throw new Error('OneBot did not come online')
     const sentEvent = new Promise<string>((resolve) => {
-      app.events.on('message.sent', (event) => resolve(event.messageId))
+      app.events.on('bot.message.sent', (event) => resolve(event.messageId))
     })
     const sent = await bot.onebot.sendGroupMsg('200', 'previous')
     expect(await sentEvent).toBe(sent.messageId)
@@ -222,6 +222,27 @@ describe('OneBot forward adapter', () => {
     })
     await app.start()
     await expect(early).resolves.toBe('early')
+  })
+
+  it('keeps sent-message events of the bot out of message listeners', async () => {
+    const { app, mock } = await setup({ token: 'test-token' })
+    const bot = app.bots.list()[0]
+    if (bot === undefined) throw new Error('bot did not come online')
+    const names: string[] = []
+    app.events.on('message', (event) => {
+      names.push(event.name)
+    })
+    const sent = new Promise<string>((resolve) => {
+      app.events.on('bot.message.sent', (event) => resolve(event.messageId))
+    })
+    const received = new Promise<void>((resolve) => {
+      app.events.on('message.group', () => resolve())
+    })
+    await bot.sendGroup('200', 'outgoing')
+    await expect(sent).resolves.toEqual(expect.any(String))
+    mock.emitGroupMessage({ groupId: '200', userId: '300', message: 'incoming' })
+    await received
+    expect(names).toEqual(['message.group'])
   })
 
   it('dispatches all matching event levels and isolates synchronous listener errors', async () => {

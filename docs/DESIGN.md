@@ -169,7 +169,7 @@ interface BaseEvent {
 | `notice.<notice_type>[.<sub_type>]` | 沿用 OneBot 命名，如 `notice.group_increase`、`notice.group_recall`、`notice.notify.poke`、`notice.group_ban.ban` |
 | `request.friend` / `request.group.add` / `request.group.invite` | 请求，带 `approve(remark?)` / `reject(reason?)` |
 | `meta.lifecycle` / `meta.heartbeat` | 元事件 |
-| 框架内部：`bot.online` / `bot.offline` / `plugin.state` / `message.sent` | 框架自身派发 |
+| 框架内部：`bot.online` / `bot.offline` / `bot.message.sent` / `plugin.state` | 框架自身派发。机器人自身相关的事件都放在 `bot` 下，不放进 `message`，以保证 `message` 监听器只会收到 Session（实测中发现，`message.sent` 会被 `ctx.on('message')` 收到） |
 
 `ctx.on` 的事件名到事件类型通过 `EventMap` 获得精确类型；OneBot 已知 notice 需列出字段，未知 notice 退化为通用 `NoticeEvent`（包含 `noticeType`、`subType?`、`userId?`、`groupId?`、`operatorId?`）。
 
@@ -267,7 +267,7 @@ interface AdapterHost {
 - 消息同时兼容 `array` 和 `string`（CQ 码）两种格式。
 - `post_type: message_sent` 在 `ignoreSelf` 开启时丢弃。
 - 数字 ID 转字符串；发送时字符串转数字。
-- 发出的消息 ID 写入 toMe 缓存，并派发 `message.sent` 内部事件。
+- 发出的消息 ID 写入 toMe 缓存，并派发 `bot.message.sent` 内部事件。
 
 **OneBotApi 首批封装**：`sendPrivateMsg`、`sendGroupMsg`、`deleteMsg`、`getMsg`、`getLoginInfo`、`getVersionInfo`、`getStrangerInfo`、`getFriendList`、`getGroupInfo`、`getGroupList`、`getGroupMemberInfo`、`getGroupMemberList`、`setGroupBan`、`setGroupWholeBan`、`setGroupKick`、`setGroupCard`、`setGroupAdmin`、`setGroupSpecialTitle`、`setFriendAddRequest`、`setGroupAddRequest`、`sendGroupForwardMsg`、`sendPrivateForwardMsg`、`groupPoke`、`friendPoke`（NapCat 扩展）。
 

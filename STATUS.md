@@ -13,6 +13,15 @@
 | M3b | 内置插件、示例插件、README、端到端测试 | integrated, runnable | `pnpm typecheck`、`pnpm lint`、`pnpm test` 连续两轮通过（97 tests）；端到端覆盖内置命令、示例插件、权限、群开关、访问控制和多轮游戏；子进程测试验证删除入口后卸载、依赖失效与恢复；真实 `node src/main.ts` 使用示例配置结构连接 MockOneBot，`/help` 列出内置插件和示例插件，修改 `plugins/echo.ts` 后回复从 `first-smoke` 变为 `热重载：probe-1`，文件已恢复；README 中两个插件示例经测试运行。尚未与真实 NapCat 联调。主控验收：修复审查问题后连续两轮 97 tests 通过；独立的真实进程 e2e（`node src/main.ts` 配合 MockOneBot 和示例配置）依次走通 `/ping`、`/echo -n 2`、别名冷却、用二分法完整玩一局 `/猜数`、排行（显示昵称）、非超管被拒、全局停用和启用 echo、拒绝停用 admin、`/status`，进程日志中没有 warn 或 error。主控审查后修正：聊天中禁止全局停用 admin，避免把自己锁在外面；猜数排行显示昵称而不是内部 key；YAML 写回关闭 flowCollectionPadding，未改动的行内数组保持原样（disable 加 enable 往返后与原文件逐字节一致） |
 | M4–M7 | 第二期：反向 WS、发送队列、HTTP、面板、Docker、沙盒 | 等待用户验收第一期 | — |
 
+## 真实环境联调（2026-11-12，NapCat 4.18.42，本机 127.0.0.1:43787）
+
+- **runnable，已对真实 NapCat 验证**：使用 Bearer token 的正向 WS 能上线；只读 API（getSelf、getVersionInfo、getGroupList、getGroupMember、getFriendList）的返回都解析正确，ID 统一为 string；meta.lifecycle 和 meta.heartbeat（30s 一次）能收到；用户在私聊和测试群发的 `/ping`、`/echo -n 2`、`/复读`、带图片的 `/echo`、`/猜数` 多轮、`/status`、`/plugin list`、`/plugin off|on echo` 都收到并成功回复（每条都有对应的 bot.message.sent），群开关关闭后 `/echo hi` 不回复；QQ 重启导致连接断开（ECONNRESET）后，机器人按退避策略自动重连成功。
+- 联调中发现并已修复：
+  - 内部事件 `message.sent` 会被 `ctx.on('message')` 收到（分层名称匹配），导致按 Session 写的监听器崩溃 → 改名为 `bot.message.sent`，并补了回归测试；
+  - 项目外的插件目录触发 `MODULE_TYPELESS_PACKAGE_JSON` 警告 → 加载钩子把插件目录下的 `.ts` 文件统一按 ESM TypeScript 加载；
+  - 没有上线和掉线的日志 → 新增 `Bot online`（info）和 `Bot offline; reconnecting`（warn）。
+- 尚未实测：@机器人 免前缀触发、通知和请求事件（进群、戳一戳、好友申请）。
+
 ## 已验证的技术前提
 
 - Node v26.5：可直接运行 `.ts`；`node:sqlite` 可用。
