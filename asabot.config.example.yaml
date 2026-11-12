@@ -10,7 +10,7 @@ command:
   replyOnDenied: true
 
 dispatch:
-  handlerTimeout: 10m
+  handlerTimeout: 1h
   ignoreSelf: true
   promptTimeout: 60s
   maxPromptTimeout: 30m

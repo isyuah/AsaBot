@@ -1,2 +1,4 @@
+export type { FakeSend } from './fake-bot.ts'
+export { FakeBot } from './fake-bot.ts'
 export type { MockCall, MockCallHandler, MockOneBotOptions } from './mock-onebot.ts'
 export { MockOneBot } from './mock-onebot.ts'

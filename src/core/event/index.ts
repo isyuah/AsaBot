@@ -18,6 +18,8 @@ export type {
   NoticeEvent,
   PokeEvent,
   PrivateSession,
+  PromptOptions,
   RequestEvent,
   Session,
+  SessionServices,
 } from './types.ts'

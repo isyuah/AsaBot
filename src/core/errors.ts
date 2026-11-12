@@ -37,3 +37,10 @@ export class NotConnectedError extends Error {
     this.name = 'NotConnectedError'
   }
 }
+
+export class CommandConflictError extends Error {
+  constructor(name: string, existingOwner: string, newOwner: string) {
+    super(`Command or alias "${name}" conflicts between "${existingOwner}" and "${newOwner}"`)
+    this.name = 'CommandConflictError'
+  }
+}

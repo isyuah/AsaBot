@@ -28,7 +28,7 @@ const commandSchema = z
 
 const dispatchSchema = z
   .object({
-    handlerTimeout: durationSchema.default(600_000),
+    handlerTimeout: durationSchema.default(3_600_000),
     ignoreSelf: z.boolean().default(true),
     promptTimeout: durationSchema.default(60_000),
     maxPromptTimeout: durationSchema.default(1_800_000),

@@ -1,6 +1,21 @@
 import type { Bot, SendResult } from '../bot.ts'
 import type { Message, Sendable } from '../message/index.ts'
 
+export interface PromptOptions {
+  timeout?: string | number
+  scope?: 'user' | 'channel'
+  filter?: (session: Session) => boolean
+}
+
+export interface SessionServices {
+  prompt(
+    session: Session,
+    text?: Sendable,
+    options?: PromptOptions,
+    signal?: AbortSignal,
+  ): Promise<Session | null>
+}
+
 export interface BaseEvent {
   readonly id: string
   readonly platform: string
@@ -31,6 +46,7 @@ export interface Session extends BaseEvent {
   readonly isSuperuser: boolean
   send(content: Sendable): Promise<SendResult>
   reply(content: Sendable, options?: { quote?: boolean; at?: boolean }): Promise<SendResult>
+  prompt(text?: Sendable, options?: PromptOptions): Promise<Session | null>
 }
 
 export interface GroupSession extends Session {

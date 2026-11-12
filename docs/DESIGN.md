@@ -87,7 +87,7 @@ command:
   replyOnDenied: true
 
 dispatch:
-  handlerTimeout: 10m       # 单次处理硬上限，超时触发 abort
+  handlerTimeout: 1h        # 单次处理的安全上限（包含其中等待 prompt 的时间），超时触发 abort
   ignoreSelf: true          # 忽略机器人自身发出的消息（OneBot message_sent）
   promptTimeout: 60s        # session.prompt 默认超时
   maxPromptTimeout: 30m
@@ -295,6 +295,7 @@ adapter.emit(event)
   - 被 prompt 消费的消息不会进入命令和匹配器，但观察者照常收到。
   - 超时返回 `null`。
   - 同一作用域同时只允许一个 prompt：新 prompt 会让旧 prompt 以 `null` 结束。
+  - 一条消息同时命中用户作用域和 channel 作用域的 prompt 时，用户作用域优先。
 
 ### 9.1 实现约定（M2）
 
@@ -361,7 +362,7 @@ ctx.command('echo <text:rest>')
   - 不带前缀时只匹配命令名和别名，匹配不上就交给匹配器。
 - **返回值**：action 的返回值（`Sendable`）通过 `session.send` 发出；返回 `undefined` 则不发。
 - **选项解析**：支持 `--key value`、`--key=value`、`-k value`，布尔选项写 `-s` 或 `--silent`。选项可以和位置参数交错出现。一旦开始解析 `rest` 参数，或遇到 `--`，后面的内容都按字面处理，不再识别为选项。未知选项报参数错误。
-- **命令名匹配**：精确匹配，区分大小写。别名只替换路径的最后一段，例如给 `plugin reload` 加别名 `重载插件`，就能用 `/重载插件 <name>` 调用。
+- **命令名匹配**：精确匹配，区分大小写。别名按完整路径解析：给 `plugin reload` 加 `.alias('重载插件')` 得到顶层命令 `/重载插件 <name>`，加 `.alias('plugin rl')` 得到 `/plugin rl <name>`。
 - **只有子命令的路径**：例如 `/plugin` 本身没有 action，但有子命令时，回复它的子命令列表。
 - **帮助数据**：提供 `formatUsage(command)` 和 `listCommands(session)`。后者按 scope、权限、hidden 以及按群开关过滤，供 M3 的 help 插件使用。
 - **错误提示**：参数错误时回复简短原因和用法，例如 `缺少参数 <text>。用法：/echo <text>`。带前缀但命令未知时默认不回复，因为群里可能有别的机器人。

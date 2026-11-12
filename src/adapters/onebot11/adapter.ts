@@ -492,26 +492,29 @@ class OneBotConnection {
     const senderRole = frame.sender?.role
     const role =
       senderRole === 'owner' || senderRole === 'admin' || senderRole === 'member' ? senderRole : undefined
-    const session = createSession({
-      id: randomUUID(),
-      platform: 'onebot11',
-      selfId: bot.selfId,
-      time: eventTime(frame as { time?: unknown }),
-      raw: frame,
-      bot,
-      ...target,
-      messageId: platformId(frame.message_id),
-      userId,
-      message,
-      sender: {
+    const session = createSession(
+      {
+        id: randomUUID(),
+        platform: 'onebot11',
+        selfId: bot.selfId,
+        time: eventTime(frame as { time?: unknown }),
+        raw: frame,
+        bot,
+        ...target,
+        messageId: platformId(frame.message_id),
         userId,
-        nickname,
-        ...(frame.sender?.card === undefined ? {} : { card: frame.sender.card }),
-        ...(role === undefined ? {} : { role }),
+        message,
+        sender: {
+          userId,
+          nickname,
+          ...(frame.sender?.card === undefined ? {} : { card: frame.sender.card }),
+          ...(role === undefined ? {} : { role }),
+        },
+        isSuperuser: this.host.isSuperuser(userId),
+        sentMessageIds: bot.sentMessageIds,
       },
-      isSuperuser: this.host.isSuperuser(userId),
-      sentMessageIds: bot.sentMessageIds,
-    })
+      this.host.sessionServices,
+    )
     this.logMessage(session)
     this.host.emit(session)
   }

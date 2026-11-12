@@ -7,7 +7,7 @@ export type {
 } from './adapters/onebot11/index.ts'
 export { createApp } from './bootstrap.ts'
 export type { Adapter, AdapterHost } from './core/adapter.ts'
-export { App, EventBus } from './core/app.ts'
+export { App } from './core/app.ts'
 export type {
   Bot,
   GroupInfo,
@@ -21,9 +21,29 @@ export type {
   UserInfo,
 } from './core/bot.ts'
 export { BotRegistry, isOneBot } from './core/bot.ts'
+export type { CommandDefinition, OptionDefinition, OptionSettings } from './core/command/builder.ts'
+export { CommandBuilder } from './core/command/builder.ts'
+export { formatUsage } from './core/command/parse.ts'
+export type { CommandAction, CommandArgs, CommandContext, OptionValue } from './core/command/types.ts'
 export { interpolateConfigValues, loadConfig } from './core/config/load.ts'
 export { type Config, configSchema } from './core/config/schema.ts'
-export { ApiError, ApiTimeoutError, ConfigError, NotConnectedError } from './core/errors.ts'
+export { Dispatcher } from './core/dispatch/dispatcher.ts'
+export type {
+  AccessFilter,
+  Disposer,
+  EnabledFilter,
+  MatchHandler,
+  MatchPattern,
+  Middleware,
+  Scope,
+} from './core/dispatch/types.ts'
+export {
+  ApiError,
+  ApiTimeoutError,
+  CommandConflictError,
+  ConfigError,
+  NotConnectedError,
+} from './core/errors.ts'
 export type {
   AnyEvent,
   BaseEvent,
@@ -43,8 +63,10 @@ export type {
   NoticeEvent,
   PokeEvent,
   PrivateSession,
+  PromptOptions,
   RequestEvent,
   Session,
+  SessionServices,
 } from './core/event/index.ts'
 export { createSession, stripLeadingMention } from './core/event/index.ts'
 export {
@@ -64,5 +86,8 @@ export {
   seg,
   toCQ,
 } from './core/message/index.ts'
+export type { Permission, Rule } from './core/permission.ts'
+export { perm } from './core/permission.ts'
+export type { CooldownScope } from './core/ratelimit.ts'
 export { type Duration, parseDuration } from './core/utils/duration.ts'
 export { LruSet } from './core/utils/lru.ts'

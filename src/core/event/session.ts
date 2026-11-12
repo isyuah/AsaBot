@@ -2,7 +2,7 @@ import type { Bot, SendResult } from '../bot.ts'
 import type { Message, Sendable } from '../message/index.ts'
 import { normalizeSendable, plainText, seg } from '../message/index.ts'
 import type { LruSet } from '../utils/lru.ts'
-import type { Session } from './types.ts'
+import type { PromptOptions, Session, SessionServices } from './types.ts'
 
 export function stripLeadingMention(message: Message, selfId: string): Message {
   const result = [...message]
@@ -50,7 +50,7 @@ interface SessionFields {
 export type SessionInit = SessionFields &
   ({ messageType: 'private'; groupId?: undefined } | { messageType: 'group'; groupId: string })
 
-export function createSession(init: SessionInit): Session {
+export function createSession(init: SessionInit, services: SessionServices): Session {
   const isReplyToSelf = init.message.some(
     (segment) => segment.type === 'reply' && init.sentMessageIds?.has(String(segment.data.id)) === true,
   )
@@ -91,6 +91,9 @@ export function createSession(init: SessionInit): Session {
         prefix.push(seg.at(init.userId))
       }
       return session.send([...prefix, ...normalizeSendable(content)])
+    },
+    prompt(text?: Sendable, options?: PromptOptions): Promise<Session | null> {
+      return services.prompt(session, text, options)
     },
   }
   return session
