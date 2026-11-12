@@ -20,7 +20,8 @@
   - 内部事件 `message.sent` 会被 `ctx.on('message')` 收到（分层名称匹配），导致按 Session 写的监听器崩溃 → 改名为 `bot.message.sent`，并补了回归测试；
   - 项目外的插件目录触发 `MODULE_TYPELESS_PACKAGE_JSON` 警告 → 加载钩子把插件目录下的 `.ts` 文件统一按 ESM TypeScript 加载；
   - 没有上线和掉线的日志 → 新增 `Bot online`（info）和 `Bot offline; reconnecting`（warn）。
-- 尚未实测：@机器人 免前缀触发、通知和请求事件（进群、戳一戳、好友申请）。
+- 修复后重启再测：群里 @机器人 加 `ping`（不带前缀）解析为 `[at, text]`、`toMe: true`，能触发命令；`/ping` 正常；日志中不再有监听器报错，也不再有 MODULE_TYPELESS 警告。
+- 尚未实测：通知和请求事件（进群、戳一戳、好友申请）。
 
 ## 已验证的技术前提
 
