@@ -111,7 +111,7 @@ plugins:                    # 插件名 → 条目；内置插件同样在此配
     enabled: true           # 默认 true
     config: { maxLen: 200 }
 
-server:                     # M5
+server:                     # M4
   host: 127.0.0.1
   port: 5140
   apiToken: ${ASABOT_API_TOKEN:-}     # 为空则不启用对外 API
@@ -526,10 +526,82 @@ t.app; t.mock; await t.dispose()
 | M2 | 分发管线（过滤、观察者、中间件、prompt、命令、匹配器）；命令系统；权限；冷却；错误隔离与 abort | 第 16 节中与管线、命令、prompt、权限相关的测试通过 |
 | M3a | 插件系统（definePlugin、Context、PluginManager、状态协调、按群开关和黑白名单）；热重载；存储（KV、迁移、状态表）；定时任务；YAML 写回；`whenIdle`；`createTestApp` | 子进程中的热重载测试通过；插件隔离和资源回收测试通过 |
 | M3b | 内置插件 help、status、admin；示例插件 `plugins/echo.ts`、`plugins/guess.ts`；README（快速开始与插件开发指南）；端到端测试 | 用 createTestApp 加载示例插件的端到端测试通过；手动修改示例插件后自动重载生效 |
-| M4 | 反向 WS（多账号，校验 X-Self-ID 和 token）；每个账号独立的发送队列 | — |
-| M5 | Hono 服务：对外 API（`POST /api/v1/send`、`GET /api/v1/bots`）、面板后端、日志 WS 推送、`ctx.route` | — |
-| M6 | React + Vite + shadcn/ui + Tailwind 面板 | — |
-| M7 | Dockerfile、包含 NapCat 的 compose、`pnpm sandbox` 终端沙盒、部署文档 | — |
+| M4 | HTTP 服务（第 18 节）：Hono 单端口服务、面板认证、面板 API、实时推送 WS、消息统计、调试台、对外 API、`ctx.route`、静态托管面板 | 第 18 节的接口全部可用，面板契约测试通过 |
+| M5 | 反向 WS（多账号，挂在同一个 HTTP 服务上，校验 X-Self-ID 和 token）；每个账号独立的发送队列 | 多账号反向连接和发送限速测试通过 |
+| M6 | Web 面板（第 19 节，由主控 Agent 亲自编写） | 用真实后端走通所有页面 |
+| M7 | Dockerfile、包含 NapCat 的 compose、部署文档。原计划的终端沙盒由面板“调试台”取代，不再单独实现 | `docker compose up` 后面板可访问，能连上 NapCat |
+
+## 18. HTTP 服务（M4）
+
+**总体**
+- 基于 `hono` + `@hono/node-server`，单端口（`server.host` / `server.port`，默认 `127.0.0.1:5140`）。WebSocket 升级统一由 `ws` 的 `noServer` 模式在 node server 的 `upgrade` 事件上按路径分发：面板推送 `/api/panel/ws`，以及 M5 的反向 WS `/onebot/v11/ws`。
+- 代码放在 `src/server/`，由 `bootstrap.ts` 组装。`core` 不依赖 server。App 只为 server 提供数据和操作的接口（插件管理、存储、统计、日志订阅、调试台）。
+- 面板和对外 API 各自独立启用：`server.panelPassword` 为空时不提供面板 API 和静态页面；`server.apiToken` 为空时不提供 `/api/v1/*`。两者都为空、并且也没有反向 WS 连接时，不监听端口。
+- 所有 JSON 错误响应统一为 `{ "error": { "code": string, "message": string, "issues"?: [{ "path": string, "message": string }] } }`，状态码遵循 HTTP 语义（400 参数错误、401 未登录、404 不存在、409 冲突、429 限流、500 内部错误）。错误信息不得包含堆栈。
+
+**面板认证**
+- `POST /api/panel/login { password }`：用常量时间比较校验密码。成功后设置 HttpOnly、SameSite=Strict、Path=/ 的会话 cookie `asabot_session`（随机 32 字节，存在内存中，7 天过期，进程重启后失效），返回 `{ ok: true }`。同一 IP 每分钟最多 10 次尝试，超出返回 429。
+- `POST /api/panel/logout` 使会话失效；`GET /api/panel/session` 返回 `{ authenticated: boolean }`，不需要登录。
+- 其他 `/api/panel/*` 都要求有效会话。为了防 CSRF，修改类请求必须是 `application/json`，并且 `Origin`（若存在）要与 Host 一致。
+- 面板的 WebSocket 通过同一个 cookie 鉴权。
+
+**面板 API**（前缀 `/api/panel`，下面的类型就是契约，前后端都按它实现）
+
+```ts
+type BotView = { platform: string; selfId: string; nickname?: string; status: 'connecting' | 'online' | 'offline'; connection: 'forward' | 'reverse'; url?: string }
+type PluginView = PluginState & { commands: CommandView[] }          // PluginState 见 12.1
+type CommandView = { owner: string; path: string; usage: string; description: string; aliases: string[]; options: { flags: string[]; description?: string; default?: unknown }[]; examples: string[]; permission: boolean; scope: 'all' | 'group' | 'private'; hidden: boolean }
+type StatsPoint = { t: number; received: number; sent: number }   // t：分钟起点的毫秒时间戳
+type LogRecord = { time: number; level: number; msg: string; plugin?: string; [key: string]: unknown }
+type Target = { type: 'group' | 'private'; id: string }
+```
+
+| 方法与路径 | 说明 |
+|---|---|
+| `GET /overview` | `{ version, node, startedAt, memory: { rss, heapUsed }, bots: BotView[], plugins: { active, failed, disabled }, today: { received, sent } }` |
+| `GET /stats/messages?range=1h\|24h` | `StatsPoint[]`。1h 按分钟（60 个点），24h 按 15 分钟聚合（96 个点）；没有消息的时段补 0。统计在内存中，保留 24 小时 |
+| `GET /bots` | `BotView[]` |
+| `GET /bots/:platform/:selfId/groups` | `{ groupId, groupName, memberCount? }[]`（实时调用平台 API） |
+| `POST /send` | `{ platform?, selfId?, target: Target, message: string \| Segment[] }` → `{ messageId }`。不指定 Bot 时使用第一个在线的 |
+| `GET /plugins` | `PluginView[]` |
+| `POST /plugins/:name/enable` / `disable` / `reload` | 返回最新的 `PluginView`；失败（例如 admin 不允许停用）返回 409 和原因 |
+| `PUT /plugins/:name/config` | `{ config }`。校验失败返回 400，`issues` 带字段路径；成功返回最新的 `PluginView` |
+| `GET /plugins/:name/groups` | `{ groupKey, enabled }[]`：只列出显式设置过的群 |
+| `PUT /plugins/:name/groups/:groupKey` | `{ enabled }` |
+| `GET /commands` | `CommandView[]`：全部命令，包括 hidden（带标记） |
+| `GET /acl` / `POST /acl` / `DELETE /acl` | `{ list, subject, key }`，与 12.1 一致；不允许 block 超管 |
+| `GET /logs?limit=200&level=30` | 最近的 `LogRecord[]`（来自内存环形缓冲） |
+| `POST /playground` | 见下文“调试台” |
+
+**实时推送** `GET /api/panel/ws`（升级为 WebSocket）。服务端推送 JSON 帧：
+- `{ type: 'log', record: LogRecord }`
+- `{ type: 'bot', bot: BotView }`：上线、掉线、状态变化
+- `{ type: 'plugin', plugin: PluginView }`：插件状态变化
+- `{ type: 'message', direction: 'in' | 'out', platform, selfId, channel: Target, userId?, nickname?, preview: string, time }`：用于面板的实时消息流，preview 为纯文本摘要，最长 120 字
+- `{ type: 'stats', point: StatsPoint }`：每分钟一次，推送刚结束的那一分钟
+- 连接建立后，服务端先推送一帧 `{ type: 'hello', overview }`。客户端不发送业务消息；服务端每 30s ping 一次。
+
+**调试台**（Playground，`POST /api/panel/playground`）
+- 请求 `{ text?: string, message?: Segment[], user: { id: string; nickname?: string; role?: 'owner' | 'admin' | 'member'; superuser?: boolean }, group?: string | null }`。
+- 服务端构造一个虚拟的 Session（platform 为 `playground`，selfId 为 `playground`），投入真实的分发器；它的 Bot 是一个记录发送内容的 PlaygroundBot，不会发到 QQ。`bot.call` 等平台 API 抛出明确的“调试台不支持该操作”错误。
+- 返回 `{ replies: { message: Segment[]; text: string }[] }`：等这次分发进入空闲（`whenIdle` 的语义）后，返回期间产生的全部回复。多轮对话就是连续调用该接口，prompt 会正常消费后续消息。
+- 调试台的 Session 同样经过黑白名单、按群开关、权限和冷却。超管身份由请求里的 `superuser` 决定，只在调试台内有效。
+
+**对外 API**（`Authorization: Bearer <server.apiToken>`）
+- `POST /api/v1/send`：请求体同面板的 `/send` → `{ messageId }`
+- `GET /api/v1/bots` → `BotView[]`
+
+**插件路由** `ctx.route(app => ...)`：插件拿到一个 Hono 子应用，挂在 `/plugins/<name>/` 下，不需要面板登录。插件卸载后该前缀返回 404。实现方式是一个 `/plugins/:name/*` 总入口，按名字转发到当前注册的子应用，从而支持动态挂载和卸载。
+
+**静态托管**：面板启用时，`/` 提供 `web/dist` 的静态文件，未匹配的非 `/api`、非 `/plugins` 路径回退到 `index.html`（SPA）。`web/dist` 不存在时，`/` 返回一个提示页，说明需要先运行 `pnpm --filter web build`。
+
+## 19. Web 面板（M6）
+
+- 位置：`web/`，pnpm workspace 包。技术栈：Vite + React 19 + TypeScript + Tailwind CSS v4 + Radix 原语（组件代码自己维护，参考 shadcn 的做法）+ `motion` 动画 + TanStack Query + lucide 图标。
+- 风格：现代、简洁，参考 Linear 和 HeroUI 的观感。配色柔和，支持浅色和深色，默认跟随系统。动效统一用 spring 曲线：页面切换、列表进出、数字滚动、抽屉和弹窗都要有过渡，并尊重 `prefers-reduced-motion`。
+- 字体：英文和数字用 Geist，等宽用 Geist Mono，中文用 Noto Sans SC（按 unicode-range 分片），全部打包在本地。
+- 页面：登录、概览（Bot 状态、消息趋势图、插件统计、实时消息流）、插件（列表、启停和重载、由 JSON Schema 生成的配置表单、按群开关、命令列表）、命令速查、日志（实时、按级别和插件过滤、搜索、暂停）、访问控制、机器人（账号、群列表、发送消息）、调试台（聊天界面模拟用户和群）。另有全局 ⌘K 命令面板。
+- 开发时 Vite 把 `/api` 和 WebSocket 代理到 `127.0.0.1:5140`；生产构建产物在 `web/dist`，由 M4 的服务托管。
 
 ## 已知限制
 

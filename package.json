@@ -19,7 +19,9 @@
     "test": "vitest run --configLoader native"
   },
   "dependencies": {
+    "@hono/node-server": "^2.1.6",
     "croner": "^11.0.0",
+    "hono": "^4.13.17",
     "pino": "^10.4.0",
     "ws": "^8.22.2",
     "yaml": "^2.9.1",
