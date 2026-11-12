@@ -419,11 +419,55 @@ export default definePlugin({
 - 重载顺序：先用新版本号 import（若失败，例如语法错误，旧实例继续运行并报告错误）→ 卸载旧实例 → 用新模块执行 setup。依赖它的插件级联重载。
 - 用 `fs.watch(dir, { recursive: true })` 监听变化，防抖 300ms，按文件所在的顶层入口定位到插件。`hotReload: auto` 在非 production 环境开启；手动重载随时可用。
 - 已知代价：ESM 缓存无法清除，每次重载会多留一份旧模块的内存，需在文档中说明。
+- **测试注意**：vitest 的模块运行器不经过 Node 的 loader 钩子，所以热重载的集成测试必须在子进程中用 `node` 直接运行（例如测试里 spawn 一个 node 脚本，再断言它的输出），不能在 vitest 进程内 import 插件。
+
+### 12.1 实现约定（M3）
+
+**组装与启动**
+- `createApp(config, { configPath?, logger? })`：注册内置插件（静态注册），并为 PluginManager 设置插件目录。
+- `app.start()` 的顺序：打开数据库 → 按依赖拓扑加载插件 → 启动适配器 → 开启热重载监听。`app.stop()` 按相反顺序执行。
+- `app.plugins` 即 PluginManager；`app.storage` 是存储层。
+- 只有提供了 `configPath`，YAML 写回才会生效；没有时（例如测试），全局开关和插件配置的修改只在内存中生效，并记一条 debug 日志。
+
+**状态协调**（reconcile）：PluginManager 的每次变更（enable、disable、reload、updateConfig、热重载）之后，都按拓扑序重新协调一遍：
+- 全局启用且依赖全部 active 的插件，加载它；
+- 依赖不再 active 的插件，卸载它，并把状态记为 `failed`，原因写“依赖 X 未激活”。依赖恢复后会被自动重新加载。
+- 依赖缺失或成环，同样标记为 `failed` 并写明原因。
+
+**插件状态对象**：`{ name, version?, description?, source: 'builtin' | 'file', path?, state: 'loading' | 'active' | 'failed' | 'disabled', error?: string, enabled: boolean, configSchema?: JSONSchema }`。`configSchema` 用 `z.toJSONSchema()` 生成，供 M5 面板渲染表单。
+
+**插件配置**
+- `manager.updateConfig(name, value)`：先用插件的 zod schema 校验，失败时抛出带路径的错误、不改动任何状态；成功则写回 YAML 的 `plugins.<name>.config`，然后重载该插件。
+- 插件没有声明 `config` schema 时，`ctx.config` 为 `undefined`；此时如果 YAML 里写了 config，记 warn。
+
+**名称与发现**
+- `definePlugin` 中的 `name` 是插件的权威名称，同名插件重复出现时，后发现的那个标记为 `failed`。
+- 热重载通过“入口文件路径 → 插件名”的映射定位插件。
+
+**按群开关与黑白名单**（替换 M2 中的默认钩子）
+- 群的标识 `groupKey` 为 `${platform}:${groupId}`，与具体是哪个机器人账号无关。私聊事件不受按群开关影响。带 groupId 的通知事件同样受按群开关约束。
+- 访问控制表 `access_list(list, subject, key)`：
+  - `list` 取值 `'block' | 'allow'`，`subject` 取值 `'user' | 'group'`，`key` 为 `${platform}:${id}`。
+  - block 中的用户或群，事件一律丢弃。
+  - allow 列表按维度分别生效：allow-user 非空时，只有列表中的用户能通过；allow-group 非空时，群事件只有列表中的群能通过（私聊不受这个维度影响）。
+  - 超管永远放行。
+- 两张表在启动时加载到内存，写入时同步更新，因此钩子可以同步判断。
+
+**空闲判定**：App 记录正在分发中的事件。`app.whenIdle()` 在“所有分发都已结束，或者仅剩阻塞在 prompt 上的处理器”时 resolve。测试辅助的 `say()` 依靠它确定性地拿到机器人的回复，包括多轮对话中的回复。
+
+**`createTestApp`**（`asabot/testing`）：
+```ts
+const t = await createTestApp({ plugins?: PluginDefinition[], pluginDirs?: string[], config?: DeepPartial<Config> })
+const replies = await t.say('/echo hi', { group?: '10', user?: '20', role?: 'admin', superuser?: boolean })  // 返回这条消息触发的发送内容（plainText 或段数组）
+t.app; t.mock; await t.dispose()
+```
+- 底层走 MockOneBot 和真实的 WS，数据库用临时目录。
+- `dispose` 时清理所有资源：app、mock 和临时目录。
 
 ## 13. 存储
 
 - 数据库文件 `data/asabot.db`，开启 WAL。
-- 框架表：`kv(plugin, key, value, expires_at)`、`migrations(plugin, version)`、`plugin_group_state(plugin, group_key, enabled)`、`access_list(kind, user_key)`。
+- 框架表：`kv(plugin, key, value, expires_at)`、`migrations(plugin, version)`、`plugin_group_state(plugin, group_key, enabled)`、`access_list(list, subject, key)`。框架表结构本身也通过迁移管理，owner 为 `core`。
 - KV 过期：读取时惰性删除，另有定期清扫。
 - 插件代码是受信任的进程内代码，`ctx.db` 直接暴露句柄，命名规范只是约定。
 
@@ -480,7 +524,8 @@ export default definePlugin({
 | M0 | 脚手架（package.json 自引用 exports、tsconfig、biome、vitest、scripts）；配置加载（schema、插值、`.env`）；logger；duration 工具；`main.ts` 骨架（信号处理）；`asabot.config.example.yaml` | `node src/main.ts` 用示例配置能启动并打印启动日志；配置错误时给出路径化报错 |
 | M1 | 消息模型、seg、CQ 码；统一事件、Session（send/reply）；Bot 接口与注册表；Adapter 接口；OneBot 正向 WS 适配器（含重连、活性检测、API 封装）；MockOneBot | 连上 MockOneBot 后，`bot.online` 触发；收到群消息时观察者拿到正确的 Session；`session.reply` 发出了正确的 `send_group_msg`；断线后自动重连 |
 | M2 | 分发管线（过滤、观察者、中间件、prompt、命令、匹配器）；命令系统；权限；冷却；错误隔离与 abort | 第 16 节中与管线、命令、prompt、权限相关的测试通过 |
-| M3 | 插件系统（definePlugin、Context、PluginManager、依赖顺序、按群开关）；热重载；存储（KV、迁移、状态表）；定时任务；YAML 写回；内置插件 help、status、admin；示例插件 `plugins/echo.ts`、`plugins/guess.ts`；`createTestApp`；README（快速开始与插件开发指南） | 端到端测试通过；手动修改示例插件后自动重载生效 |
+| M3a | 插件系统（definePlugin、Context、PluginManager、状态协调、按群开关和黑白名单）；热重载；存储（KV、迁移、状态表）；定时任务；YAML 写回；`whenIdle`；`createTestApp` | 子进程中的热重载测试通过；插件隔离和资源回收测试通过 |
+| M3b | 内置插件 help、status、admin；示例插件 `plugins/echo.ts`、`plugins/guess.ts`；README（快速开始与插件开发指南）；端到端测试 | 用 createTestApp 加载示例插件的端到端测试通过；手动修改示例插件后自动重载生效 |
 | M4 | 反向 WS（多账号，校验 X-Self-ID 和 token）；每个账号独立的发送队列 | — |
 | M5 | Hono 服务：对外 API（`POST /api/v1/send`、`GET /api/v1/bots`）、面板后端、日志 WS 推送、`ctx.route` | — |
 | M6 | React + Vite + shadcn/ui + Tailwind 面板 | — |

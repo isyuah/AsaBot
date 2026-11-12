@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      croner:
+        specifier: ^11.0.0
+        version: 11.0.0
       pino:
         specifier: ^10.4.0
         version: 10.4.0
@@ -389,6 +392,10 @@ packages:
 
   colorette@2.0.20:
     resolution: {integrity: sha512-IfEDxwoWIjkeXL1eXcDiow4UbKjhLdq6/EuSVR9GMN7KVH3r9gQ83e73hsz1Nd1T3ijd5xv1wcWRYO+D6kCI2w==}
+
+  croner@11.0.0:
+    resolution: {integrity: sha512-T17ADjdttrVToyzLpLq9Xb9xzcMwpQ/M3Qs9szhh0MVNTbv6NWQ9OFYa2qlzPYXFMn+uoDlnW1IpIv6cAvFtyA==}
+    engines: {node: '>=18.0'}
 
   dateformat@4.6.3:
     resolution: {integrity: sha512-2P0p0pFGzHS5EMnhdxQi7aJN+iMheud0UhG4dlE1DLAlvL8JHjJJTX/CSm4JXwV0Ka5nGk3zC5mcb5bUQUxxMA==}
@@ -939,6 +946,8 @@ snapshots:
   chai@6.3.0: {}
 
   colorette@2.0.20: {}
+
+  croner@11.0.0: {}
 
   dateformat@4.6.3: {}
 
