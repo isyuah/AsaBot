@@ -13,8 +13,9 @@ import type {
   UserInfo,
 } from '../../core/bot.ts'
 import { botActions } from '../../core/bot.ts'
+import { dispatchContext } from '../../core/dispatch/trace.ts'
 import { UnsupportedError } from '../../core/errors.ts'
-import type { BaseEvent, NoticeEvent } from '../../core/event/index.ts'
+import type { BaseEvent, NoticeEvent, RequestEvent } from '../../core/event/index.ts'
 import { createSession } from '../../core/event/index.ts'
 import type { Message, Sendable } from '../../core/message/index.ts'
 import { normalizeSendable, seg } from '../../core/message/index.ts'
@@ -26,6 +27,7 @@ export interface VirtualSend {
   target: string
   message: Message
   messageId: string
+  eventId?: string
 }
 
 export interface VirtualMessageOptions {
@@ -36,6 +38,18 @@ export interface VirtualMessageOptions {
   superuser?: boolean
 }
 
+export interface VirtualAction {
+  action: string
+  params: Record<string, unknown>
+  eventId?: string
+}
+
+export type VirtualRequestInput = RequestEvent extends infer Event
+  ? Event extends RequestEvent
+    ? Omit<Event, keyof BaseEvent | 'approve' | 'reject'> & Pick<Event, 'name'>
+    : never
+  : never
+
 type VirtualNoticeInput<T extends NoticeEvent = NoticeEvent> = T extends NoticeEvent
   ? Omit<T, keyof BaseEvent> & Pick<T, 'name'>
   : never
@@ -44,10 +58,11 @@ export class VirtualBot implements Bot {
   readonly platform = 'virtual'
   readonly selfId: string
   readonly nickname = 'VirtualBot'
-  readonly capabilities: BotCapabilities
+  private readonly defaultCapabilities: BotCapabilities
+  private currentCapabilities: BotCapabilities
   status: Bot['status'] = 'online'
   readonly sends: VirtualSend[] = []
-  readonly actions: { action: string; params: Record<string, unknown> }[] = []
+  readonly actions: VirtualAction[] = []
   readonly sentMessageIds = new LruSet<string>(1000)
   private readonly messages = new Map<string, MessageInfo>()
   private readonly forwards = new Map<string, ForwardMessage[]>()
@@ -56,12 +71,21 @@ export class VirtualBot implements Bot {
   constructor(host: AdapterHost, selfId: string, capabilities: Partial<BotCapabilities> = {}) {
     this.host = host
     this.selfId = selfId
-    this.capabilities = {
+    this.defaultCapabilities = {
       segments: neutralSegments,
       textStyles: ['bold', 'italic', 'underline', 'strike', 'code', 'spoiler'],
       actions: [...botActions, 'getAvatarUrl'],
       ...capabilities,
     }
+    this.currentCapabilities = this.defaultCapabilities
+  }
+
+  get capabilities(): BotCapabilities {
+    return this.currentCapabilities
+  }
+
+  setCapabilities(capabilities?: Partial<BotCapabilities>): void {
+    this.currentCapabilities = { ...this.defaultCapabilities, ...capabilities }
   }
 
   private assertAction(action: string): void {
@@ -88,9 +112,20 @@ export class VirtualBot implements Bot {
     return this.record(type, target, message)
   }
 
-  private record(type: 'private' | 'group', target: string, message: Message): SendResult {
-    const messageId = String(this.sends.length + 1)
-    this.sends.push({ type, target, message, messageId })
+  private record(
+    type: 'private' | 'group',
+    target: string,
+    message: Message,
+    messageId = String(this.sends.length + 1),
+  ): SendResult {
+    const context = dispatchContext.getStore()
+    this.sends.push({
+      type,
+      target,
+      message,
+      messageId,
+      ...(context?.active.value ? { eventId: context.eventId } : {}),
+    })
     this.messages.set(messageId, {
       messageId,
       messageType: type,
@@ -122,6 +157,11 @@ export class VirtualBot implements Bot {
     this.messages.set(message.messageId, message)
   }
 
+  recordAction(action: string, params: Record<string, unknown>): void {
+    const context = dispatchContext.getStore()
+    this.actions.push({ action, params, ...(context?.active.value ? { eventId: context.eventId } : {}) })
+  }
+
   async getMessage(messageId: string): Promise<MessageInfo> {
     this.assertAction('getMessage')
     const message = this.messages.get(messageId)
@@ -141,8 +181,9 @@ export class VirtualBot implements Bot {
       if (!Array.isArray(message)) return message.sent
       messages.push({ userId: node.userId, nickname: node.nickname, message })
     }
-    const result = this.record(target.type, target.id, [seg.forward(String(this.sends.length + 1))])
-    this.forwards.set(result.messageId, messages)
+    const forwardId = String(this.sends.length + 1)
+    const result = this.record(target.type, target.id, [seg.forward(forwardId)], forwardId)
+    this.forwards.set(forwardId, messages)
     return result
   }
 
@@ -155,28 +196,25 @@ export class VirtualBot implements Bot {
 
   async getGroupMembers(groupId: string): Promise<GroupMemberInfo[]> {
     this.assertAction('getGroupMembers')
-    this.actions.push({ action: 'getGroupMembers', params: { groupId } })
+    this.recordAction('getGroupMembers', { groupId })
     return []
   }
   async muteMember(groupId: string, userId: string, duration: number): Promise<void> {
     this.assertAction('muteMember')
-    this.actions.push({ action: 'muteMember', params: { groupId, userId, duration } })
+    this.recordAction('muteMember', { groupId, userId, duration })
   }
   async kickMember(groupId: string, userId: string, options?: { rejectRequest?: boolean }): Promise<void> {
     this.assertAction('kickMember')
-    this.actions.push({
-      action: 'kickMember',
-      params: { groupId, userId, ...(options === undefined ? {} : { options }) },
-    })
+    this.recordAction('kickMember', { groupId, userId, ...(options === undefined ? {} : { options }) })
   }
   async setMemberCard(groupId: string, userId: string, card: string): Promise<void> {
     this.assertAction('setMemberCard')
-    this.actions.push({ action: 'setMemberCard', params: { groupId, userId, card } })
+    this.recordAction('setMemberCard', { groupId, userId, card })
   }
 
   async deleteMessage(messageId: string): Promise<void> {
     this.assertAction('deleteMessage')
-    this.actions.push({ action: 'deleteMessage', params: { messageId } })
+    this.recordAction('deleteMessage', { messageId })
     this.messages.delete(messageId)
   }
   async getSelf(): Promise<UserInfo> {
@@ -197,7 +235,7 @@ export class VirtualBot implements Bot {
   }
   async call(action: string, params?: Record<string, unknown>): Promise<unknown> {
     this.assertAction('call')
-    this.actions.push({ action, params: params ?? {} })
+    this.recordAction(action, params ?? {})
     return {}
   }
 
@@ -242,42 +280,14 @@ export class VirtualAdapter implements Adapter {
 
   async reconfigure(_config: unknown): Promise<void> {}
 
-  receive(content: string | Message, options: VirtualMessageOptions): Promise<VirtualSend[]> {
+  run<T>(run: () => Promise<T>, capabilities?: Partial<BotCapabilities>): Promise<T> {
     const work = this.queue.then(async () => {
-      const start = this.bot.sends.length
-      const id = randomUUID()
-      const session = createSession(
-        {
-          id,
-          platform: this.platform,
-          selfId: this.bot.selfId,
-          time: Date.now(),
-          raw: undefined,
-          bot: this.bot,
-          messageId: id,
-          userId: options.user,
-          message: typeof content === 'string' ? [seg.text(content)] : content,
-          sender: { userId: options.user, nickname: options.nickname ?? options.user, role: options.role },
-          isSuperuser: options.superuser ?? this.host.isSuperuser(options.user),
-          sentMessageIds: this.bot.sentMessageIds,
-          ...(options.group == null
-            ? { messageType: 'private' as const }
-            : { messageType: 'group' as const, groupId: options.group }),
-        },
-        this.host.sessionServices,
-      )
-      this.bot.rememberMessage({
-        messageId: session.messageId,
-        messageType: session.messageType,
-        userId: session.userId,
-        ...(session.groupId === undefined ? {} : { groupId: session.groupId }),
-        time: session.time,
-        message: session.message,
-        sender: session.sender,
-      })
-      this.host.emit(session)
-      await this.host.whenIdle()
-      return this.bot.sends.slice(start)
+      this.bot.setCapabilities(capabilities)
+      try {
+        return await run()
+      } finally {
+        this.bot.setCapabilities()
+      }
     })
     this.queue = work.then(
       () => undefined,
@@ -288,10 +298,55 @@ export class VirtualAdapter implements Adapter {
     return work
   }
 
-  async emitNotice(input: VirtualNoticeInput): Promise<void> {
+  receive(content: string | Message, options: VirtualMessageOptions): Promise<VirtualSend[]> {
+    return this.run(async () => (await this.dispatchMessage(content, options)).sends)
+  }
+
+  async dispatchMessage(
+    content: string | Message,
+    options: VirtualMessageOptions,
+  ): Promise<{ messageId: string; eventId: string; sends: VirtualSend[] }> {
+    const start = this.bot.sends.length
+    const id = randomUUID()
+    const session = createSession(
+      {
+        id,
+        platform: this.platform,
+        selfId: this.bot.selfId,
+        time: Date.now(),
+        raw: undefined,
+        bot: this.bot,
+        messageId: id,
+        userId: options.user,
+        message: typeof content === 'string' ? [seg.text(content)] : content,
+        sender: { userId: options.user, nickname: options.nickname ?? options.user, role: options.role },
+        isSuperuser: options.superuser ?? this.host.isSuperuser(options.user),
+        sentMessageIds: this.bot.sentMessageIds,
+        ...(options.group == null
+          ? { messageType: 'private' as const }
+          : { messageType: 'group' as const, groupId: options.group }),
+      },
+      this.host.sessionServices,
+    )
+    this.bot.rememberMessage({
+      messageId: session.messageId,
+      messageType: session.messageType,
+      userId: session.userId,
+      ...(session.groupId === undefined ? {} : { groupId: session.groupId }),
+      time: session.time,
+      message: session.message,
+      sender: session.sender,
+    })
+    this.host.emit(session)
+    await this.host.whenIdle()
+    return { messageId: session.messageId, eventId: session.id, sends: this.bot.sends.slice(start) }
+  }
+
+  async emitNotice(input: VirtualNoticeInput): Promise<string> {
+    const id = randomUUID()
     this.host.emit({
       ...input,
-      id: randomUUID(),
+      id,
       platform: this.platform,
       selfId: this.bot.selfId,
       time: Date.now(),
@@ -300,5 +355,33 @@ export class VirtualAdapter implements Adapter {
       kind: 'notice',
     })
     await this.host.whenIdle()
+    return id
+  }
+
+  async emitRequest(input: VirtualRequestInput): Promise<string> {
+    const id = randomUUID()
+    const params = () => ({
+      name: input.name,
+      userId: input.userId,
+      ...('groupId' in input ? { groupId: input.groupId } : {}),
+    })
+    this.host.emit({
+      ...input,
+      id,
+      platform: this.platform,
+      selfId: this.bot.selfId,
+      time: Date.now(),
+      raw: undefined,
+      bot: this.bot,
+      kind: 'request',
+      approve: async (remark?: string) => {
+        this.bot.recordAction('approve', { ...params(), ...(remark === undefined ? {} : { remark }) })
+      },
+      reject: async (reason?: string) => {
+        this.bot.recordAction('reject', { ...params(), ...(reason === undefined ? {} : { reason }) })
+      },
+    })
+    await this.host.whenIdle()
+    return id
   }
 }

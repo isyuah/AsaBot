@@ -35,7 +35,7 @@ import { lowerMessage } from './message/lower.ts'
 import { PluginManager } from './plugin/manager.ts'
 import type { PackageOptions } from './plugin/packages.ts'
 import { TaskCoordinator } from './plugin/tasks.ts'
-import type { PluginStateEvent } from './plugin/types.ts'
+import type { PanelPage, PluginStateEvent } from './plugin/types.ts'
 import { Storage } from './storage/index.ts'
 import { type Target, targetSchema } from './target.ts'
 
@@ -108,6 +108,11 @@ export class App implements AdapterHost {
   private readonly upgrades = new Map<string, UpgradeHandler>()
   private readonly untrackedBots = new WeakSet<Bot>()
   private readonly routes = new Map<string, Hono>()
+  private readonly panelRoutes = new Map<string, Hono>()
+  private readonly panelPages = new Map<string, PanelPage>()
+  private readonly panelSubscribers = new Set<
+    (event: { plugin: string; topic: string; data: unknown }) => void
+  >()
   private readonly dispatchSubscribers = new Set<(event: DispatchEvent) => void>()
   private readonly shutdown = new AbortController()
   private state: AppState = 'created'
@@ -229,6 +234,46 @@ export class App implements AdapterHost {
 
   getPluginRoute(name: string): Hono | undefined {
     return this.routes.get(name)
+  }
+
+  setPanelRoute(name: string, route: Hono): () => void {
+    this.panelRoutes.set(name, route)
+    return () => {
+      if (this.panelRoutes.get(name) === route) this.panelRoutes.delete(name)
+    }
+  }
+
+  getPanelRoute(name: string): Hono | undefined {
+    return this.panelRoutes.get(name)
+  }
+
+  setPanelPage(name: string, page: PanelPage): () => void {
+    if (this.panelPages.has(name)) throw new Error(`Plugin "${name}" already has a panel page`)
+    this.panelPages.set(name, page)
+    return () => {
+      if (this.panelPages.get(name) === page) this.panelPages.delete(name)
+    }
+  }
+
+  getPanelPage(name: string): PanelPage | undefined {
+    return this.panelPages.get(name)
+  }
+
+  subscribePanelEvents(
+    subscriber: (event: { plugin: string; topic: string; data: unknown }) => void,
+  ): () => void {
+    this.panelSubscribers.add(subscriber)
+    return () => this.panelSubscribers.delete(subscriber)
+  }
+
+  pushPanelEvent(plugin: string, topic: string, data: unknown): void {
+    for (const subscriber of this.panelSubscribers) {
+      try {
+        subscriber({ plugin, topic, data })
+      } catch (error) {
+        this.logger.error({ err: error, plugin, topic }, 'Panel event subscriber failed')
+      }
+    }
   }
 
   useAdapter(adapter: Adapter): void {

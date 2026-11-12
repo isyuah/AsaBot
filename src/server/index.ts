@@ -22,12 +22,15 @@ import type { PackageOperation } from '../core/plugin/packages.ts'
 import { ManagementError } from '../core/plugin/upload.ts'
 import { constantTimeEqual } from '../core/utils/security.ts'
 import { PanelAuth } from './auth.ts'
+import { Groups } from './groups.ts'
 import { Playground } from './playground.ts'
+import { isPluginPageName, pluginPageFile, unsafePluginPageUrl } from './plugin-pages.ts'
 import {
   accessSchema,
   packageInstallSchema,
   packageNameSchema,
   packageUninstallSchema,
+  playgroundEventSchema,
   playgroundSchema,
   purgeSchema,
   sendSchema,
@@ -105,11 +108,35 @@ function configSecrets(value: unknown, key = ''): string[] {
   return []
 }
 
-async function body<T extends z.ZodType>(c: ServerContext, schema: T): Promise<z.output<T>> {
+async function body<T extends z.ZodType>(
+  c: ServerContext,
+  schema: T,
+  maxBytes?: number,
+): Promise<z.output<T>> {
   let value: unknown
   try {
-    value = await c.req.json()
-  } catch {
+    if (maxBytes === undefined) value = await c.req.json()
+    else {
+      if (Number(c.req.header('content-length') ?? 0) > maxBytes)
+        throw new HttpError(400, 'BAD_REQUEST', 'Request exceeds 2 MB')
+      const reader = c.req.raw.body?.getReader()
+      if (!reader) throw new HttpError(400, 'BAD_REQUEST', 'Invalid JSON')
+      const chunks: Uint8Array[] = []
+      let size = 0
+      for (;;) {
+        const part = await reader.read()
+        if (part.done) break
+        size += part.value.length
+        if (size > maxBytes) {
+          await reader.cancel()
+          throw new HttpError(400, 'BAD_REQUEST', 'Request exceeds 2 MB')
+        }
+        chunks.push(part.value)
+      }
+      value = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    }
+  } catch (error) {
+    if (error instanceof HttpError) throw error
     throw new HttpError(400, 'BAD_REQUEST', 'Invalid JSON')
   }
   const result = schema.safeParse(value)
@@ -185,6 +212,7 @@ export class HttpServer implements ServerService {
   private readonly auth = new PanelAuth()
   private readonly playground: Playground
   private readonly settings: SettingsService
+  private readonly groups: Groups
   private readonly http: Server
   private readonly websocket = new WebSocketServer({ noServer: true })
   private readonly clientSessions = new Map<WebSocket, string | undefined>()
@@ -192,8 +220,17 @@ export class HttpServer implements ServerService {
     this.app = app
     this.playground = new Playground(app)
     this.settings = new SettingsService(app)
+    this.groups = new Groups(app)
     const routes = this.routes()
-    this.http = createServer(getRequestListener(routes.fetch))
+    const listener = getRequestListener(routes.fetch)
+    this.http = createServer((request, response) => {
+      if (unsafePluginPageUrl(request.url ?? '/')) {
+        response.writeHead(404, { 'content-type': 'application/json' })
+        response.end(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Not found' } }))
+        return
+      }
+      listener(request, response)
+    })
     if (app.config.server.panelPassword || app.setupCode) {
       app.registerUpgrade('/api/panel/ws', (request, socket, head) => {
         if (this.app.setupCode || !this.auth.authenticated(request.headers.cookie))
@@ -308,6 +345,27 @@ export class HttpServer implements ServerService {
     routes.all('/plugins/:name', forwardPlugin)
     routes.all('/plugins/:name/*', forwardPlugin)
     if (this.app.config.server.panelPassword || this.app.setupCode) {
+      routes.use('/plugin-pages/*', async (_c, next) => {
+        if (!this.app.config.server.panelPassword) throw new HttpError(404, 'NOT_FOUND', 'Not found')
+        await next()
+      })
+      const page = async (c: ServerContext, next: () => Promise<void>): Promise<Response | undefined> => {
+        const name = c.req.param('name') ?? ''
+        if (name.startsWith('_')) {
+          await next()
+          return undefined
+        }
+        if (!isPluginPageName(name)) throw new HttpError(404, 'NOT_FOUND', 'Not found')
+        const config = this.app.getPanelPage(name)
+        if (!config) throw new HttpError(404, 'NOT_FOUND', 'Not found')
+        const raw = (c.env.incoming.url ?? '').split('?', 1)[0] ?? ''
+        const path = decodeURIComponent(raw).slice('/plugin-pages/'.length).split('/').slice(1).join('/')
+        const response = await pluginPageFile(config, path)
+        if (!response) throw new HttpError(404, 'NOT_FOUND', 'Not found')
+        return response
+      }
+      routes.get('/plugin-pages/:name', page)
+      routes.get('/plugin-pages/:name/*', page)
       const root = fileURLToPath(new URL('../../web/dist', import.meta.url))
       if (existsSync(root)) {
         // Built assets have content hashes in their names, so they can be cached forever. index.html must always be
@@ -325,7 +383,7 @@ export class HttpServer implements ServerService {
           return staticFiles(c, next)
         })
         routes.use('*', async (c, next) => {
-          if (isBackendPath(c.req.path)) return next()
+          if (isBackendPath(c.req.path) || c.req.path.startsWith('/plugin-pages/')) return next()
           return index(c, next)
         })
       } else {
@@ -343,6 +401,8 @@ export class HttpServer implements ServerService {
   private panelRoutes(routes: Hono<Env>): void {
     const panel = new Hono<Env>()
     panel.use('*', async (c, next) => {
+      if (c.req.path.startsWith('/api/panel/ext/') && !this.app.config.server.panelPassword)
+        throw new HttpError(404, 'NOT_FOUND', 'Not found')
       if (this.app.setupCode && c.req.path !== '/api/panel/session' && c.req.path !== '/api/panel/setup')
         throw new HttpError(401, 'UNAUTHORIZED', 'Setup required')
       if (
@@ -397,7 +457,39 @@ export class HttpServer implements ServerService {
       if (range !== '1h' && range !== '24h') throw new HttpError(400, 'BAD_REQUEST', 'Invalid range')
       return c.json(this.app.stats.range(range))
     })
+    const forwardPanelPlugin = (c: ServerContext): Promise<Response> | Response => {
+      const app = this.app.getPanelRoute(c.req.param('name') ?? '')
+      if (!app) throw new HttpError(404, 'NOT_FOUND', 'Plugin route not found')
+      const url = new URL(c.req.url)
+      url.pathname = url.pathname.replace(/^\/api\/panel\/ext\/[^/]+/, '') || '/'
+      return app.fetch(new Request(url, c.req.raw))
+    }
+    panel.all('/ext/:name', forwardPanelPlugin)
+    panel.all('/ext/:name/*', forwardPanelPlugin)
     panel.get('/bots', (c) => c.json(this.app.bots.list().map((bot) => botView(this.app, bot))))
+    panel.get('/groups', async (c) => c.json(await this.groups.list(c.req.query('refresh') === '1')))
+    panel.get('/groups/:groupKey', async (c) => {
+      const groupKey = c.req.param('groupKey')
+      const group = (await this.groups.list()).find((item) => item.groupKey === groupKey)
+      if (!group) throw new HttpError(404, 'NOT_FOUND', 'Group not found')
+      return c.json({
+        group,
+        plugins: this.app.plugins.list().map((plugin) => {
+          const override = this.app.storage.getGroupConfig(plugin.name, groupKey)
+          return {
+            name: plugin.name,
+            enabled: this.app.storage.isGroupEnabled(plugin.name, groupKey),
+            configurable: plugin.configSchema !== undefined,
+            ...(override === undefined ? {} : { override }),
+          }
+        }),
+        commands: this.app.dispatcher.registeredCommands().map((command) => ({
+          path: command.path.join(' '),
+          owner: command.owner,
+          enabled: this.app.storage.isCommandGroupEnabled(command.path.join(' '), groupKey),
+        })),
+      })
+    })
     panel.get('/bots/:platform/:selfId/groups', async (c) => {
       const bot = this.app.getBot(c.req.param('platform'), c.req.param('selfId'))
       if (!bot) throw new HttpError(404, 'NOT_FOUND', 'Bot not found')
@@ -610,7 +702,12 @@ export class HttpServer implements ServerService {
       this.app.logger.level = input.level
       return c.json({ level: this.app.logger.level })
     })
-    panel.post('/playground', async (c) => c.json(await this.playground.run(await body(c, playgroundSchema))))
+    panel.post('/playground', async (c) =>
+      c.json(await this.playground.run(await body(c, playgroundSchema, 2 * 1024 * 1024))),
+    )
+    panel.post('/playground/event', async (c) =>
+      c.json(await this.playground.event(await body(c, playgroundEventSchema, 2 * 1024 * 1024))),
+    )
     panel.get('/ws', () => {
       throw new HttpError(400, 'BAD_REQUEST', 'WebSocket upgrade required')
     })
@@ -687,6 +784,9 @@ export class HttpServer implements ServerService {
       const frame = this.eventFrame(event)
       if (frame) push(frame)
     })
+    const unsubscribePanelEvents = this.app.subscribePanelEvents((event) =>
+      push({ type: 'plugin-event', ...event }),
+    )
     const ping = setInterval(() => {
       if (client.readyState !== WebSocket.OPEN) return
       if (this.auth.authenticated(cookie)) client.ping()
@@ -717,6 +817,7 @@ export class HttpServer implements ServerService {
       unsubscribePackages()
       unsubscribePackageUpdates()
       unsubscribeEvents()
+      unsubscribePanelEvents()
     })
   }
 

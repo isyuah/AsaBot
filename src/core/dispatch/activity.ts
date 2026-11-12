@@ -3,9 +3,9 @@ export class ActivityTracker {
   private readonly waiters = new Set<() => void>()
   private scheduled = false
 
-  begin(): Activity {
+  begin(parent?: Activity): Activity {
     this.active++
-    return new Activity(this)
+    return new Activity(this, parent)
   }
 
   change(delta: number): void {
@@ -31,16 +31,20 @@ export class ActivityTracker {
 
 export class Activity {
   private readonly tracker: ActivityTracker
+  private readonly parent?: Activity
+  private readonly inactiveWaiters = new Set<() => void>()
   private suspended = false
   private finished = false
 
-  constructor(tracker: ActivityTracker) {
+  constructor(tracker: ActivityTracker, parent?: Activity) {
     this.tracker = tracker
+    this.parent = parent
   }
   pause(): void {
     if (this.finished || this.suspended) return
     this.suspended = true
     this.tracker.change(-1)
+    this.resolveInactive()
   }
   resume(): void {
     if (this.finished || !this.suspended) return
@@ -51,6 +55,22 @@ export class Activity {
     if (this.finished) return
     this.finished = true
     if (!this.suspended) this.tracker.change(-1)
+    this.resolveInactive()
+  }
+
+  whenInactive(): Promise<void> {
+    if (this.finished || this.suspended) return Promise.resolve()
+    return new Promise((resolve) => this.inactiveWaiters.add(resolve))
+  }
+
+  async whenBranchInactive(): Promise<void> {
+    await this.whenInactive()
+    await this.parent?.whenBranchInactive()
+  }
+
+  private resolveInactive(): void {
+    for (const resolve of this.inactiveWaiters) resolve()
+    this.inactiveWaiters.clear()
   }
 }
 

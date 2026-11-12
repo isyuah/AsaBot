@@ -184,6 +184,7 @@ export default definePlugin({
 | `ctx.filter(predicate)`、`ctx.platform(...names)` | 只在符合条件的事件中启用注册的处理器 |
 | `ctx.configFor(session)` | 获取当前群合并并校验后的插件配置 |
 | `ctx.route(app => ...)` | 注册插件的 Hono HTTP 路由，插件卸载时回收 |
+| `ctx.panel.page`、`ctx.panel.route`、`ctx.panel.push` | 注册面板页面、受面板认证保护的数据接口和实时事件 |
 | `ctx.cron`、`ctx.interval`、`ctx.timeout` | 注册定时任务 |
 | `ctx.store`、`ctx.db`、`ctx.migrate(steps)` | 插件独立 KV、共享 SQLite 句柄、按插件版本管理的迁移 |
 | `ctx.bot(selfId?)`、`ctx.bots` | 查找在线 Bot、列出 Bot；找不到在线 Bot 时 `ctx.bot()` 抛错 |
@@ -193,6 +194,41 @@ export default definePlugin({
 | `ctx.dataDir`、`ctx.signal`、`ctx.onDispose(fn)` | 插件数据目录、卸载信号、自定义清理函数 |
 
 观察者、命令、中间件、匹配器和定时任务随插件卸载自动回收。事件处理器应配合 `signal` 取消耗时操作；插件代码仍运行在主进程中。
+
+### 插件面板页面
+
+插件可通过 `ctx.panel.page` 声明一个页面目录，通过 `ctx.panel.route` 注册数据接口。页面文件通过 `/plugin-pages/<插件名>/` 公开访问，不要在静态文件中存放敏感数据；需要鉴权的数据通过 `panel.route` 提供。面板启用时，这些接口位于 `/api/panel/ext/<插件名>/`，需要登录，修改请求也遵循面板的 CSRF 校验。
+
+例如，`plugins/dashboard/index.ts`：
+
+```ts
+import { definePlugin } from '@asabot/core'
+
+export default definePlugin({
+  name: 'dashboard',
+  setup(ctx) {
+    ctx.panel.page({ title: '统计', icon: 'chart', root: new URL('./page/', import.meta.url) })
+    ctx.panel.route((app) => app.get('/stats', (c) => c.json({ total: 42 })))
+    // 需要通知页面时：ctx.panel.push('updated', { total: 42 })
+  },
+})
+```
+
+`plugins/dashboard/page/index.html`：
+
+```html
+<!doctype html>
+<meta charset="utf-8">
+<p id="stats"></p>
+<script src="/plugin-pages/_sdk.js"></script>
+<script>
+  asabot.json('/stats').then((stats) => {
+    document.querySelector('#stats').textContent = `总数：${stats.total}`
+  })
+</script>
+```
+
+`entry` 默认为 `index.html`。页面可用 `asabot.on('updated', handler)` 接收 `ctx.panel.push` 推送；SDK 还提供 `asabot.fetch`、`asabot.toast` 和 `asabot.theme`。页面、路由及推送入口随插件卸载失效。
 
 ### 通知与请求事件
 

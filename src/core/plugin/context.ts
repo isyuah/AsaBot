@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
+import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
 import type { Logger } from 'pino'
 import type { Services } from '../../index.ts'
@@ -34,7 +35,7 @@ import { type Target, targetSchema } from '../target.ts'
 import { type Duration, parseDuration } from '../utils/duration.ts'
 import { type PluginDefinition, serviceDependencies } from './definition.ts'
 import { PersistentTasks, type TaskHandle, type TaskHandler } from './tasks.ts'
-import type { PluginStateEvent } from './types.ts'
+import type { PanelPageOptions, PluginStateEvent } from './types.ts'
 
 type Listener = (event: AnyEvent | PluginStateEvent, signal: AbortSignal) => unknown | Promise<unknown>
 type PublicListener = Listener | ((event: never, signal: AbortSignal) => unknown | Promise<unknown>)
@@ -54,7 +55,38 @@ export class Context<Config = undefined> {
   private readonly cleanups: Cleanup[] = []
   private readonly dependencies: ReturnType<typeof serviceDependencies>
   private routeApp?: Hono
+  private panelRouteApp?: Hono
   private disposed = false
+
+  readonly panel = {
+    page: (options: PanelPageOptions): Disposer => {
+      this.assertActive()
+      const remove = this.app.setPanelPage(this.owner, {
+        title: options.title,
+        ...(options.icon === undefined ? {} : { icon: options.icon }),
+        root: options.root instanceof URL ? fileURLToPath(options.root) : options.root,
+        entry: options.entry ?? 'index.html',
+      })
+      this.controller.signal.addEventListener('abort', remove, { once: true })
+      return () => {
+        this.controller.signal.removeEventListener('abort', remove)
+        remove()
+      }
+    },
+    route: (register: (app: Hono) => void): void => {
+      this.assertActive()
+      if (!this.panelRouteApp) {
+        this.panelRouteApp = new Hono()
+        const remove = this.app.setPanelRoute(this.owner, this.panelRouteApp)
+        this.controller.signal.addEventListener('abort', remove, { once: true })
+      }
+      register(this.panelRouteApp)
+    },
+    push: (topic: string, data: unknown): void => {
+      this.assertActive()
+      this.app.pushPanelEvent(this.owner, topic, data)
+    },
+  }
 
   constructor(app: App, name: string, config: Config, dependencies?: PluginDefinition['inject']) {
     this.app = app

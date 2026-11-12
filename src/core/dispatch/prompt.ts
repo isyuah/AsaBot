@@ -1,11 +1,14 @@
 import type { PromptOptions, Session } from '../event/index.ts'
 import type { Sendable } from '../message/index.ts'
 import { parseDuration } from '../utils/duration.ts'
+import type { Activity } from './activity.ts'
 import { scheduleTimeout } from './timer.ts'
-import { dispatchContext } from './trace.ts'
+import { type DispatchContext, dispatchContext } from './trace.ts'
 
 interface Waiter {
   owner: string
+  context?: DispatchContext
+  activity?: Activity
   key: string
   channel: string
   user?: string
@@ -38,6 +41,7 @@ export class PromptManager {
     onWaiting?: () => void,
     onResume?: () => void,
     owner = dispatchContext.getStore()?.plugin ?? 'core',
+    activity?: Activity,
   ): Promise<Session | null> {
     if (signal.aborted) return Promise.reject(signal.reason)
     const timeout = Math.min(
@@ -65,6 +69,8 @@ export class PromptManager {
       }
       const waiter: Waiter = {
         owner,
+        context: dispatchContext.getStore(),
+        activity,
         key,
         channel: session.channelKey,
         ...(user === undefined ? {} : { user }),
@@ -94,7 +100,7 @@ export class PromptManager {
     })
   }
 
-  consume(session: Session): { owner: string } | undefined {
+  consume(session: Session): { owner: string; settled: Promise<void> } | undefined {
     // A user-scoped prompt is more specific than a channel-scoped one, so it gets the message first.
     const candidates = [...this.waiters.values()]
       .filter(
@@ -110,8 +116,17 @@ export class PromptManager {
         waiter.fail(error)
         continue
       }
+      const current = dispatchContext.getStore()
+      if (current) {
+        // Resumed handlers and their enclosing middleware belong to the answer's dispatch.
+        for (let context = waiter.context; context; context = context.parent) {
+          context.eventId = current.eventId
+          context.trace = current.trace
+          context.active = current.active
+        }
+      }
       waiter.finish(session)
-      return { owner: waiter.owner }
+      return { owner: waiter.owner, settled: waiter.activity?.whenBranchInactive() ?? Promise.resolve() }
     }
     return undefined
   }

@@ -1324,7 +1324,7 @@ ctx.panel.push(topic: string, data: unknown)        // 通过面板实时推送�
     - `actions` 是虚拟 Bot 在这次处理中记录的群管理等操作；
     - `traces` 和 `logs` 包含这次请求触发的所有事件。
   - 收发的消息都有 messageId，面板可以引用之前的消息（reply 段），虚拟 Bot 的 `getMessage` 能查到这些消息。
-- **`POST /playground/event { name, user, group?, fields? }`**：模拟通知和请求事件，响应格式同上。
+- **`POST /playground/event { name, user, group?, fields? }`**：模拟通知和请求事件，响应格式同上，只是没有 `incoming`（通知和请求没有消息 ID）。
   - 支持的 name：`notice.member.join`、`notice.member.leave`、`notice.member.mute`、`notice.poke`、`notice.message.recall`、`request.friend`、`request.group.join`、`request.group.invite`。
   - 请求事件被 `approve` / `reject` 时，记入 `actions`。
 - 消息段仍然遵守 E2：图片以 `base64://` 上传，单个请求不超过 2MB。

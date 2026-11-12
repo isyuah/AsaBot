@@ -52,6 +52,7 @@ export function commandView(app: App, command: CommandDefinition) {
 
 export function pluginView(app: App, state: PluginState) {
   const value = app.plugins.getConfig(state.name)
+  const page = app.getPanelPage(state.name)
   let config: unknown
   if (value !== undefined) {
     try {
@@ -69,6 +70,9 @@ export function pluginView(app: App, state: PluginState) {
     ...(state.source === 'package' ? { package: app.plugins.packageInfo(state.name) } : {}),
     commands: app.dispatcher.registeredCommands(state.name).map((item) => commandView(app, item)),
     ...(config === undefined ? {} : { config }),
+    ...(page === undefined
+      ? {}
+      : { page: { title: page.title, ...(page.icon === undefined ? {} : { icon: page.icon }) } }),
   }
 }
 

@@ -13,6 +13,13 @@ export interface AccessEntry {
   key: string
 }
 
+export interface GroupRuleSummary {
+  groupKey: string
+  plugins: number
+  configs: number
+  commands: number
+}
+
 const coreMigrations = [
   `CREATE TABLE kv (plugin TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, expires_at INTEGER,
     PRIMARY KEY (plugin, key));
@@ -240,6 +247,28 @@ export class Storage {
       .filter(([key, enabled]) => !enabled && (JSON.parse(key) as string[])[0] === command)
       .map(([key]) => (JSON.parse(key) as string[])[1] as string)
       .sort()
+  }
+
+  groupRuleSummaries(): GroupRuleSummary[] {
+    const result = new Map<string, GroupRuleSummary>()
+    const add = (groupKey: string, field: 'plugins' | 'configs' | 'commands'): void => {
+      const current = result.get(groupKey) ?? { groupKey, plugins: 0, configs: 0, commands: 0 }
+      current[field] += 1
+      result.set(groupKey, current)
+    }
+    for (const row of this.db.prepare('SELECT group_key FROM plugin_group_state').all())
+      add(String(row.group_key), 'plugins')
+    for (const row of this.db.prepare('SELECT group_key FROM plugin_group_config').all())
+      add(String(row.group_key), 'configs')
+    for (const row of this.db.prepare('SELECT group_key FROM command_group_state').all())
+      add(String(row.group_key), 'commands')
+    return [...result.values()].sort((a, b) => a.groupKey.localeCompare(b.groupKey))
+  }
+
+  groupAccess(groupKey: string): AccessList | undefined {
+    if (this.accessSet('block', 'group').has(groupKey)) return 'block'
+    if (this.accessSet('allow', 'group').has(groupKey)) return 'allow'
+    return undefined
   }
 
   purgePlugin(owner: string): void {

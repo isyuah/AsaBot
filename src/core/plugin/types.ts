@@ -1,6 +1,20 @@
 import type { Bot } from '../bot.ts'
 import type { BaseEvent } from '../event/index.ts'
 
+export interface PanelPageOptions {
+  title: string
+  icon?: string
+  root: URL | string
+  entry?: string
+}
+
+export interface PanelPage {
+  title: string
+  icon?: string
+  root: string
+  entry: string
+}
+
 export interface PluginState {
   name: string
   version?: string

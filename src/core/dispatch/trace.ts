@@ -27,6 +27,7 @@ export interface DispatchContext {
   trace: DispatchTrace
   active: { value: boolean }
   plugin?: string
+  parent?: DispatchContext
 }
 
 export const dispatchContext = new AsyncLocalStorage<DispatchContext | undefined>()

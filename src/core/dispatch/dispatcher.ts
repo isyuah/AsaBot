@@ -129,6 +129,8 @@ export class Dispatcher implements SessionServices, CommandRegistration {
   private readonly prompts: PromptManager
   private readonly activity = new ActivityTracker()
   private readonly warnedOverrideIssues = new Set<string>()
+  private readonly activeTraces = new Map<string, DispatchTrace>()
+  private readonly traceLinkSubscribers = new Set<(eventId: string, relatedEventId: string) => void>()
 
   constructor(config: Config, logger: Logger, shutdown: AbortSignal) {
     this.config = config
@@ -336,6 +338,15 @@ export class Dispatcher implements SessionServices, CommandRegistration {
     return this.activity.whenIdle()
   }
 
+  activeTrace(eventId: string): DispatchTrace | undefined {
+    return this.activeTraces.get(eventId)
+  }
+
+  subscribeTraceLinks(subscriber: (eventId: string, relatedEventId: string) => void): Disposer {
+    this.traceLinkSubscribers.add(subscriber)
+    return () => this.traceLinkSubscribers.delete(subscriber)
+  }
+
   async dispatch(event: DispatchEvent): Promise<void> {
     if (this.shutdown.aborted) return
     if (event.kind === 'internal' || event.kind === 'meta') {
@@ -346,6 +357,10 @@ export class Dispatcher implements SessionServices, CommandRegistration {
       }
       await this.dispatchEvent(event)
       return
+    }
+    const parent = dispatchContext.getStore()
+    if (parent?.active.value) {
+      for (const subscriber of this.traceLinkSubscribers) subscriber(parent.eventId, event.id)
     }
     const trace: DispatchTrace = {
       eventId: event.id,
@@ -360,6 +375,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
       sent: [],
     }
     const active = { value: true }
+    this.activeTraces.set(event.id, trace)
     const started = performance.now()
     await dispatchContext.run({ eventId: event.id, trace, active }, async () => {
       try {
@@ -367,19 +383,23 @@ export class Dispatcher implements SessionServices, CommandRegistration {
       } finally {
         active.value = false
         trace.duration = performance.now() - started
-        await dispatchContext.run(undefined, () =>
-          this.dispatch({
-            id: randomUUID(),
-            platform: event.platform,
-            selfId: event.selfId,
-            time: Date.now(),
-            kind: 'internal',
-            name: 'dispatch.trace',
-            raw: undefined,
-            bot: event.bot,
-            trace,
-          }),
-        )
+        try {
+          await dispatchContext.run(undefined, () =>
+            this.dispatch({
+              id: randomUUID(),
+              platform: event.platform,
+              selfId: event.selfId,
+              time: Date.now(),
+              kind: 'internal',
+              name: 'dispatch.trace',
+              raw: undefined,
+              bot: event.bot,
+              trace,
+            }),
+          )
+        } finally {
+          this.activeTraces.delete(event.id)
+        }
       }
     })
   }
@@ -476,6 +496,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
         if (prompt) {
           const step = this.traceStep('prompt', prompt.owner)
           if (step) step.duration = performance.now() - started
+          await prompt.settled
           return
         }
         if (await this.runCommand(session, parent)) return
@@ -761,6 +782,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
                 activity?.resume()
               },
               owner,
+              activity,
             )
             .then((answer) => (answer === null ? null : this.bindSession(answer, signal, activity, owner))),
         )
@@ -798,7 +820,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
         step = this.traceStep(stage, scope.owner, 'handled', command)
     }
     if (stage !== 'matcher') record()
-    const activity = this.activity.begin()
+    const activity = this.activity.begin(parent)
     parent?.pause()
     setActivity?.(activity)
     const timeout = new AbortController()
@@ -817,13 +839,15 @@ export class Dispatcher implements SessionServices, CommandRegistration {
       signal.addEventListener('abort', onAbort, { once: true })
       if (signal.aborted) onAbort()
     })
+    const current = dispatchContext.getStore()
+    const handlerContext = current ? { ...current, plugin: scope.owner, parent: current } : undefined
     const logError = (error: unknown): void => {
       this.logger[error instanceof SendBlockedError ? 'info' : 'error'](
         {
           err: error,
           plugin: scope.owner,
           event: event.name,
-          eventId: event.id,
+          eventId: handlerContext?.active.value ? handlerContext.eventId : event.id,
           ...(command === undefined ? {} : { command }),
         },
         message,
@@ -832,9 +856,8 @@ export class Dispatcher implements SessionServices, CommandRegistration {
     let finished = false
     const work = Promise.resolve().then(() => {
       signal.throwIfAborted()
-      const current = dispatchContext.getStore()
-      return current
-        ? dispatchContext.run({ ...current, plugin: scope.owner }, () => handler(view, signal, step, record))
+      return handlerContext
+        ? dispatchContext.run(handlerContext, () => handler(view, signal, step, record))
         : handler(view, signal, step, record)
     })
     void work.catch((error: unknown) => {
@@ -846,7 +869,10 @@ export class Dispatcher implements SessionServices, CommandRegistration {
       if (isCancellation(error, signal)) {
         if (timeout.signal.aborted && signal.reason === timeout.signal.reason) {
           if (step) step.outcome = 'timeout'
-          this.logger.warn({ plugin: scope.owner, event: event.name, eventId: event.id }, '处理器超时')
+          this.logger.warn(
+            { plugin: scope.owner, event: event.name, eventId: handlerContext?.eventId ?? event.id },
+            '处理器超时',
+          )
         }
       } else {
         if (step) {
@@ -856,10 +882,15 @@ export class Dispatcher implements SessionServices, CommandRegistration {
         logError(error)
         if (onError !== undefined && !(error instanceof SendBlockedError)) {
           try {
-            await onError(view)
+            await dispatchContext.run(handlerContext, () => onError(view))
           } catch (replyError) {
             this.logger[replyError instanceof SendBlockedError ? 'info' : 'error'](
-              { err: replyError, plugin: scope.owner, event: event.name, eventId: event.id },
+              {
+                err: replyError,
+                plugin: scope.owner,
+                event: event.name,
+                eventId: handlerContext?.eventId ?? event.id,
+              },
               'Failed to send error reply',
             )
           }

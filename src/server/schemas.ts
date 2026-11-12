@@ -63,21 +63,63 @@ export const sendSchema = z
   })
   .strict()
 
+const playgroundUser = z.object({
+  id: z.string().min(1),
+  nickname: z.string().optional(),
+  role: z.enum(['owner', 'admin', 'member']).optional(),
+  superuser: z.boolean().optional(),
+})
+
+const capabilities = z
+  .object({
+    segments: z.array(z.string()).optional(),
+    textStyles: z.array(z.enum(['bold', 'italic', 'underline', 'strike', 'code', 'spoiler'])).optional(),
+    actions: z.array(z.string()).optional(),
+  })
+  .strict()
+
 export const playgroundSchema = z
   .object({
     text: z.string().optional(),
     message: z.array(segment).optional(),
-    user: z.object({
-      id: z.string().min(1),
-      nickname: z.string().optional(),
-      role: z.enum(['owner', 'admin', 'member']).optional(),
-      superuser: z.boolean().optional(),
-    }),
+    user: playgroundUser,
     group: z.string().min(1).nullable().optional(),
+    capabilities: capabilities.optional(),
   })
   .refine((value) => value.text !== undefined || value.message !== undefined, {
     message: 'text or message is required',
   })
+
+export const playgroundEventSchema = z
+  .object({
+    name: z.enum([
+      'notice.member.join',
+      'notice.member.leave',
+      'notice.member.mute',
+      'notice.poke',
+      'notice.message.recall',
+      'request.friend',
+      'request.group.join',
+      'request.group.invite',
+    ]),
+    user: playgroundUser,
+    group: z.string().min(1).nullable().optional(),
+    fields: z
+      .object({
+        userId: z.string().min(1).optional(),
+        groupId: z.string().min(1).optional(),
+        operatorId: z.string().min(1).optional(),
+        joinType: z.string().optional(),
+        reason: z.string().optional(),
+        duration: z.number().nonnegative().optional(),
+        targetId: z.string().min(1).optional(),
+        messageId: z.string().min(1).optional(),
+        comment: z.string().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
 
 export const accessSchema = z.object({
   list: z.enum(['block', 'allow']),
