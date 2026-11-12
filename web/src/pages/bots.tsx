@@ -12,6 +12,7 @@ import { Badge, Card, EmptyState, PageHeader, Skeleton } from '../components/ui/
 import { api } from '../lib/api.ts'
 import { formatNumber } from '../lib/format.ts'
 import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
+import { isValidId } from '../lib/platform.ts'
 import type { BotView, Target } from '../lib/types.ts'
 
 const statusMeta = {
@@ -34,7 +35,7 @@ export function BotsPage() {
           <EmptyState
             icon={<Radio />}
             title="还没有机器人连接"
-            description="在配置文件的 onebot11.connections 中添加 NapCat 的 WebSocket 地址，或使用反向 WS 让 NapCat 主动连接。"
+            description="在配置文件的 adapters 段配置适配器。以 OneBot 11 为例：可以填写正向 WS 地址让 AsaBot 主动连接，也可以开启反向 WS，让 OneBot 实现连过来。"
           />
         </Card>
       ) : (
@@ -58,7 +59,7 @@ function BotCard({ bot, onSend }: { bot: BotView; onSend: (target?: Target) => v
     <Card className="overflow-hidden">
       <div className="flex flex-wrap items-center gap-4 p-5">
         <div className="relative">
-          <Avatar id={bot.selfId} name={bot.nickname} platform={bot.platform} size={48} />
+          <Avatar id={bot.selfId} name={bot.nickname} src={bot.avatar} size={48} />
           <span className="absolute -right-0.5 -bottom-0.5 rounded-full border-2 border-surface">
             <span
               className={`block size-2.5 rounded-full ${bot.status === 'online' ? 'bg-success' : bot.status === 'connecting' ? 'bg-warning' : 'bg-danger'}`}
@@ -77,7 +78,7 @@ function BotCard({ bot, onSend }: { bot: BotView; onSend: (target?: Target) => v
             <span>{bot.platform}</span>
             <span className="flex items-center gap-1">
               <Link2 className="size-3.5" />
-              {bot.connection === 'forward' ? '正向 WS' : '反向 WS'}
+              {bot.connection}
               {bot.url && <span className="font-mono">{bot.url}</span>}
             </span>
           </div>
@@ -212,7 +213,7 @@ function SendDialog({
       onClose()
     },
   })
-  const valid = /^\d+$/.test(id.trim()) && text.trim().length > 0
+  const valid = isValidId(id) && text.trim().length > 0
   const submit = (event?: FormEvent) => {
     event?.preventDefault()
     if (!state || !valid) return
@@ -250,7 +251,7 @@ function SendDialog({
             { value: 'private', label: '私聊' },
           ]}
         />
-        <Field label={type === 'group' ? '群号' : 'QQ 号'} htmlFor="send-id">
+        <Field label={type === 'group' ? '群 ID' : '用户 ID'} htmlFor="send-id">
           <Input
             id="send-id"
             inputMode="numeric"

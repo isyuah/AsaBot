@@ -104,7 +104,7 @@ export function PlaygroundPage() {
     <>
       <PageHeader
         title="调试台"
-        description="模拟用户给机器人发消息，消息会走真实的插件和命令，但不会发到 QQ"
+        description="模拟用户给机器人发消息，消息会走真实的插件和命令，但不会发到任何聊天平台"
       />
       <div className="grid gap-3 lg:grid-cols-[300px_1fr]">
         <div className="space-y-3">
@@ -385,7 +385,7 @@ function Segments({ message }: { message: Segment[] }) {
           case 'at':
             return (
               <span key={key} className="mx-0.5 rounded bg-accent-soft px-1 text-accent-soft-fg">
-                @{segment.data.qq === 'all' ? '全体成员' : String(segment.data.qq)}
+                @{segment.data.id === 'all' ? '全体成员' : String(segment.data.id)}
               </span>
             )
           case 'image': {

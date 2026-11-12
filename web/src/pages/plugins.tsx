@@ -21,9 +21,11 @@ import { Sheet } from '../components/ui/dialog.tsx'
 import { Input } from '../components/ui/input.tsx'
 import { Menu, MenuItem, Segmented, TabPanel, Tabs, Tooltip } from '../components/ui/misc.tsx'
 import { Badge, Card, EmptyState, PageHeader, Skeleton, type Tone } from '../components/ui/primitives.tsx'
+import { Select } from '../components/ui/select.tsx'
 import { Switch } from '../components/ui/switch.tsx'
 import { ApiError, api } from '../lib/api.ts'
 import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
+import { isValidId, usePlatforms } from '../lib/platform.ts'
 import { navigate } from '../lib/router.tsx'
 import type { PluginStateName, PluginView } from '../lib/types.ts'
 import { playgroundDraft } from '../lib/ui-state.ts'
@@ -538,7 +540,9 @@ function GroupsTab({ plugin }: { plugin: PluginView }) {
     queryFn: () => api.pluginGroups(plugin.name),
   })
   const [groupId, setGroupId] = useState('')
-  const [platform] = useState('onebot11')
+  const platforms = usePlatforms()
+  const [platform, setPlatform] = useState('')
+  const effectivePlatform = platform || platforms[0] || ''
   const set = useMutation({
     mutationFn: ({ groupKey, enabled }: { groupKey: string; enabled: boolean }) =>
       api.setPluginGroup(plugin.name, groupKey, enabled),
@@ -564,14 +568,23 @@ function GroupsTab({ plugin }: { plugin: PluginView }) {
         onSubmit={(event) => {
           event.preventDefault()
           const id = groupId.trim()
-          if (!/^\d+$/.test(id)) return toast.error('请输入数字群号')
-          set.mutate({ groupKey: `${platform}:${id}`, enabled: false })
+          if (!isValidId(id)) return toast.error('请输入群 ID')
+          if (!effectivePlatform) return toast.error('没有已连接的平台，无法确定群所属的平台')
+          set.mutate({ groupKey: `${effectivePlatform}:${id}`, enabled: false })
           setGroupId('')
         }}
       >
+        {platforms.length > 1 && (
+          <Select
+            aria-label="平台"
+            value={effectivePlatform}
+            onValueChange={setPlatform}
+            options={platforms.map((item) => ({ value: item, label: item }))}
+          />
+        )}
         <Input
           icon={<Users />}
-          placeholder="群号，例如 1021765523"
+          placeholder="群 ID"
           value={groupId}
           onChange={(event) => setGroupId(event.target.value)}
           className="flex-1"

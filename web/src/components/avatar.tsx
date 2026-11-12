@@ -15,22 +15,24 @@ function hash(value: string): number {
   return result
 }
 
-/** QQ avatar for numeric IDs on OneBot, falling back to a soft colored initial. */
+/**
+ * Shows the avatar URL supplied by the backend (adapters know where their platform keeps avatars), falling back to a
+ * soft colored initial. The panel itself never builds platform-specific avatar URLs.
+ */
 export function Avatar({
   id,
   name,
-  platform,
+  src,
   size = 32,
   className,
 }: {
   id: string
   name?: string
-  platform?: string
+  src?: string
   size?: number
   className?: string
 }) {
   const [failed, setFailed] = useState(false)
-  const useQQ = platform === 'onebot11' && /^\d{5,}$/.test(id) && !failed
   const initial = (name?.trim() || id).slice(0, 1).toUpperCase()
   return (
     <span
@@ -41,9 +43,9 @@ export function Avatar({
       )}
       style={{ width: size, height: size, fontSize: size * 0.4 }}
     >
-      {useQQ ? (
+      {src && !failed ? (
         <img
-          src={`https://q1.qlogo.cn/g?b=qq&nk=${id}&s=100`}
+          src={src}
           alt=""
           loading="lazy"
           referrerPolicy="no-referrer"

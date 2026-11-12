@@ -7,8 +7,10 @@ export interface BotView {
   selfId: string
   nickname?: string
   status: BotStatus
-  connection: 'forward' | 'reverse'
+  /** Display text supplied by the adapter, e.g. '正向 WS'. */
+  connection: string
   url?: string
+  avatar?: string
 }
 
 export type PluginStateName = 'loading' | 'active' | 'failed' | 'disabled'
@@ -133,6 +135,7 @@ export interface LiveMessage {
   channel: Target
   userId?: string
   nickname?: string
+  avatar?: string
   preview: string
   time: number
 }

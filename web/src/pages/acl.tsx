@@ -10,6 +10,7 @@ import { Segmented } from '../components/ui/misc.tsx'
 import { Card, CardHeader, EmptyState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
 import { api } from '../lib/api.ts'
 import { softSpring } from '../lib/motion.ts'
+import { isValidId, usePlatforms } from '../lib/platform.ts'
 import type { AccessEntry, AccessList, AccessSubject } from '../lib/types.ts'
 
 const sameEntry = (a: AccessEntry, b: AccessEntry) =>
@@ -159,13 +160,15 @@ function AddEntryDialog({
 }) {
   const [subject, setSubject] = useState<AccessSubject>('user')
   const [id, setId] = useState('')
-  const [platform, setPlatform] = useState('onebot11')
-  const valid = /^\d+$/.test(id.trim()) && platform.trim().length > 0
+  const platforms = usePlatforms()
+  const [platform, setPlatform] = useState('')
+  const effectivePlatform = platform || platforms[0] || ''
+  const valid = isValidId(id) && effectivePlatform.trim().length > 0
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (!list || !valid) return
-    onSubmit({ list, subject, key: `${platform.trim()}:${id.trim()}` })
+    onSubmit({ list, subject, key: `${effectivePlatform.trim()}:${id.trim()}` })
     setId('')
   }
 
@@ -203,11 +206,10 @@ function AddEntryDialog({
           ]}
         />
         <div className="grid grid-cols-[1fr_120px] gap-3">
-          <Field label={subject === 'user' ? 'QQ 号' : '群号'} htmlFor="acl-id">
+          <Field label={subject === 'user' ? '用户 ID' : '群 ID'} htmlFor="acl-id">
             <Input
               id="acl-id"
               autoFocus
-              inputMode="numeric"
               value={id}
               onChange={(event) => setId(event.target.value)}
               className="font-mono"
@@ -216,7 +218,8 @@ function AddEntryDialog({
           <Field label="平台" htmlFor="acl-platform">
             <Input
               id="acl-platform"
-              value={platform}
+              value={effectivePlatform}
+              placeholder="平台"
               onChange={(event) => setPlatform(event.target.value)}
               className="font-mono"
             />

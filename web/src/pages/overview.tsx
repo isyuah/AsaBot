@@ -234,7 +234,7 @@ function BotsCard({ bots }: { bots: BotView[] | undefined }) {
           <EmptyState
             icon={<Radio />}
             title="还没有连接"
-            description="在配置文件的 onebot11.connections 中添加 NapCat 连接。"
+            description="在配置文件的 adapters 段配置一个适配器，例如 OneBot 11 的正向或反向 WS。"
             className="py-8"
           />
         ) : (
@@ -244,11 +244,11 @@ function BotsCard({ bots }: { bots: BotView[] | undefined }) {
                 key={`${bot.platform}:${bot.selfId}`}
                 className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-surface-2/70"
               >
-                <Avatar id={bot.selfId} name={bot.nickname} platform={bot.platform} size={34} />
+                <Avatar id={bot.selfId} name={bot.nickname} src={bot.avatar} size={34} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[13.5px] font-medium">{bot.nickname ?? bot.selfId}</div>
                   <div className="truncate font-mono text-[11.5px] text-fg-3">
-                    {bot.selfId} · {bot.connection === 'forward' ? '正向 WS' : '反向 WS'}
+                    {bot.selfId} · {bot.connection}
                   </div>
                 </div>
                 <Badge tone={botTone(bot)} dot pulse={bot.status === 'online'}>
@@ -327,7 +327,7 @@ function LiveFeedCard() {
                   <Avatar
                     id={message.direction === 'out' ? message.selfId : (message.userId ?? '?')}
                     name={message.direction === 'out' ? 'Bot' : message.nickname}
-                    platform={message.platform}
+                    src={message.avatar}
                     size={28}
                   />
                   <div className="min-w-0 flex-1">
