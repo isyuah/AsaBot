@@ -1,6 +1,6 @@
 # AsaBot 设计规格
 
-> 本文档是实现的权威依据。实现中若发现设计缺陷，先在 STATUS.md 记录问题与建议，不要静默偏离。
+> 本文档是实现的权威依据。实现中若发现设计缺陷，在交付说明中提出，不要静默偏离。
 
 ## 1. 目标与非目标
 
@@ -530,3 +530,11 @@ t.app; t.mock; await t.dispose()
 | M5 | Hono 服务：对外 API（`POST /api/v1/send`、`GET /api/v1/bots`）、面板后端、日志 WS 推送、`ctx.route` | — |
 | M6 | React + Vite + shadcn/ui + Tailwind 面板 | — |
 | M7 | Dockerfile、包含 NapCat 的 compose、`pnpm sandbox` 终端沙盒、部署文档 | — |
+
+## 已知限制
+
+- **取消是协作式的**：插件代码如果不理会 `signal`，被取消（超时、卸载、退出）后仍会继续执行；框架只是不再等待它，也不会自动发送它的返回值。
+- **热重载的内存代价**：Node 的 ESM 模块缓存无法清除，每次重载都会保留一份旧模块，长时间频繁重载后应重启进程。
+- **超大数字 ID**：OneBot JSON 中的数字按 JavaScript `Number` 解析，超过 2^53 的 ID 会丢失精度。QQ 号、群号和 NapCat 的 message_id（int32）都远小于这个范围，暂不处理。
+- **whenIdle**：见 12.1，处理器把 prompt 与其他异步任务并行等待时可能提前 resolve，只影响测试辅助。
+- **删除插件文件**：入口文件删除后插件会被卸载并从列表中移除；依赖它的插件进入 failed，入口恢复后自动恢复。
