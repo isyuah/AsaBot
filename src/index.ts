@@ -27,9 +27,11 @@ export { formatUsage } from './core/command/parse.ts'
 export type { CommandAction, CommandArgs, CommandContext, OptionValue } from './core/command/types.ts'
 export { interpolateConfigValues, loadConfig } from './core/config/load.ts'
 export { type Config, configSchema } from './core/config/schema.ts'
+export { writeConfigValue } from './core/config/write.ts'
 export { Dispatcher } from './core/dispatch/dispatcher.ts'
 export type {
   AccessFilter,
+  DispatchEvent,
   Disposer,
   EnabledFilter,
   MatchHandler,
@@ -42,7 +44,9 @@ export {
   ApiTimeoutError,
   CommandConflictError,
   ConfigError,
+  NoBotOnlineError,
   NotConnectedError,
+  PluginError,
 } from './core/errors.ts'
 export type {
   AnyEvent,
@@ -88,6 +92,17 @@ export {
 } from './core/message/index.ts'
 export type { Permission, Rule } from './core/permission.ts'
 export { perm } from './core/permission.ts'
+export { Context } from './core/plugin/context.ts'
+export { definePlugin, type PluginDefinition } from './core/plugin/definition.ts'
+export { PluginManager } from './core/plugin/manager.ts'
+export type { PluginState, PluginStateEvent } from './core/plugin/types.ts'
 export type { CooldownScope } from './core/ratelimit.ts'
+export {
+  type AccessEntry,
+  type AccessList,
+  type AccessSubject,
+  KVStore,
+  Storage,
+} from './core/storage/index.ts'
 export { type Duration, parseDuration } from './core/utils/duration.ts'
 export { LruSet } from './core/utils/lru.ts'

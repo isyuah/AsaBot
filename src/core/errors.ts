@@ -38,6 +38,20 @@ export class NotConnectedError extends Error {
   }
 }
 
+export class NoBotOnlineError extends Error {
+  constructor() {
+    super('No bot is online')
+    this.name = 'NoBotOnlineError'
+  }
+}
+
+export class PluginError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'PluginError'
+  }
+}
+
 export class CommandConflictError extends Error {
   constructor(name: string, existingOwner: string, newOwner: string) {
     super(`Command or alias "${name}" conflicts between "${existingOwner}" and "${newOwner}"`)

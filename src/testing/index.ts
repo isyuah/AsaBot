@@ -1,3 +1,4 @@
+export { createTestApp, type SayOptions, type TestApp, type TestAppOptions } from './create-test-app.ts'
 export type { FakeSend } from './fake-bot.ts'
 export { FakeBot } from './fake-bot.ts'
 export type { MockCall, MockCallHandler, MockOneBotOptions } from './mock-onebot.ts'

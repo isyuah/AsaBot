@@ -33,6 +33,8 @@ export class PromptManager {
     text: Sendable | undefined,
     signal: AbortSignal,
     options: PromptOptions = {},
+    onWaiting?: () => void,
+    onResume?: () => void,
   ): Promise<Session | null> {
     if (signal.aborted) return Promise.reject(signal.reason)
     const timeout = Math.min(
@@ -49,6 +51,7 @@ export class PromptManager {
       const cleanup = (): boolean => {
         if (settled) return false
         settled = true
+        onResume?.()
         cancelTimer()
         signal.removeEventListener('abort', onAbort)
         if (this.waiters.get(key) === waiter) this.waiters.delete(key)
@@ -76,7 +79,14 @@ export class PromptManager {
         onAbort()
         return
       }
-      if (text !== undefined) void session.send(text).catch((error: unknown) => waiter.fail(error))
+      if (text !== undefined) {
+        void session.send(text).then(
+          () => {
+            if (!settled) onWaiting?.()
+          },
+          (error: unknown) => waiter.fail(error),
+        )
+      } else onWaiting?.()
     })
   }
 

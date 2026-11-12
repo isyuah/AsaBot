@@ -6,10 +6,13 @@ import { createLogger } from './core/logger.ts'
 
 export interface CreateAppOptions {
   logger?: Logger
+  configPath?: string
 }
 
 export function createApp(config: Config, options: CreateAppOptions = {}): App {
-  const app = new App(config, options.logger ?? createLogger({ level: config.logLevel }))
+  const app = new App(config, options.logger ?? createLogger({ level: config.logLevel }), {
+    configPath: options.configPath,
+  })
   if (config.onebot11.connections.length > 0) {
     app.useAdapter(
       new OneBotAdapter(config.onebot11, app, {

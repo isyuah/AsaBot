@@ -3,6 +3,7 @@ import type { Adapter, AdapterHost } from './adapter.ts'
 import { type Bot, BotRegistry } from './bot.ts'
 import type { Config } from './config/schema.ts'
 import { Dispatcher } from './dispatch/dispatcher.ts'
+import type { DispatchEvent } from './dispatch/types.ts'
 import type {
   AnyEvent,
   EventMap,
@@ -13,15 +14,19 @@ import type {
   SessionServices,
 } from './event/index.ts'
 import { logger as defaultLogger } from './logger.ts'
+import { PluginManager } from './plugin/manager.ts'
+import type { PluginStateEvent } from './plugin/types.ts'
+import { Storage } from './storage/index.ts'
 
 type AppState = 'created' | 'running' | 'stopped'
-type Listener = (event: AnyEvent) => unknown | Promise<unknown>
+type Listener = (event: DispatchEvent) => unknown | Promise<unknown>
 type PublicListener =
   | Listener
   | ((event: Session) => unknown | Promise<unknown>)
   | ((event: NoticeEvent) => unknown | Promise<unknown>)
   | ((event: RequestEvent) => unknown | Promise<unknown>)
   | ((event: MetaEvent) => unknown | Promise<unknown>)
+  | ((event: PluginStateEvent) => unknown | Promise<unknown>)
 
 class CoreEvents {
   private readonly dispatcher: Dispatcher
@@ -33,6 +38,7 @@ class CoreEvents {
     name: K,
     listener: (event: EventMap[K]) => unknown | Promise<unknown>,
   ): () => void
+  on(name: 'plugin.state', listener: (event: PluginStateEvent) => unknown | Promise<unknown>): () => void
   on(name: `notice.${string}`, listener: (event: NoticeEvent) => unknown | Promise<unknown>): () => void
   on(name: `request.${string}`, listener: (event: RequestEvent) => unknown | Promise<unknown>): () => void
   on(name: `meta.${string}`, listener: (event: MetaEvent) => unknown | Promise<unknown>): () => void
@@ -41,7 +47,7 @@ class CoreEvents {
     return this.dispatcher.on({ owner: 'core' }, name, listener as Listener)
   }
 
-  emit(event: AnyEvent): Promise<void> {
+  emit(event: DispatchEvent): Promise<void> {
     return this.dispatcher.dispatch(event)
   }
 }
@@ -53,16 +59,22 @@ export class App implements AdapterHost {
   readonly sessionServices: SessionServices
   readonly events: CoreEvents
   readonly bots = new BotRegistry()
+  readonly storage: Storage
+  readonly plugins: PluginManager
   private readonly adapters: Adapter[] = []
   private readonly shutdown = new AbortController()
   private state: AppState = 'created'
 
-  constructor(config: Config, logger: Logger = defaultLogger) {
+  constructor(config: Config, logger: Logger = defaultLogger, options: { configPath?: string } = {}) {
     this.config = config
     this.logger = logger
     this.dispatcher = new Dispatcher(config, logger, this.shutdown.signal)
     this.sessionServices = this.dispatcher
     this.events = new CoreEvents(this.dispatcher)
+    this.storage = new Storage(config.dataDir, logger)
+    this.plugins = new PluginManager(this, options.configPath)
+    this.dispatcher.accessFilter = (event) => this.storage.allows(event)
+    this.dispatcher.isEnabledFor = (owner, event) => this.plugins.isEnabledFor(owner, event)
   }
 
   useAdapter(adapter: Adapter): void {
@@ -78,9 +90,20 @@ export class App implements AdapterHost {
   }
 
   emit(event: AnyEvent): void {
+    if (this.state === 'stopped') return
     void this.dispatcher.dispatch(event).catch((error: unknown) => {
       this.logger.error({ err: error, event: event.name, eventId: event.id }, 'Event dispatch failed')
     })
+  }
+
+  emitPluginState(event: PluginStateEvent): void {
+    void this.dispatcher.dispatch(event).catch((error: unknown) => {
+      this.logger.error({ err: error, event: event.name, eventId: event.id }, 'Event dispatch failed')
+    })
+  }
+
+  whenIdle(): Promise<void> {
+    return this.dispatcher.whenIdle()
   }
 
   registerBot(bot: Bot): void {
@@ -111,6 +134,14 @@ export class App implements AdapterHost {
       throw new Error('A stopped App cannot be restarted')
     }
 
+    this.storage.open()
+    try {
+      await this.plugins.start()
+    } catch (error) {
+      await this.plugins.stop()
+      this.storage.close()
+      throw error
+    }
     this.state = 'running'
     for (const adapter of this.adapters) {
       try {
@@ -118,6 +149,12 @@ export class App implements AdapterHost {
       } catch (error) {
         this.logger.error({ err: error, platform: adapter.platform }, 'Failed to start adapter')
       }
+    }
+    try {
+      await this.plugins.watch()
+    } catch (error) {
+      await this.stop()
+      throw error
     }
     this.logger.info({ dataDir: this.config.dataDir }, 'AsaBot started')
   }
@@ -128,7 +165,10 @@ export class App implements AdapterHost {
     }
 
     this.state = 'stopped'
+    await this.plugins.stopWatching()
     this.shutdown.abort(new DOMException('App stopped', 'AbortError'))
+    await this.whenIdle()
+    await this.plugins.stop()
     for (const adapter of this.adapters) {
       try {
         await adapter.stop()
@@ -139,6 +179,7 @@ export class App implements AdapterHost {
     for (const bot of this.bots.list()) {
       this.unregisterBot(bot)
     }
+    this.storage.close()
     this.logger.info('AsaBot stopped')
   }
 }

@@ -157,7 +157,7 @@ interface BaseEvent {
   kind: 'message' | 'notice' | 'request' | 'meta' | 'internal'   // internal：框架自身派发的事件
   name: string                     // 分层事件名，见下
   raw: unknown                     // 原始平台数据
-  bot: Bot
+  bot: Bot                         // 框架事件 plugin.state 可能发生在任何 Bot 上线之前，因此该事件的 bot 是可选的
 }
 ```
 
@@ -382,7 +382,7 @@ ctx.command('echo <text:rest>')
 
 ```ts
 export default definePlugin({
-  name: 'echo',                  // /^[a-z0-9][a-z0-9_-]*$/，全局唯一
+  name: 'echo',                  // /^[a-z0-9][a-z0-9_-]*$/，全局唯一；'core' 为保留名，供框架自身作为作用域和迁移 owner
   version: '1.0.0',
   description: '复读',
   config: z.object({ maxLen: z.number().default(200) }),  // 可选
@@ -453,7 +453,7 @@ export default definePlugin({
   - 超管永远放行。
 - 两张表在启动时加载到内存，写入时同步更新，因此钩子可以同步判断。
 
-**空闲判定**：App 记录正在分发中的事件。`app.whenIdle()` 在“所有分发都已结束，或者仅剩阻塞在 prompt 上的处理器”时 resolve。测试辅助的 `say()` 依靠它确定性地拿到机器人的回复，包括多轮对话中的回复。
+**空闲判定**：App 记录正在分发中的事件。`app.whenIdle()` 在“所有分发都已结束，或者仅剩阻塞在 prompt 上的处理器”时 resolve。测试辅助的 `say()` 依靠它确定性地拿到机器人的回复，包括多轮对话中的回复。**已知限制（接受）**：处理器如果把 prompt 和其他异步任务并行等待（例如 `Promise.all([session.prompt(), fetch()])`），`whenIdle` 可能在那个异步任务完成前就 resolve。whenIdle 只用于测试辅助，生产路径不依赖它，所以不为此增加显式的活动登记 API。
 
 **`createTestApp`**（`asabot/testing`）：
 ```ts

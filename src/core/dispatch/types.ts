@@ -1,5 +1,8 @@
 import type { AnyEvent, Session } from '../event/index.ts'
 import type { Sendable } from '../message/index.ts'
+import type { PluginStateEvent } from '../plugin/types.ts'
+
+export type DispatchEvent = AnyEvent | PluginStateEvent
 
 export interface Scope {
   owner: string
@@ -17,5 +20,5 @@ export type MatchHandler = (
   session: Session,
   signal: AbortSignal,
 ) => Sendable | void | Promise<Sendable | undefined> | Promise<void>
-export type AccessFilter = (event: AnyEvent) => boolean
-export type EnabledFilter = (owner: string, event: AnyEvent) => boolean
+export type AccessFilter = (event: DispatchEvent) => boolean
+export type EnabledFilter = (owner: string, event: DispatchEvent) => boolean
