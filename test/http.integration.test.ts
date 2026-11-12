@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
+import { OneBotAdapter, onebot11Schema } from '../src/adapters/onebot11/index.ts'
+import { MockOneBot } from '../src/adapters/onebot11/testing.ts'
 import { definePlugin, z } from '../src/index.ts'
 import { createTestApp, type TestApp } from '../src/testing/index.ts'
 
 const apps: TestApp[] = []
+const onebotMocks: MockOneBot[] = []
 
 const sample = definePlugin({
   name: 'panel-sample',
@@ -74,6 +77,7 @@ function request(
 
 afterEach(async () => {
   for (const app of apps.splice(0)) await app.dispose()
+  for (const mock of onebotMocks.splice(0)) await mock.close()
 })
 
 describe('HTTP service contract', () => {
@@ -114,6 +118,10 @@ describe('HTTP service contract', () => {
     const port = apiOnly.app.server?.address()?.port
     expect(port).toBeDefined()
     const base = `http://127.0.0.1:${port}`
+    expect(await (await fetch(`${base}/healthz`)).json()).toEqual({
+      ok: true,
+      bots: { online: 1, total: 1 },
+    })
     expect((await fetch(`${base}/api/panel/session`)).status).toBe(404)
     expect((await fetch(`${base}/`)).status).toBe(404)
     expect(
@@ -370,6 +378,57 @@ describe('HTTP service contract', () => {
         message: [{ type: 'text', data: { text: 'from api' } }],
       })
       await waitFor(() => frames.some((frame) => frame.type === 'message' && frame.direction === 'out'))
+
+      const mock = new MockOneBot({ userId: '10001' })
+      onebotMocks.push(mock)
+      await mock.ready
+      const online = new Promise<void>((resolve) => {
+        const unsubscribe = t.app.events.on('bot.online', (event) => {
+          if (event.platform === 'onebot11') {
+            unsubscribe()
+            resolve()
+          }
+        })
+      })
+      t.app.useAdapter(
+        new OneBotAdapter(
+          onebot11Schema.parse({
+            connections: [{ type: 'forward', url: mock.url }],
+            sendQueue: { interval: 0 },
+          }),
+          t.app,
+        ),
+      )
+      await online
+      const bot = t.app.getBot('onebot11', '10001')
+      if (!bot) throw new Error('OneBot did not come online')
+      const bots = await (await request(url, cookie, '/bots')).json()
+      mock.emitGroupMessage({ groupId: '200', userId: '300', message: 'from user' })
+      await waitFor(() => frames.some((frame) => frame.type === 'message' && frame.preview === 'from user'))
+      await bot.sendPrivate('400', 'from bot')
+      await waitFor(() => frames.some((frame) => frame.type === 'message' && frame.preview === 'from bot'))
+      expect({
+        virtualViewHasAvatar: Object.hasOwn(
+          bots.find((item: { platform: string }) => item.platform === 'virtual'),
+          'avatar',
+        ),
+        virtualMessageHasAvatar: Object.hasOwn(
+          frames.find((frame) => frame.preview === 'hello') ?? {},
+          'avatar',
+        ),
+        bot: bots.find((item: { platform: string }) => item.platform === 'onebot11').avatar,
+        incoming: frames.find((frame) => frame.preview === 'from user')?.avatar,
+        outgoing: frames.find((frame) => frame.preview === 'from bot')?.avatar,
+        invalid: ['', '123\n', '123x', '１２３'].map((id) => bot.getAvatarUrl?.(id)),
+      }).toEqual({
+        virtualViewHasAvatar: false,
+        virtualMessageHasAvatar: false,
+        bot: 'https://q1.qlogo.cn/g?b=qq&nk=10001&s=100',
+        incoming: 'https://q1.qlogo.cn/g?b=qq&nk=300&s=100',
+        outgoing: 'https://q1.qlogo.cn/g?b=qq&nk=10001&s=100',
+        invalid: [undefined, undefined, undefined, undefined],
+      })
+
       const closed = new Promise<void>((resolve) => socket.once('close', () => resolve()))
       expect((await request(url, cookie, '/logout', 'POST')).status).toBe(200)
       await closed

@@ -1,6 +1,6 @@
+import { createRequire } from 'node:module'
 import { Writable } from 'node:stream'
 import pino, { type DestinationStream, type Logger, type StreamEntry } from 'pino'
-import pinoPretty from 'pino-pretty'
 
 const logCapacity = 2_000
 const redactedFields = [
@@ -93,7 +93,11 @@ export interface CreateLoggerOptions {
 export function createLogger(options: CreateLoggerOptions = {}): Logger {
   const destination = options.destination ?? process.stdout
   const pretty = options.pretty ?? (process.env.NODE_ENV !== 'production' && process.stdout.isTTY === true)
-  const output: DestinationStream = pretty ? pinoPretty({ destination, sync: true }) : destination
+  let output: DestinationStream = destination
+  if (pretty) {
+    const pinoPretty: typeof import('pino-pretty') = createRequire(import.meta.url)('pino-pretty')
+    output = pinoPretty({ destination, sync: true })
+  }
   const streams: StreamEntry[] = [
     { level: 'trace', stream: output },
     { level: 'trace', stream: ringBufferDestination },

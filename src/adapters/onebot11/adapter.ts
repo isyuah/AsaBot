@@ -175,6 +175,12 @@ class OneBotBotImpl implements OneBotBot {
     return this.onebot.getFriendList()
   }
 
+  getAvatarUrl(userId: string): string | undefined {
+    return userId.length > 0 && !/\D/.test(userId)
+      ? `https://q1.qlogo.cn/g?b=qq&nk=${userId}&s=100`
+      : undefined
+  }
+
   call(action: string, params?: Record<string, unknown>): Promise<unknown> {
     return this.connection.requestForBot(this, action, params)
   }

@@ -1,0 +1,27 @@
+logLevel: info
+dataDir: /app/data
+# 按需填写超管用户 ID（字符串）
+superusers: []
+
+pluginLoader:
+  dirs: [/app/plugins]
+  hotReload: auto
+
+adapters:
+  onebot11:
+    # 按需添加正向连接，token 由环境变量提供
+    connections: []
+    # connections:
+    #   - type: forward
+    #     url: ws://host.docker.internal:3001
+    #     accessToken: ${ONEBOT_TOKEN}
+    # 按需启用反向连接，token 由环境变量提供
+    # reverse:
+    #   accessToken: ${ONEBOT_REVERSE_TOKEN}
+
+server:
+  host: 0.0.0.0
+  port: 5140
+  panelPassword: ${ASABOT_PANEL_PASSWORD}
+  # 不需要对外 API 时留空
+  apiToken: ${ASABOT_API_TOKEN:-}

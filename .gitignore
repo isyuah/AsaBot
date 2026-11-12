@@ -8,3 +8,4 @@ coverage/
 !.env.example
 asabot.config.yaml
 .omp/
+config/

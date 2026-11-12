@@ -2,6 +2,8 @@
 
 AsaBot 是一个使用 TypeScript 编写的协议无关机器人框架，提供命令、多轮对话、权限、插件热重载和 SQLite 存储。支持 OneBot 11 协议，NapCat、Lagrange.OneBot、LLOneBot 等实现都能接入。
 
+部署、Docker、备份和反向代理配置见 [部署文档](docs/DEPLOY.md)。
+
 ## 快速开始
 
 需要 Node.js **24 或更高版本**、pnpm，以及已经配置好账号的 OneBot 11 实现。项目直接运行 TypeScript，不需要构建。

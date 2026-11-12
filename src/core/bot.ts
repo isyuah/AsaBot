@@ -41,6 +41,7 @@ export interface Bot {
   getGroupMember(groupId: string, userId: string): Promise<GroupMemberInfo>
   getFriendList(): Promise<UserInfo[]>
   call(action: string, params?: Record<string, unknown>): Promise<unknown>
+  getAvatarUrl?(userId: string): string | undefined
 }
 
 export class BotRegistry {

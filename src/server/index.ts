@@ -224,6 +224,13 @@ export class HttpServer implements ServerService {
       this.app.logger.error('HTTP request failed')
       return failure(c, new HttpError(500, 'INTERNAL_ERROR', 'Internal server error'))
     })
+    routes.get('/healthz', (c) => {
+      const bots = this.app.bots.list()
+      return c.json({
+        ok: true,
+        bots: { online: bots.filter((bot) => bot.status === 'online').length, total: bots.length },
+      })
+    })
     if (this.app.config.server.panelPassword) this.panelRoutes(routes)
     if (this.app.config.server.apiToken) this.publicRoutes(routes)
     const forwardPlugin = (c: ServerContext): Promise<Response> | Response => {
@@ -508,6 +515,7 @@ export class HttpServer implements ServerService {
         channel: { type: event.messageType, id: event.groupId ?? event.userId },
         userId: event.userId,
         nickname: event.sender.nickname,
+        avatar: event.bot.getAvatarUrl?.(event.userId),
         preview: [...event.text].slice(0, 120).join(''),
         time: event.time,
       }
@@ -520,6 +528,7 @@ export class HttpServer implements ServerService {
         selfId: sent.selfId,
         channel: { type: sent.messageType, id: sent.groupId ?? sent.userId },
         ...(sent.userId === undefined ? {} : { userId: sent.userId }),
+        avatar: sent.bot.getAvatarUrl?.(sent.selfId),
         preview: [...plainText(sent.message)].slice(0, 120).join(''),
         time: sent.time,
       }

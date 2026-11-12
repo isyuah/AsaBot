@@ -1,0 +1,34 @@
+services:
+  asabot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:5140:5140"
+    volumes:
+      - ./data:/app/data
+      - ./plugins:/app/plugins
+      # 挂载目录而不是单个文件：面板和聊天命令写回配置时需要在同一目录里原子替换文件
+      - ./config:/app/config
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5140/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    # 正向连接已有 OneBot 11 服务：本机可用 ws://host.docker.internal:3001，
+    # 远程服务使用对方可达的地址；同网络容器使用服务名或容器名及其监听端口。
+    # 不同 Compose 项目可先执行 docker network create asabot-onebot，
+    # 然后双方都声明并加入下面的 external 网络，用 ws://<对方服务名或容器名>:3001。
+    # networks:
+    #   - default
+    #   - onebot_shared
+    # 反向连接：在 OneBot 实现中填写 ws://<host>:5140/onebot/v11/ws。
+    # 默认端口只发布到本机；远程连接需配置可达的端口或反向代理。
+
+# networks:
+#   onebot_shared:
+#     name: asabot-onebot
+#     external: true
