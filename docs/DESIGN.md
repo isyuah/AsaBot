@@ -232,13 +232,30 @@ interface AdapterHost {
 
 `start()` 只负责发起连接，不等待上线；连接失败不抛出，而是进入重连。
 
+**组装位置**：`core` 不能导入适配器，所以由 `src/bootstrap.ts` 中的 `createApp(config, { logger? })` 负责组装：创建 App，再按配置实例化 OneBot 适配器并调用 `app.useAdapter(adapter)`；M3 起还负责注册内置插件。`main.ts` 和 `src/testing` 都通过 `createApp` 获取完整的 App。`AdapterHost` 由 App 实现，并额外提供 `isSuperuser(userId): boolean`，供适配器在构造 Session 时使用。
+
+**Bot 的生命周期**
+- 同一个 selfId 只对应一个 Bot 实例，断线和重连都不会更换实例，保证插件手里的 Bot 引用一直有效。
+- 断线时 status 变为 `offline` 并派发 `bot.offline`，但 Bot 仍留在注册表中；重连成功后 status 变为 `online` 并派发 `bot.online`。
+- 重连后 `get_login_info` 返回的 selfId 和之前不同（换号了）时，注销旧 Bot，再注册新 Bot。
+- `app.stop()` 时注销所有 Bot。
+
+**事件总线**（M1 先提供，M2 在此基础上扩展成完整管线）：`app.events.on(name, listener)` 返回 disposer。按第 6 节的分层名称匹配；所有命中的监听器通过 `Promise.allSettled` 并发执行，异常带上事件名记录日志。签名利用 `EventMap` 提供精确类型。
+
+**出站媒体的规范化**
+- `seg.image(buffer)` 在构造时同步转成 `base64://`。
+- `seg.image('/abs/path')` 和 `seg.image('file:///...')` 先原样保存为 `file://` URL，由 OneBot 适配器在发送前异步读取文件并转成 `base64://`。原因是 NapCat 通常运行在容器里，读不到宿主机的路径。文件读取失败时，发送调用以带路径信息的错误 reject。
+- `http(s)://` 和 `base64://` 原样透传。
+- record、video、file 段与 image 规则相同。
+
 ## 8. OneBot 11 适配器
 
 **正向 WS 连接状态机**：`connecting → open → online → (closed) → 退避重连`
 - 鉴权：发送 `Authorization: Bearer <token>` 头。日志中的 URL 必须去掉 `access_token`，任何日志都不得输出 token。
 - 连接打开后调用 `get_login_info` 得到 selfId 和昵称，然后注册 Bot 并派发 `bot.online`。
 - 重连：指数退避加抖动，从 `minDelay` 到 `maxDelay`；连接稳定 30s 后重置退避。`stop()` 后不再重连，并以 code 1000 关闭。
-- 活性检测：每 30s 发一次 ws ping，10s 内无 pong 则 terminate 并重连。另外，收到过 OneBot heartbeat 后，若超过 2.5 倍 heartbeat 周期没有收到任何消息，同样判定断线。
+- 活性检测：每 30s 发一次 ws ping，10s 内无 pong 则 terminate 并重连。另外，收到过 OneBot heartbeat 后，若超过 2.5 倍 heartbeat 周期没有收到任何消息，同样判定断线。上述时间参数要能通过适配器构造选项注入（不进入用户配置），方便测试用很短的间隔。
+- `onebot11.apiTimeout`（默认 30s）和 `onebot11.reconnect.{minDelay,maxDelay}`（默认 1s 和 60s）在 M1 加入配置 schema。
 
 **API 调用**
 - 请求 `{ action, params, echo }`，echo 为连接内递增的唯一字符串。
