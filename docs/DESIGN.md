@@ -957,6 +957,7 @@ export default definePlugin({ name: 'shop', inject: ['coins'], setup(ctx) { cons
 - OneBot 适配器的实现：关闭所有连接、停止反向连接的接收，换上新配置后重新启动。Bot 实例按 selfId 保留，遵守第 7 节“同一 selfId 只对应一个 Bot 实例”。状态会先变为 offline 再变回 online，`bot.offline` / `bot.online` 照常派发。
 - 新增一个平台时，创建并启动对应的适配器；移除一个平台时，停止它的适配器并注销它的所有 Bot。
 - App 新增 `reconfigureAdapters(next: Record<string, unknown>)`，供设置接口调用。
+- **配置形状（修订 8.1）**：OneBot 的 `reverse` 改为带默认值的 `{ enabled: boolean（默认 false）, accessToken: string（默认 ''） }`，不再用“对象存在即启用”的写法，这样表单可以直接用开关表示。适配器配置的 JSON Schema 中，每个有默认值的字段都带 `default`，每个字段都带中文的 `title` 和 `description`（zod 的 `.meta()`），面板直接用作标签、说明和占位值。
 
 **首次运行向导**
 - **触发条件**（只在 `main.ts` 中判断，`createApp` 和测试不受影响）：
