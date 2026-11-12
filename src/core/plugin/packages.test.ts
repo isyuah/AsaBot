@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { gzipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import {
   type NpmExecutor,
@@ -8,6 +9,7 @@ import {
   type PackageManifest,
   PackageService,
   type RegistryClient,
+  readmeFromTarball,
 } from './packages.ts'
 
 describe('package operation contract', () => {
@@ -24,6 +26,9 @@ describe('package operation contract', () => {
       async fullMetadata() {
         throw new Error('not used')
       },
+      async tarball() {
+        throw new Error('not used')
+      },
       async metadata() {
         calls++
         if (fail) throw new Error('registry unavailable')
@@ -37,6 +42,7 @@ describe('package operation contract', () => {
       installedPackages: () => new Map([[manifest.name, { manifest, plugin: 'example' }]]),
       latestChanged() {},
       latestFailed() {},
+      readmeFailed() {},
       subscriberFailed() {},
       async installPackage() {
         return {
@@ -74,6 +80,9 @@ describe('package operation contract', () => {
       async fullMetadata() {
         throw new Error('not used')
       },
+      async tarball() {
+        throw new Error('not used')
+      },
       async metadata() {
         return {
           name: manifest.name,
@@ -103,6 +112,7 @@ describe('package operation contract', () => {
         installedPackages: () => new Map(),
         latestChanged() {},
         latestFailed() {},
+        readmeFailed() {},
         subscriberFailed() {},
         async installPackage(_manifest, _kind, log) {
           await service.runNpm(['install'], log)
@@ -141,5 +151,87 @@ describe('package operation contract', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+/** A gzipped ustar archive with the given regular files (checksums are not verified by the reader). */
+function tarball(files: Record<string, string>): Uint8Array {
+  const encoder = new TextEncoder()
+  const blocks: Uint8Array[] = []
+  for (const [path, content] of Object.entries(files)) {
+    const data = encoder.encode(content)
+    const header = new Uint8Array(512)
+    header.set(encoder.encode(path), 0)
+    header.set(encoder.encode(`${data.length.toString(8).padStart(11, '0')}\0`), 124)
+    header[156] = '0'.charCodeAt(0)
+    const body = new Uint8Array(Math.ceil(data.length / 512) * 512)
+    body.set(data)
+    blocks.push(header, body)
+  }
+  blocks.push(new Uint8Array(1024))
+  const tar = new Uint8Array(blocks.reduce((size, block) => size + block.length, 0))
+  let offset = 0
+  for (const block of blocks) {
+    tar.set(block, offset)
+    offset += block.length
+  }
+  return gzipSync(tar)
+}
+
+describe('package README', () => {
+  it('reads only the top-level README from a tarball', () => {
+    const readme = `# 示例\n${'x'.repeat(700)}`
+    expect(
+      readmeFromTarball(
+        tarball({
+          'package/package.json': '{}',
+          'package/docs/README.md': 'nested',
+          'package/Readme.md': readme,
+        }),
+      ),
+    ).toBe(readme)
+    expect(readmeFromTarball(tarball({ 'package/docs/README.md': 'nested' }))).toBeUndefined()
+  })
+
+  it('falls back to the latest tarball when the packument has no README', async () => {
+    const failures: unknown[] = []
+    const registry: RegistryClient = {
+      async metadata() {
+        throw new Error('not used')
+      },
+      async fullMetadata(name) {
+        return {
+          name,
+          'dist-tags': { latest: '1.0.0' },
+          versions: { '1.0.0': { dist: { tarball: `https://registry.invalid/${name}.tgz` } } },
+        }
+      },
+      async tarball(url) {
+        if (url.includes('broken')) throw new Error('HTTP 500')
+        return tarball({ 'package/README.md': '# From tarball' })
+      },
+      async search() {
+        return { total: 0, items: [] }
+      },
+    }
+    const service = new PackageService(
+      { dir: '.', registry: 'http://127.0.0.1:1', npm: 'npm', installTimeout: 1000 },
+      {
+        installedPackages: () => new Map(),
+        latestChanged() {},
+        latestFailed() {},
+        readmeFailed: (_name, error) => failures.push(error),
+        subscriberFailed() {},
+        async installPackage() {
+          throw new Error('not used')
+        },
+        async uninstallPackage() {},
+      },
+      { registry },
+    )
+    expect((await service.marketInfo('asabot-plugin-ok')).readme).toBe('# From tarball')
+    const broken = await service.marketInfo('asabot-plugin-broken')
+    expect(broken.readme).toBeUndefined()
+    expect(failures).toHaveLength(1)
   })
 })

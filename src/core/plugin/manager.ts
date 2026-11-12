@@ -109,6 +109,11 @@ export class PluginManager {
             }
           }
         },
+        readmeFailed: (name, error) =>
+          this.app.logger.warn(
+            { package: name, reason: redact(errorMessage(error)) },
+            'Package README unavailable',
+          ),
         latestFailed: (name, error) =>
           this.app.logger.warn(
             { package: name, reason: redact(errorMessage(error)) },

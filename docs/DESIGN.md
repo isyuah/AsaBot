@@ -998,6 +998,7 @@ export default definePlugin({ name: 'shop', inject: ['coins'], setup(ctx) { cons
   }
   ```
   - 数据来自 registry 的完整 packument（`accept: application/json`），缓存 10 分钟。
+  - npm 官方源的 packument 已经不再附带 README（npmmirror 等镜像仍然附带）。packument 中没有 README 时，从 latest 版本的 tarball 中读取顶层的 `README*`：tarball 地址取自同一个 registry 返回的 `dist.tarball`，大小上限 5MB。读取失败记 warn，详情照常返回，只是没有 README。
   - 安装时的元数据仍然使用现有的精简格式。
 - **安装指定版本**：沿用 `POST /packages/install { name, version, force? }`。版本不兼容时返回 409，面板确认后带 `force` 重试，与 20.5 一致。
 - **面板**：

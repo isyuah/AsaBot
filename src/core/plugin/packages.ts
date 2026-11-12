@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { delimiter, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { gunzipSync } from 'fflate'
 import { maxSatisfying, rcompare, satisfies, valid, validRange } from 'semver'
 import { z } from 'zod'
 import type { PluginState } from './types.ts'
@@ -66,6 +67,8 @@ export interface PackageSearchItem {
 export interface RegistryClient {
   metadata(name: string): Promise<Packument>
   fullMetadata(name: string): Promise<FullPackument>
+  /** Downloads a package tarball (a URL taken from the registry's own packument). */
+  tarball(url: string): Promise<Uint8Array>
   search(
     query: string,
   ): Promise<{ total: number; items: Omit<PackageSearchItem, 'installed' | 'installedVersion'>[] }>
@@ -165,6 +168,34 @@ export function redact(value: string): string {
   return result
 }
 
+const maxTarballBytes = 5 * 1024 * 1024
+const readmePath = /^[^/]+\/readme(?:\.(?:md|markdown|txt))?$/i
+
+/** The top-level README of an npm tarball (gzipped ustar), or undefined when there is none. */
+export function readmeFromTarball(tgz: Uint8Array): string | undefined {
+  const tar = gunzipSync(tgz)
+  const decoder = new TextDecoder()
+  const field = (offset: number, length: number): string => {
+    const bytes = tar.subarray(offset, offset + length)
+    const end = bytes.indexOf(0)
+    return decoder.decode(end === -1 ? bytes : bytes.subarray(0, end))
+  }
+  for (let offset = 0; offset + 512 <= tar.length; ) {
+    const name = field(offset, 100)
+    if (!name) break // end-of-archive block
+    const size = Number.parseInt(field(offset + 124, 12).trim() || '0', 8)
+    if (!Number.isSafeInteger(size) || size < 0) throw new Error('Invalid tar entry size')
+    const type = field(offset + 156, 1)
+    const prefix = field(offset + 345, 155)
+    const path = prefix ? `${prefix}/${name}` : name
+    const start = offset + 512
+    if ((type === '' || type === '0') && readmePath.test(path))
+      return decoder.decode(tar.subarray(start, start + size))
+    offset = start + Math.ceil(size / 512) * 512
+  }
+  return undefined
+}
+
 export class FetchRegistry implements RegistryClient {
   private readonly registry: string
   constructor(registry: string) {
@@ -189,6 +220,17 @@ export class FetchRegistry implements RegistryClient {
     if (response.status === 404) throw new ManagementError(404, 'Package not found')
     if (!response.ok) throw new Error(`Registry returned HTTP ${response.status}`)
     return fullPackumentSchema.parse(await response.json())
+  }
+
+  async tarball(url: string): Promise<Uint8Array> {
+    if (!/^https?:\/\//i.test(url)) throw new Error('Tarball URL must be http(s)')
+    const response = await fetch(url, { signal: AbortSignal.timeout(15_000) })
+    if (!response.ok) throw new Error(`Registry returned HTTP ${response.status}`)
+    if (Number(response.headers.get('content-length') ?? 0) > maxTarballBytes)
+      throw new Error('Tarball is too large to read a README from')
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    if (bytes.length > maxTarballBytes) throw new Error('Tarball is too large to read a README from')
+    return bytes
   }
 
   async search(
@@ -305,6 +347,7 @@ interface PackageHost {
   installedPackages(): Map<string, { manifest: PackageManifest; plugin: string }>
   latestChanged(name: string): void
   latestFailed(name: string, error: unknown): void
+  readmeFailed(name: string, error: unknown): void
   subscriberFailed(operation: PackageOperation, error: unknown): void
   installPackage(
     manifest: PackageManifest,
@@ -449,6 +492,25 @@ export class PackageService {
     }
   }
 
+  /**
+   * The npm registry no longer embeds READMEs in packuments (mirrors such as npmmirror still do), so fall back
+   * to the README inside the latest tarball. A missing README never fails the details request.
+   */
+  private async readme(name: string, metadata: FullPackument): Promise<string | undefined> {
+    if (metadata.readme?.trim()) return metadata.readme
+    const latest = metadata['dist-tags'].latest
+    const dist = z
+      .object({ dist: z.object({ tarball: z.string() }) })
+      .safeParse(latest === undefined ? undefined : metadata.versions[latest])
+    if (!dist.success) return undefined
+    try {
+      return readmeFromTarball(await this.registry.tarball(dist.data.dist.tarball))
+    } catch (error) {
+      this.host.readmeFailed(name, error)
+      return undefined
+    }
+  }
+
   async marketInfo(name: string) {
     if (!validPackageName(name)) throw new ManagementError(400, 'Invalid package name')
     let cached = this.infoCache.get(name)
@@ -457,7 +519,8 @@ export class PackageService {
       if (!pending) {
         pending = this.registry
           .fullMetadata(name)
-          .then((value) => {
+          .then(async (metadata) => {
+            const value = { ...metadata, readme: await this.readme(name, metadata) }
             this.infoCache.set(name, { value, expires: Date.now() + 600_000 })
             return value
           })

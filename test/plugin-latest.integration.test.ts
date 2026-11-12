@@ -36,6 +36,9 @@ describe('plugin package update information', () => {
       async fullMetadata() {
         throw new Error('not used')
       },
+      async tarball() {
+        throw new Error('not used')
+      },
       async search() {
         return { total: 0, items: [] }
       },
