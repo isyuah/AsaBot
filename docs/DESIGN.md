@@ -114,7 +114,8 @@ adapters:                   # 每个键是一个已注册的适配器；配置�
       - type: forward
         url: ws://127.0.0.1:3001
         accessToken: ${ONEBOT_TOKEN:-}
-    reverse:                  # 配置了这一段才接受反向连接（OneBot 实现主动连 AsaBot），地址为 ws://<server>/onebot/v11/ws
+    reverse:                  # enabled 为 true 时接受反向连接（OneBot 实现主动连 AsaBot），地址为 ws://<server>/onebot/v11/ws
+      enabled: false
       accessToken: ${ONEBOT_REVERSE_TOKEN:-}
     sendQueue: { interval: 500ms, jitter: 300ms, maxPending: 100 }   # M5
 
@@ -306,7 +307,7 @@ interface AdapterHost {
 **会话与传输分离**：把现在 `OneBotConnection` 中与传输无关的部分抽成 `OneBotSession`，包括 API 的 echo 配对与超时、入站帧处理、事件转换、Bot 生命周期、活性检测（ping/pong 和 heartbeat）、发送队列。正向连接 = 客户端 socket + 退避重连 + 一个 OneBotSession；反向连接 = 服务端接受的 socket + 一个 OneBotSession，不负责重连（由对端的 OneBot 实现负责）。两者行为一致，不允许出现两份重复的协议实现。
 
 **反向 WS**
-- 只要配置了 `onebot11.reverse`，HTTP 服务就会启动（即使面板和对外 API 都没开），并在 `/onebot/v11/ws` 接受升级。
+- 只要 `onebot11.reverse.enabled` 为 true，HTTP 服务就会启动（即使面板和对外 API 都没开），并在 `/onebot/v11/ws` 接受升级。
 - 鉴权：`Authorization: Bearer <token>`，或查询参数 `access_token`（OneBot 11 规范允许）。`reverse.accessToken` 为空时不校验，同时在启动时记一条 warn：“反向 WS 未设置 token”。校验失败返回 401。
 - 账号识别：必须带 `X-Self-ID`（纯数字），缺失时返回 400。只支持 `X-Client-Role: Universal`（主流实现的默认值）或不带这个头；`API` 和 `Event` 拆分连接返回 400，并写明原因。
 - 握手成功后照样调用 `get_login_info`。返回的 user_id 与 `X-Self-ID` 不一致时关闭连接（1008），记 warn。
