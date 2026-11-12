@@ -172,17 +172,25 @@ interface BaseEvent {
 }
 ```
 
-**分层事件名**：派发 `notice.notify.poke` 时，`notice`、`notice.notify`、`notice.notify.poke` 三级的监听器都会触发。
+**分层事件名**：派发 `notice.member.join` 时，`notice`、`notice.member`、`notice.member.join` 三级的监听器都会触发。
 
-| 名称 | 说明 |
-|---|---|
-| `message.private` / `message.group` | 消息（对应 `Session`） |
-| `notice.<notice_type>[.<sub_type>]` | 沿用 OneBot 命名，如 `notice.group_increase`、`notice.group_recall`、`notice.notify.poke`、`notice.group_ban.ban` |
-| `request.friend` / `request.group.add` / `request.group.invite` | 请求，带 `approve(remark?)` / `reject(reason?)` |
-| `meta.lifecycle` / `meta.heartbeat` | 元事件 |
-| 框架内部：`bot.online` / `bot.offline` / `bot.message.sent` / `plugin.state` | 框架自身派发。机器人自身相关的事件都放在 `bot` 下，不放进 `message`，以保证 `message` 监听器只会收到 Session（实测中发现，`message.sent` 会被 `ctx.on('message')` 收到） |
+事件名和字段是**框架自己的词汇**，与任何协议无关；适配器负责把协议事件映射过来。
 
-`ctx.on` 的事件名到事件类型通过 `EventMap` 获得精确类型；OneBot 已知 notice 需列出字段，未知 notice 退化为通用 `NoticeEvent`（包含 `noticeType`、`subType?`、`userId?`、`groupId?`、`operatorId?`）。
+| 名称 | 字段（除 BaseEvent 外） | OneBot 11 映射（仅供适配器参考） |
+|---|---|---|
+| `message.private` / `message.group` | Session | `message` |
+| `notice.member.join` | `groupId`、`userId`、`operatorId?`、`joinType: 'approve' \| 'invite' \| string` | `group_increase` |
+| `notice.member.leave` | `groupId`、`userId`、`operatorId?`、`reason: 'leave' \| 'kick' \| string`（被踢的是机器人自己时 `userId === selfId`） | `group_decrease`（`kick_me` 映射为 reason `kick`） |
+| `notice.member.mute` / `notice.member.unmute` | `groupId`、`userId`、`operatorId?`、`duration`（毫秒，仅 mute） | `group_ban` 的 `ban` / `lift_ban`（秒转毫秒） |
+| `notice.member.role` | `groupId`、`userId`、`role: 'admin' \| 'member'` | `group_admin` 的 `set` / `unset` |
+| `notice.message.recall` | `messageId`、`userId`（原消息作者）、`operatorId?`、`groupId?`（私聊时无） | `group_recall` / `friend_recall` |
+| `notice.poke` | `userId`（发起者）、`targetId`、`groupId?` | `notify.poke` |
+| `notice.<platform>.<type>[.<subType>]` | 通用 `PlatformNoticeEvent`：`platformType`、`subType?`、`userId?`、`groupId?`、`operatorId?` | 其余未映射的通知，例如 `notice.onebot11.group_upload` |
+| `request.friend` / `request.group.join` / `request.group.invite` | `userId`、`groupId?`、`comment`，带 `approve(remark?)` / `reject(reason?)` | `request.friend` / `request.group` 的 `add` / `invite` |
+| `meta.lifecycle` / `meta.heartbeat` | 元事件（适配器可以选择不派发） | `meta_event` |
+| 框架内部：`bot.online` / `bot.offline` / `bot.message.sent` / `plugin.state` | 框架自身派发。机器人自身相关的事件都放在 `bot` 下，不放进 `message`，以保证 `message` 监听器只会收到 Session | — |
+
+`ctx.on` 的事件名到事件类型通过 `EventMap` 获得精确类型。平台专属通知统一用 `notice.<platform>.*` 前缀，插件只有在显式订阅这个前缀时才会接触到平台细节。
 
 **Session（消息事件）**
 
@@ -567,6 +575,7 @@ t.app; t.mock; await t.dispose()
 | M4 | HTTP 服务（第 18 节）：Hono 单端口服务、面板认证、面板 API、实时推送 WS、消息统计、调试台、对外 API、`ctx.route`、静态托管面板 | 第 18 节的接口全部可用，面板契约测试通过 |
 | M5 | 反向 WS（多账号，挂在同一个 HTTP 服务上，校验 X-Self-ID 和 token）；每个账号独立的发送队列 | 多账号反向连接和发送限速测试通过 |
 | M5b | 协议无关化（第 1.1 节）：OneBot 专属内容移入适配器并以 `asabot/onebot11` 子路径导出；协议无关的消息模型；`adapters` 配置段和适配器注册表；通用 server 的 upgrade 注册接口；虚拟适配器（调试台和 createTestApp 共用）；去掉核心层、内置插件和面板中的纯数字 ID 假设和 QQ/NapCat 措辞 | `src/core`、`src/server`、`src/plugins`、`web/` 中搜索不到协议专属内容；全部测试通过 |
+| M5c | 协议无关的事件命名（第 6 节）：核心 EventMap 改用框架自己的通知和请求事件名，OneBot 适配器负责映射，未映射的通知以 `notice.<platform>.*` 透传 | 核心事件类型中不再出现 OneBot 的 notice_type 命名；示例插件和文档同步更新 |
 | M6 | Web 面板（第 19 节，由主控 Agent 亲自编写） | 用真实后端走通所有页面 |
 | M7 | Dockerfile、compose（只运行 AsaBot 本身，不包含任何 OneBot 实现）、部署文档。原计划的终端沙盒由面板“调试台”取代，不再单独实现 | `docker compose up` 后面板可访问，能通过正向或反向 WS 连上已有的 OneBot 服务 |
 
