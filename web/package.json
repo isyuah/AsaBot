@@ -6,6 +6,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "site:dev": "vite --config site/vite.config.ts",
+    "site:build": "tsc --noEmit -p site/tsconfig.json && vite build --config site/vite.config.ts",
+    "site:preview": "vite preview --config site/vite.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
