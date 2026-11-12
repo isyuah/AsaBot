@@ -36,6 +36,7 @@ describe('adapter registration', () => {
             })
           },
           async stop() {},
+          async reconfigure() {},
         }
       },
     }
@@ -87,6 +88,7 @@ describe('adapter registration', () => {
           app.registerUpgrade('/dynamic/ws', (_request, socket) => socket.end())
         },
         async stop() {},
+        async reconfigure() {},
       })
       await vi.waitFor(() => expect(app.server?.address()?.port).toBeDefined())
     } finally {

@@ -31,8 +31,9 @@ adapters:
     #     url: ws://host.docker.internal:3001
     #     accessToken: ${ONEBOT_TOKEN}
     # 按需启用反向连接，token 由环境变量提供
-    # reverse:
-    #   accessToken: ${ONEBOT_REVERSE_TOKEN}
+    reverse:
+      enabled: false
+      accessToken: ${ONEBOT_REVERSE_TOKEN:-}
 
 server:
   host: 0.0.0.0

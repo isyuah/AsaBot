@@ -16,6 +16,7 @@ RUN pnpm install --prod --filter asabot --frozen-lockfile
 FROM node:26-alpine AS runtime
 
 ENV NODE_ENV=production
+ENV ASABOT_HOST=0.0.0.0
 # A directory, not a single file: write-back renames a temp file over the config, which fails on a file bind mount.
 ENV ASABOT_CONFIG=/app/config/asabot.config.yaml
 WORKDIR /app

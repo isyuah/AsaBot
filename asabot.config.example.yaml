@@ -51,9 +51,10 @@ adapters:
         url: ws://127.0.0.1:3001
         # 从环境变量或 .env 读取 token；未设置时为空
         accessToken: ${ONEBOT_TOKEN:-}
-    # 取消注释以启用反向 WebSocket（OneBot 实现主动连接 AsaBot）
-    # reverse:
-    #   accessToken: ${ONEBOT_REVERSE_TOKEN:-}
+    # OneBot 实现可以主动连接 AsaBot
+    reverse:
+      enabled: false
+      accessToken: ${ONEBOT_REVERSE_TOKEN:-}
     sendQueue:
       # 同一个账号相邻两次发送消息的最短间隔；0 表示不限速
       interval: 500ms

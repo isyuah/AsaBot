@@ -7,10 +7,10 @@ export const durationSchema = z
   .transform((value, context) => {
     try {
       return parseDuration(value)
-    } catch (error) {
+    } catch {
       context.issues.push({
         code: 'custom',
-        message: error instanceof Error ? error.message : 'Invalid duration',
+        message: 'Invalid duration',
         input: value,
       })
       return z.NEVER

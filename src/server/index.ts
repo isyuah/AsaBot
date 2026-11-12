@@ -32,6 +32,13 @@ import {
   sendSchema,
   uploadSchema,
 } from './schemas.ts'
+import {
+  SettingsService,
+  SettingsValidationError,
+  SetupCodeError,
+  settingsInput,
+  setupInput,
+} from './settings.ts'
 import { botView, commandView, overview, pluginView } from './views.ts'
 
 type Env = { Bindings: HttpBindings }
@@ -176,17 +183,20 @@ export class HttpServer implements ServerService {
   private readonly app: App
   private readonly auth = new PanelAuth()
   private readonly playground: Playground
+  private readonly settings: SettingsService
   private readonly http: Server
   private readonly websocket = new WebSocketServer({ noServer: true })
   private readonly clientSessions = new Map<WebSocket, string | undefined>()
   constructor(app: App) {
     this.app = app
     this.playground = new Playground(app)
+    this.settings = new SettingsService(app)
     const routes = this.routes()
     this.http = createServer(getRequestListener(routes.fetch))
-    if (app.config.server.panelPassword) {
+    if (app.config.server.panelPassword || app.setupCode) {
       app.registerUpgrade('/api/panel/ws', (request, socket, head) => {
-        if (!this.auth.authenticated(request.headers.cookie)) return this.rejectUpgrade(socket, 401)
+        if (this.app.setupCode || !this.auth.authenticated(request.headers.cookie))
+          return this.rejectUpgrade(socket, 401)
         this.websocket.handleUpgrade(request, socket, head, (client) =>
           this.connect(client, request.headers.cookie),
         )
@@ -262,6 +272,10 @@ export class HttpServer implements ServerService {
       if (error instanceof HttpError) return failure(c, error)
       if (error instanceof PluginConfigError)
         return failure(c, new HttpError(400, 'BAD_REQUEST', 'Plugin configuration is invalid', error.issues))
+      if (error instanceof SettingsValidationError)
+        return failure(c, new HttpError(400, 'BAD_REQUEST', 'Configuration is invalid', error.issues))
+      if (error instanceof SetupCodeError)
+        return failure(c, new HttpError(401, 'UNAUTHORIZED', 'Invalid setup code'))
       if (error instanceof ManagementError)
         return failure(
           c,
@@ -281,7 +295,7 @@ export class HttpServer implements ServerService {
         bots: { online: bots.filter((bot) => bot.status === 'online').length, total: bots.length },
       })
     })
-    if (this.app.config.server.panelPassword) this.panelRoutes(routes)
+    if (this.app.config.server.panelPassword || this.app.setupCode) this.panelRoutes(routes)
     if (this.app.config.server.apiToken) this.publicRoutes(routes)
     const forwardPlugin = (c: ServerContext): Promise<Response> | Response => {
       const app = this.app.getPluginRoute(c.req.param('name') ?? '')
@@ -292,7 +306,7 @@ export class HttpServer implements ServerService {
     }
     routes.all('/plugins/:name', forwardPlugin)
     routes.all('/plugins/:name/*', forwardPlugin)
-    if (this.app.config.server.panelPassword) {
+    if (this.app.config.server.panelPassword || this.app.setupCode) {
       const root = fileURLToPath(new URL('../../web/dist', import.meta.url))
       if (existsSync(root)) {
         // Built assets have content hashes in their names, so they can be cached forever. index.html must always be
@@ -328,14 +342,29 @@ export class HttpServer implements ServerService {
   private panelRoutes(routes: Hono<Env>): void {
     const panel = new Hono<Env>()
     panel.use('*', async (c, next) => {
+      if (this.app.setupCode && c.req.path !== '/api/panel/session' && c.req.path !== '/api/panel/setup')
+        throw new HttpError(401, 'UNAUTHORIZED', 'Setup required')
       if (
         c.req.path !== '/api/panel/login' &&
         c.req.path !== '/api/panel/session' &&
+        c.req.path !== '/api/panel/setup' &&
         !this.auth.authenticated(c.req.header('cookie'))
       )
         throw new HttpError(401, 'UNAUTHORIZED', 'Authentication required')
       if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(c.req.method)) verifyOrigin(c)
       await next()
+    })
+    panel.post('/setup', async (c) => {
+      const setupCode = this.app.setupCode
+      if (!setupCode) throw new HttpError(404, 'NOT_FOUND', 'Not found')
+      if (!this.auth.attempt(c.env.incoming.socket.remoteAddress ?? 'unknown'))
+        throw new HttpError(429, 'RATE_LIMITED', 'Too many login attempts')
+      const input = await body(c, setupInput)
+      if (!constantTimeEqual(input.code, setupCode))
+        throw new HttpError(401, 'UNAUTHORIZED', 'Invalid setup code')
+      await this.settings.setup(input)
+      this.setSessionCookie(c)
+      return c.json({ ok: true })
     })
     panel.post('/login', async (c) => {
       if (!this.auth.attempt(c.env.incoming.socket.remoteAddress ?? 'unknown'))
@@ -343,13 +372,7 @@ export class HttpServer implements ServerService {
       const input = await body(c, z.object({ password: z.string() }))
       if (!constantTimeEqual(input.password, this.app.config.server.panelPassword))
         throw new HttpError(401, 'UNAUTHORIZED', 'Invalid password')
-      const token = this.auth.create()
-      setCookie(c, 'asabot_session', token, {
-        httpOnly: true,
-        sameSite: 'Strict',
-        path: '/',
-        maxAge: 7 * 24 * 60 * 60,
-      })
+      this.setSessionCookie(c)
       return c.json({ ok: true })
     })
     panel.post('/logout', (c) => {
@@ -360,7 +383,13 @@ export class HttpServer implements ServerService {
       deleteCookie(c, 'asabot_session', { httpOnly: true, sameSite: 'Strict', path: '/' })
       return c.json({ ok: true })
     })
-    panel.get('/session', (c) => c.json({ authenticated: this.auth.authenticated(c.req.header('cookie')) }))
+    panel.get('/session', (c) =>
+      this.app.setupCode
+        ? c.json({ authenticated: false, setup: true })
+        : c.json({ authenticated: this.auth.authenticated(c.req.header('cookie')) }),
+    )
+    panel.get('/settings', async (c) => c.json(await this.settings.get()))
+    panel.put('/settings', async (c) => c.json(await this.settings.update(await body(c, settingsInput))))
     panel.get('/overview', (c) => c.json(overview(this.app)))
     panel.get('/stats/messages', (c) => {
       const range = c.req.query('range') ?? '1h'
@@ -407,8 +436,14 @@ export class HttpServer implements ServerService {
       const from = Number(c.req.query('from') ?? 0)
       if (!Number.isSafeInteger(from) || from < 0)
         throw new HttpError(400, 'BAD_REQUEST', 'Invalid search offset')
-      return c.json(await this.app.plugins.packages.search(c.req.query('q') ?? '', from))
+      const sort = c.req.query('sort') ?? 'relevance'
+      if (sort !== 'relevance' && sort !== 'updated' && sort !== 'name')
+        throw new HttpError(400, 'BAD_REQUEST', 'Invalid search sort')
+      return c.json(await this.app.plugins.packages.search(c.req.query('q') ?? '', from, sort))
     })
+    panel.get('/packages/info', async (c) =>
+      c.json(await this.app.plugins.packages.marketInfo(c.req.query('name') ?? '')),
+    )
     panel.post('/packages/install', async (c) => {
       const input = await body(c, packageInstallSchema)
       return c.json(
@@ -526,6 +561,7 @@ export class HttpServer implements ServerService {
   private publicRoutes(routes: Hono<Env>): void {
     const api = new Hono<Env>()
     api.use('*', async (c, next) => {
+      if (this.app.setupCode) throw new HttpError(401, 'UNAUTHORIZED', 'Setup required')
       const authorization = c.req.header('authorization') ?? ''
       const match = /^Bearer (.+)$/.exec(authorization)
       if (!match || !constantTimeEqual(match[1] ?? '', this.app.config.server.apiToken))
@@ -541,6 +577,15 @@ export class HttpServer implements ServerService {
     const plugin = this.app.plugins.get(name)
     if (!plugin) throw new HttpError(404, 'NOT_FOUND', 'Plugin not found')
     return plugin
+  }
+
+  private setSessionCookie(c: ServerContext): void {
+    setCookie(c, 'asabot_session', this.auth.create(), {
+      httpOnly: true,
+      sameSite: 'Strict',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60,
+    })
   }
 
   private packageOperation(operation: PackageOperation) {

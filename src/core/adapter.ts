@@ -19,6 +19,7 @@ export interface Adapter {
   readonly platform: string
   start(): Promise<void>
   stop(): Promise<void>
+  reconfigure(config: unknown): Promise<void>
 }
 
 export interface BotInfo {
@@ -33,7 +34,7 @@ export interface AdapterHost {
   emit(event: AnyEvent): void
   registerBot(bot: Bot): void
   unregisterBot(bot: Bot): void
-  registerUpgrade(path: string, handler: UpgradeHandler): void
+  registerUpgrade(path: string, handler: UpgradeHandler): () => void
   setBotInfo(bot: Bot, info: BotInfo): void
   whenIdle(): Promise<void>
   isSuperuser(userId: string): boolean

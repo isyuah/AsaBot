@@ -5,6 +5,15 @@ import { type Config, configSchema } from './schema.ts'
 
 const interpolationPattern = /\$\{([A-Za-z_][A-Za-z\d_]*)(?::-([^}]*))?\}/g
 
+export class InterpolationError extends ConfigError {
+  readonly path: string
+
+  constructor(name: string, path: string) {
+    super(`Missing environment variable "${name}" at ${formatPath(path)}`)
+    this.path = formatPath(path)
+  }
+}
+
 function formatPath(path: string): string {
   return path || '<root>'
 }
@@ -21,7 +30,7 @@ function interpolateString(value: string, path: string, env: NodeJS.ProcessEnv):
       return fallback
     }
 
-    throw new ConfigError(`Missing environment variable "${name}" at ${formatPath(path)}`)
+    throw new InterpolationError(name, path)
   })
 }
 
@@ -61,7 +70,7 @@ export function formatIssuePath(path: PropertyKey[]): string {
   )
 }
 
-export async function loadConfig(path: string): Promise<Config> {
+export async function readRawConfig(path: string): Promise<unknown> {
   let source: string
   try {
     source = await readFile(path, 'utf8')
@@ -75,8 +84,11 @@ export async function loadConfig(path: string): Promise<Config> {
     throw new ConfigError(`Invalid configuration file "${path}":\n${reasons.join('\n')}`)
   }
 
-  const parsed: unknown = document.toJS()
-  const interpolated = interpolateConfigValues(parsed)
+  return document.toJS()
+}
+
+export async function loadConfig(path: string): Promise<Config> {
+  const interpolated = interpolateConfigValues(await readRawConfig(path))
   const result = configSchema.safeParse(interpolated)
 
   if (!result.success) {

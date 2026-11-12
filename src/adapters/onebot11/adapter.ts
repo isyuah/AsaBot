@@ -81,7 +81,7 @@ function sanitizedUrl(source: string): string {
   try {
     const url = new URL(source)
     for (const key of [...url.searchParams.keys()]) {
-      if (key.toLowerCase() === 'access_token') {
+      if (/(?:token|password|secret|authorization)/i.test(key)) {
         url.searchParams.delete(key)
       }
     }
@@ -94,7 +94,9 @@ function sanitizedUrl(source: string): string {
 }
 
 function redactSecrets(text: string, token: string | undefined): string {
-  let result = text.replace(/access_token=[^&\s]*/gi, 'access_token=[Redacted]')
+  let result = text
+    .replace(/((?:access_token|token|apiToken|password|secret|authorization)=)[^&\s]*/gi, '$1[Redacted]')
+    .replace(/((?:wss?|https?):\/\/)[^\s/@]+(?::[^\s/@]*)?@/gi, '$1[Redacted]@')
   if (token) {
     result = result.replaceAll(token, '[Redacted]')
   }
@@ -124,7 +126,7 @@ class OneBotBotImpl implements OneBotBot {
   private currentStatus: 'connecting' | 'online' | 'offline' = 'connecting'
   readonly selfId: string
   nickname: string | undefined
-  readonly sendQueue: SendQueue
+  sendQueue: SendQueue
   private connection: OneBotSession
 
   constructor(connection: OneBotSession, selfId: string, options: ConnectionOptions) {
@@ -1030,10 +1032,13 @@ function normalizeMessageForEvent(content: Sendable): Message {
 
 export class OneBotAdapter implements Adapter {
   readonly platform = 'onebot11'
-  private readonly connections: OneBotConnection[]
+  private connections: OneBotConnection[] = []
   private readonly host: AdapterHost
-  private readonly options: ConnectionOptions
-  private readonly reverseToken: string | undefined
+  private readonly overrides: OneBotAdapterOptions
+  private options: ConnectionOptions
+  private reverseToken = ''
+  private reverseEnabled = false
+  private removeUpgrade?: () => void
   private readonly bots = new Map<string, OneBotBotImpl>()
   private readonly reverseSessions = new Map<string, Set<OneBotSession>>()
   private readonly activeReverseSessions = new Set<OneBotSession>()
@@ -1041,9 +1046,16 @@ export class OneBotAdapter implements Adapter {
   private stopped = true
 
   constructor(config: OneBot11Config, host: AdapterHost, options: OneBotAdapterOptions = {}) {
-    const settings = config
-    const connectionOptions: ConnectionOptions = {
-      logger: options.logger ?? host.logger,
+    this.host = host
+    this.overrides = options
+    this.options = this.connectionOptions(config)
+    this.configure(config)
+  }
+
+  private connectionOptions(settings: OneBot11Config): ConnectionOptions {
+    const options = this.overrides
+    return {
+      logger: options.logger ?? this.host.logger,
       apiTimeout: options.apiTimeout ?? settings.apiTimeout,
       reconnect: options.reconnect ?? settings.reconnect,
       pingInterval: options.pingInterval ?? 30_000,
@@ -1054,43 +1066,50 @@ export class OneBotAdapter implements Adapter {
       ignoreSelf: options.ignoreSelf ?? true,
       sendQueue: settings.sendQueue,
     }
-    this.host = host
-    this.options = connectionOptions
-    this.reverseToken = settings.reverse?.accessToken
+  }
+
+  private configure(settings: OneBot11Config): void {
+    this.options = this.connectionOptions(settings)
+    this.reverseToken = settings.reverse.accessToken
+    this.reverseEnabled = settings.reverse.enabled
     this.connections = settings.connections.map(
-      (connection) => new OneBotConnection(connection, host, connectionOptions, this),
+      (connection) => new OneBotConnection(connection, this.host, this.options, this),
     )
-    if (settings.reverse !== undefined) {
-      host.registerUpgrade('/onebot/v11/ws', (request, socket, head) => {
-        if (this.stopped) return this.rejectUpgrade(socket, 503)
-        const token = settings.reverse?.accessToken ?? ''
-        const url = new URL(request.url ?? '/', 'http://localhost')
-        const bearer = /^Bearer (.+)$/.exec(request.headers.authorization ?? '')?.[1]
-        const queryToken = url.searchParams.get('access_token')
-        if (
-          token &&
-          !(bearer !== undefined && constantTimeEqual(bearer, token)) &&
-          !(queryToken !== null && constantTimeEqual(queryToken, token))
-        )
-          return this.rejectUpgrade(socket, 401)
-        const selfId = request.headers['x-self-id']
-        if (typeof selfId !== 'string' || !/^\d+$/.test(selfId) || !Number.isSafeInteger(Number(selfId))) {
-          return this.rejectUpgrade(socket, 400, 'X-Self-ID must contain only safe integer digits')
-        }
-        const role = request.headers['x-client-role']
-        if (role !== undefined && role !== 'Universal') {
-          return this.rejectUpgrade(
-            socket,
-            400,
-            'X-Client-Role must be Universal; split API/Event connections are not supported',
-          )
-        }
-        const remoteAddress = request.socket.remoteAddress ?? 'unknown'
-        this.reverseWebsocket.handleUpgrade(request, socket, head, (client) =>
-          this.acceptReverse(client, selfId, remoteAddress),
-        )
-      })
+    for (const bot of this.bots.values()) {
+      bot.sendQueue = new SendQueue(this.options.sendQueue, this.options.logger, bot.selfId)
     }
+  }
+
+  private registerReverse(): void {
+    this.removeUpgrade = this.host.registerUpgrade('/onebot/v11/ws', (request, socket, head) => {
+      if (this.stopped) return this.rejectUpgrade(socket, 503)
+      const token = this.reverseToken
+      const url = new URL(request.url ?? '/', 'http://localhost')
+      const bearer = /^Bearer (.+)$/.exec(request.headers.authorization ?? '')?.[1]
+      const queryToken = url.searchParams.get('access_token')
+      if (
+        token &&
+        !(bearer !== undefined && constantTimeEqual(bearer, token)) &&
+        !(queryToken !== null && constantTimeEqual(queryToken, token))
+      )
+        return this.rejectUpgrade(socket, 401)
+      const selfId = request.headers['x-self-id']
+      if (typeof selfId !== 'string' || !/^\d+$/.test(selfId) || !Number.isSafeInteger(Number(selfId))) {
+        return this.rejectUpgrade(socket, 400, 'X-Self-ID must contain only safe integer digits')
+      }
+      const role = request.headers['x-client-role']
+      if (role !== undefined && role !== 'Universal') {
+        return this.rejectUpgrade(
+          socket,
+          400,
+          'X-Client-Role must be Universal; split API/Event connections are not supported',
+        )
+      }
+      const remoteAddress = request.socket.remoteAddress ?? 'unknown'
+      this.reverseWebsocket.handleUpgrade(request, socket, head, (client) =>
+        this.acceptReverse(client, selfId, remoteAddress),
+      )
+    })
   }
 
   private rejectUpgrade(socket: Duplex, status: 400 | 401 | 503, detail?: string): void {
@@ -1190,7 +1209,10 @@ export class OneBotAdapter implements Adapter {
       return
     }
     this.stopped = false
-    if (this.reverseToken === '') this.options.logger.warn('反向 WS 未设置 token')
+    if (this.reverseEnabled) {
+      this.registerReverse()
+      if (this.reverseToken === '') this.options.logger.warn('反向 WS 未设置 token')
+    }
     for (const connection of this.connections) {
       connection.start()
     }
@@ -1200,18 +1222,31 @@ export class OneBotAdapter implements Adapter {
     await Promise.all([...this.activeReverseSessions].map((session) => session.stop()))
   }
 
-  async stop(): Promise<void> {
+  private async closeConnections(): Promise<void> {
     if (this.stopped) {
       return
     }
     this.stopped = true
+    this.removeUpgrade?.()
+    this.removeUpgrade = undefined
     await Promise.all([
       ...this.connections.map((connection) => connection.stop()),
       this.closeReverseConnections(),
     ])
+    this.reverseSessions.clear()
+  }
+
+  async reconfigure(config: unknown): Promise<void> {
+    const running = !this.stopped
+    await this.closeConnections()
+    this.configure(config as OneBot11Config)
+    if (running) await this.start()
+  }
+
+  async stop(): Promise<void> {
+    await this.closeConnections()
     for (const bot of this.bots.values()) this.host.unregisterBot(bot)
     this.bots.clear()
-    this.reverseSessions.clear()
   }
 }
 

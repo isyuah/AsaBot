@@ -439,7 +439,7 @@ export class PluginManager {
     return groupId === undefined || this.app.storage.isGroupEnabled(name, `${event.platform}:${groupId}`)
   }
 
-  private serial<T>(work: () => Promise<T>): Promise<T> {
+  serial<T>(work: () => Promise<T>): Promise<T> {
     const result = this.queue.then(work)
     this.queue = result
       .then(() => undefined)

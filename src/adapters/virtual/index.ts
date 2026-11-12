@@ -202,6 +202,8 @@ export class VirtualAdapter implements Adapter {
     this.host.unregisterBot(this.bot)
   }
 
+  async reconfigure(_config: unknown): Promise<void> {}
+
   receive(content: string | Message, options: VirtualMessageOptions): Promise<VirtualSend[]> {
     const work = this.queue.then(async () => {
       const start = this.bot.sends.length

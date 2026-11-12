@@ -6,6 +6,10 @@ AsaBot 支持 OneBot 11 协议，可以连接已有的 OneBot 11 服务；NapCat
 
 需要 Node.js 24 或更高版本及 pnpm。以下命令在仓库根目录执行，Windows PowerShell 的复制命令为 `Copy-Item asabot.config.example.yaml asabot.config.yaml`。
 
+也可以先安装依赖、构建面板并直接运行 `pnpm start`，由首次运行向导生成配置。配置文件不存在，或者面板密码和适配器均为空时，控制台 stderr 会显示一次性设置码；打开 `http://127.0.0.1:5140`，输入设置码并设置至少 8 位的面板密码、超管和可选连接。设置码只在当前进程有效，重启后会重新生成。向导将密码明文写入配置文件；之后建议将 `server.panelPassword` 改成 `${ASABOT_PANEL_PASSWORD}`，并通过环境变量或 `.env` 提供密码。
+
+首次生成配置时可用 `ASABOT_HOST` 和 `ASABOT_PORT` 设置监听地址和端口，默认是 `127.0.0.1` 和 `5140`；这两个变量不会覆盖已有配置。
+
 ```sh
 pnpm install --frozen-lockfile
 cp asabot.config.example.yaml asabot.config.yaml
@@ -27,6 +31,8 @@ PowerShell 可用 `$env:NODE_ENV = 'production'`、`$env:ASABOT_PANEL_PASSWORD =
 访问 `http://127.0.0.1:5140` 登录面板。只要面板、对外 API 或反向连接之一已启用，HTTP 服务就会监听；运行后可通过无需登录的 `GET /healthz` 检查，响应包含 `ok` 和在线/全部 Bot 数量。面板、对外 API 与反向连接均未启用时，HTTP 服务不会启动。
 
 ## Docker 和 Compose
+
+使用首次运行向导时，准备可写的 `config`、`data` 目录和 Compose 所需的 `.env` 文件，不必先复制配置。启动后运行 `docker compose logs -f asabot` 查看本次设置码，访问 `http://127.0.0.1:5140` 完成设置。镜像在生成配置时默认监听 `0.0.0.0`，Compose 默认只发布到宿主机的 `127.0.0.1`。也可以按下面的步骤预先准备完整配置。
 
 在仓库根目录准备配置及环境变量：
 
@@ -96,6 +102,7 @@ adapters:
   onebot11:
     connections: []
     reverse:
+      enabled: true
       accessToken: ${ONEBOT_REVERSE_TOKEN}
 ```
 

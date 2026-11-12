@@ -1,9 +1,13 @@
+import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { stringify } from 'yaml'
 import { createApp } from './bootstrap.ts'
 import type { App } from './core/app.ts'
 import { loadConfig } from './core/config/load.ts'
+import type { Config } from './core/config/schema.ts'
 import { ConfigError } from './core/errors.ts'
 import { createLogger } from './core/logger.ts'
 
@@ -71,6 +75,43 @@ function installProcessHandlers(app: App): void {
   process.on('uncaughtException', handleUncaughtException)
 }
 
+export async function loadMainConfig(configPath: string): Promise<{ config: Config; setupCode?: string }> {
+  const missing = !existsSync(configPath)
+  if (missing) {
+    const host = process.env.ASABOT_HOST || '127.0.0.1'
+    const portValue = process.env.ASABOT_PORT || '5140'
+    const port = Number(portValue)
+    if (!/^\d+$/.test(portValue) || !Number.isInteger(port) || port > 65_535) {
+      throw new ConfigError('ASABOT_PORT must be an integer between 0 and 65535')
+    }
+    await mkdir(dirname(resolve(configPath)), { recursive: true })
+    await writeFile(
+      configPath,
+      `# 完整配置示例见 asabot.config.example.yaml\n${stringify({
+        superusers: [],
+        adapters: {},
+        server: { host, port, panelPassword: '' },
+      })}`,
+      { encoding: 'utf8', flag: 'wx' },
+    )
+  }
+
+  const config = await loadConfig(configPath)
+  const setup = missing || (!config.server.panelPassword && Object.keys(config.adapters).length === 0)
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  const characters = setup ? [...randomBytes(8)].map((byte) => alphabet[byte & 31]).join('') : ''
+  const setupCode = setup ? `${characters.slice(0, 4)}-${characters.slice(4)}` : undefined
+  if (setupCode) {
+    // Printed straight to the console, never through the logger: it must not reach log files or the panel.
+    const { host, port } = config.server
+    const shown = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host
+    process.stderr.write(
+      `\n  首次运行：在浏览器打开 http://${shown}:${port} 完成设置\n  设置码：${setupCode}\n\n`,
+    )
+  }
+  return { config, setupCode }
+}
+
 export async function runMain(): Promise<void> {
   const envPath = resolve('.env')
   if (existsSync(envPath)) {
@@ -78,14 +119,8 @@ export async function runMain(): Promise<void> {
   }
 
   const configPath = process.env.ASABOT_CONFIG || './asabot.config.yaml'
-  if (!existsSync(configPath)) {
-    throw new ConfigError(
-      `Configuration file "${configPath}" does not exist. Copy "asabot.config.example.yaml" to "asabot.config.yaml".`,
-    )
-  }
-
-  const config = await loadConfig(configPath)
-  const app = createApp(config, { configPath })
+  const { config, setupCode } = await loadMainConfig(configPath)
+  const app = createApp(config, { configPath, setupCode })
   installProcessHandlers(app)
   app.logger.info({ configPath }, 'Starting AsaBot')
   await app.start()

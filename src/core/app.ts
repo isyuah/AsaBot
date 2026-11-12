@@ -1,4 +1,5 @@
 import type { AddressInfo } from 'node:net'
+import { isDeepStrictEqual } from 'node:util'
 import type { Hono } from 'hono'
 import type { Logger } from 'pino'
 import type { Adapter, AdapterHost, BotInfo, OutgoingMessage, UpgradeHandler } from './adapter.ts'
@@ -83,10 +84,14 @@ export class App implements AdapterHost {
   readonly plugins: PluginManager
   readonly stats: MessageStats
   readonly startedAt = Date.now()
+  readonly configPath?: string
+  setupCode?: string
   server?: ServerService
   private serverFactory?: () => ServerService
   private serverStarting?: Promise<void>
   private readonly adapters: Adapter[] = []
+  private readonly managedAdapters = new Map<string, { adapter: Adapter; config: unknown }>()
+  private adapterFactory?: (platform: string, config: unknown) => Adapter
   private readonly botInfo = new WeakMap<Bot, BotInfo>()
   private readonly upgrades = new Map<string, UpgradeHandler>()
   private readonly untrackedBots = new WeakSet<Bot>()
@@ -98,9 +103,11 @@ export class App implements AdapterHost {
   constructor(
     config: Config,
     logger: Logger = defaultLogger,
-    options: { configPath?: string; packages?: PackageOptions } = {},
+    options: { configPath?: string; packages?: PackageOptions; setupCode?: string } = {},
   ) {
     this.config = config
+    this.configPath = options.configPath
+    this.setupCode = options.setupCode
     this.logger = logger
     this.stats = new MessageStats(config.timezone)
     this.dispatcher = new Dispatcher(config, logger, this.shutdown.signal)
@@ -144,7 +151,7 @@ export class App implements AdapterHost {
     if (
       !this.server &&
       this.serverFactory &&
-      (this.hasUpgrades || this.config.server.panelPassword || this.config.server.apiToken)
+      (this.hasUpgrades || this.config.server.panelPassword || this.config.server.apiToken || this.setupCode)
     ) {
       this.server = this.serverFactory()
     }
@@ -171,7 +178,7 @@ export class App implements AdapterHost {
     return this.botInfo.get(bot)
   }
 
-  registerUpgrade(path: string, handler: UpgradeHandler): void {
+  registerUpgrade(path: string, handler: UpgradeHandler): () => void {
     if (this.upgrades.has(path)) throw new Error(`WebSocket upgrade path already registered: ${path}`)
     this.upgrades.set(path, handler)
     if (this.state === 'running') {
@@ -181,6 +188,9 @@ export class App implements AdapterHost {
           this.logger.error({ err: error }, 'Failed to start HTTP server')
         })
       })
+    }
+    return () => {
+      if (this.upgrades.get(path) === handler) this.upgrades.delete(path)
     }
   }
 
@@ -217,6 +227,42 @@ export class App implements AdapterHost {
         this.logger.error({ err: error, platform: adapter.platform }, 'Failed to start adapter')
       })
     }
+  }
+
+  configureAdapters(factory: (platform: string, config: unknown) => Adapter): void {
+    this.adapterFactory = factory
+  }
+
+  useConfiguredAdapter(adapter: Adapter, config: unknown): void {
+    this.managedAdapters.set(adapter.platform, { adapter, config })
+    this.useAdapter(adapter)
+  }
+
+  async reconfigureAdapters(next: Record<string, unknown>): Promise<void> {
+    if (this.state === 'stopped') throw new Error('Cannot reconfigure a stopped App')
+    for (const [platform, current] of this.managedAdapters) {
+      if (!Object.hasOwn(next, platform)) {
+        await current.adapter.stop()
+        this.adapters.splice(this.adapters.indexOf(current.adapter), 1)
+        this.managedAdapters.delete(platform)
+      }
+    }
+    for (const [platform, config] of Object.entries(next)) {
+      const current = this.managedAdapters.get(platform)
+      if (current) {
+        if (!isDeepStrictEqual(current.config, config)) {
+          await current.adapter.reconfigure(config)
+          current.config = config
+        }
+      } else {
+        if (!this.adapterFactory) throw new Error('Adapter factory is not configured')
+        const adapter = this.adapterFactory(platform, config)
+        this.managedAdapters.set(platform, { adapter, config })
+        this.adapters.push(adapter)
+        if (this.state === 'running') await adapter.start()
+      }
+    }
+    this.config.adapters = next
   }
 
   emit(event: AnyEvent): void {

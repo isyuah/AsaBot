@@ -10,7 +10,7 @@ export interface OneBot11Config {
   apiTimeout: number
   reconnect: { minDelay: number; maxDelay: number }
   connections: OneBotConnectionConfig[]
-  reverse?: { accessToken: string }
+  reverse: { enabled: boolean; accessToken: string }
   sendQueue: { interval: number; jitter: number; maxPending: number }
 }
 

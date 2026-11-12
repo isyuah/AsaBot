@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { delimiter, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { maxSatisfying, satisfies, valid, validRange } from 'semver'
+import { maxSatisfying, rcompare, satisfies, valid, validRange } from 'semver'
 import { z } from 'zod'
 import type { PluginState } from './types.ts'
 import { ManagementError } from './upload.ts'
@@ -42,6 +42,16 @@ const packumentSchema = z.object({
   versions: z.record(z.string(), z.unknown()),
 })
 
+const fullPackumentSchema = packumentSchema.extend({
+  description: z.string().optional(),
+  license: z.union([z.string(), z.object({ type: z.string() })]).optional(),
+  homepage: z.string().optional(),
+  repository: z.union([z.string(), z.object({ url: z.string() })]).optional(),
+  readme: z.string().optional(),
+  time: z.record(z.string(), z.string()).optional(),
+})
+type FullPackument = z.output<typeof fullPackumentSchema>
+
 export interface PackageSearchItem {
   name: string
   version: string
@@ -55,11 +65,13 @@ export interface PackageSearchItem {
 
 export interface RegistryClient {
   metadata(name: string): Promise<Packument>
+  fullMetadata(name: string): Promise<FullPackument>
   search(
     query: string,
-    from: number,
   ): Promise<{ total: number; items: Omit<PackageSearchItem, 'installed' | 'installedVersion'>[] }>
 }
+
+export type PackageSort = 'relevance' | 'updated' | 'name'
 
 export interface NpmExecutor {
   run(args: string[], onLine: (line: string) => void): Promise<void>
@@ -169,13 +181,23 @@ export class FetchRegistry implements RegistryClient {
     return packumentSchema.parse(await response.json())
   }
 
+  async fullMetadata(name: string): Promise<FullPackument> {
+    const response = await fetch(new URL(encodeURIComponent(name), this.registry), {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (response.status === 404) throw new ManagementError(404, 'Package not found')
+    if (!response.ok) throw new Error(`Registry returned HTTP ${response.status}`)
+    return fullPackumentSchema.parse(await response.json())
+  }
+
   async search(
     query: string,
-    from: number,
   ): Promise<{ total: number; items: Omit<PackageSearchItem, 'installed' | 'installedVersion'>[] }> {
     const url = new URL('-/v1/search', this.registry)
     url.searchParams.set('text', `keywords:asabot-plugin ${query}`.trim())
-    url.searchParams.set('from', String(from))
+    url.searchParams.set('from', '0')
+    url.searchParams.set('size', '250')
     const response = await fetch(url, { signal: AbortSignal.timeout(15_000) })
     if (!response.ok) throw new Error(`Registry returned HTTP ${response.status}`)
     const result = (await response.json()) as {
@@ -302,6 +324,13 @@ export class PackageService {
   private readonly subscribers = new Set<(operation: PackageOperation) => void>()
   private readonly latestCache = new Map<string, { value?: string; expires: number }>()
   private readonly latestPending = new Map<string, Promise<void>>()
+  private readonly searchCache = new Map<
+    string,
+    { value: Awaited<ReturnType<RegistryClient['search']>>; expires: number }
+  >()
+  private readonly searchPending = new Map<string, Promise<Awaited<ReturnType<RegistryClient['search']>>>>()
+  private readonly infoCache = new Map<string, { value: FullPackument; expires: number }>()
+  private readonly infoPending = new Map<string, Promise<FullPackument>>()
   private readonly timers = new Map<string, NodeJS.Timeout>()
   private queue: Promise<void> = Promise.resolve()
 
@@ -385,15 +414,103 @@ export class PackageService {
     await Promise.all([...this.host.installedPackages().keys()].map((name) => this.refreshLatest(name)))
   }
 
-  async search(query: string, from: number): Promise<{ total: number; items: PackageSearchItem[] }> {
-    const result = await this.registry.search(query, from)
+  async search(
+    query: string,
+    from: number,
+    sort: PackageSort = 'relevance',
+  ): Promise<{ total: number; items: PackageSearchItem[] }> {
+    let cached = this.searchCache.get(query)
+    if (!cached || cached.expires <= Date.now()) {
+      let pending = this.searchPending.get(query)
+      if (!pending) {
+        pending = this.registry
+          .search(query)
+          .then((value) => {
+            this.searchCache.set(query, { value, expires: Date.now() + 300_000 })
+            return value
+          })
+          .finally(() => this.searchPending.delete(query))
+        this.searchPending.set(query, pending)
+      }
+      cached = { value: await pending, expires: Date.now() + 300_000 }
+    }
+    const result = cached.value
+    const sorted = result.items.slice(0, 250)
+    if (sort === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name, 'en'))
+    else if (sort === 'updated')
+      sorted.sort((a, b) => (Date.parse(b.date ?? '') || 0) - (Date.parse(a.date ?? '') || 0))
     const installed = this.host.installedPackages()
     return {
-      total: result.total,
-      items: result.items.map((item) => {
+      total: Math.min(result.total, 250),
+      items: sorted.slice(from, from + 20).map((item) => {
         const entry = installed.get(item.name)
         return { ...item, installed: !!entry, ...(entry ? { installedVersion: entry.manifest.version } : {}) }
       }),
+    }
+  }
+
+  async marketInfo(name: string) {
+    if (!validPackageName(name)) throw new ManagementError(400, 'Invalid package name')
+    let cached = this.infoCache.get(name)
+    if (!cached || cached.expires <= Date.now()) {
+      let pending = this.infoPending.get(name)
+      if (!pending) {
+        pending = this.registry
+          .fullMetadata(name)
+          .then((value) => {
+            this.infoCache.set(name, { value, expires: Date.now() + 600_000 })
+            return value
+          })
+          .finally(() => this.infoPending.delete(name))
+        this.infoPending.set(name, pending)
+      }
+      cached = { value: await pending, expires: Date.now() + 600_000 }
+    }
+    const data = cached.value
+    const installed = this.host.installedPackages().get(name)?.manifest.version
+    const repository = typeof data.repository === 'string' ? data.repository : data.repository?.url
+    const bytes = data.readme === undefined ? undefined : Buffer.from(data.readme, 'utf8')
+    const readme =
+      bytes && bytes.length > 200 * 1024
+        ? new TextDecoder().decode(bytes.subarray(0, 200 * 1024), { stream: true })
+        : data.readme
+    const versions = Object.keys(data.versions)
+      .filter((version) => valid(version))
+      .sort(rcompare)
+      .slice(0, 50)
+      .map((version) => {
+        const value = z
+          .object({
+            peerDependencies: z.record(z.string(), z.string()).optional(),
+            deprecated: z.string().optional(),
+          })
+          .safeParse(data.versions[version])
+        const peerRange = value.success ? value.data.peerDependencies?.asabot : undefined
+        const deprecated = value.success ? value.data.deprecated : undefined
+        const date = data.time?.[version]
+        return {
+          version,
+          ...(date === undefined ? {} : { date }),
+          ...(peerRange === undefined ? {} : { peerRange }),
+          compatible: !!peerRange && !!validRange(peerRange) && satisfies(frameworkVersion, peerRange),
+          ...(deprecated === undefined ? {} : { deprecated }),
+        }
+      })
+    return {
+      name: data.name,
+      ...(data.description === undefined ? {} : { description: data.description }),
+      ...(data.license === undefined
+        ? {}
+        : { license: typeof data.license === 'string' ? data.license : data.license.type }),
+      links: {
+        npm: `https://www.npmjs.com/package/${name}`,
+        ...(data.homepage === undefined ? {} : { homepage: data.homepage }),
+        ...(repository === undefined ? {} : { repository }),
+      },
+      ...(readme === undefined ? {} : { readme }),
+      ...(data['dist-tags'].latest === undefined ? {} : { latest: data['dist-tags'].latest }),
+      ...(installed === undefined ? {} : { installed }),
+      versions,
     }
   }
 

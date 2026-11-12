@@ -55,7 +55,7 @@ async function setup(
         apiTimeout: 1_000,
         reconnect: { minDelay: 15, maxDelay: 30 },
         connections: options.forwardUrl ? [{ type: 'forward', url: options.forwardUrl }] : [],
-        reverse: { accessToken: options.token ?? 'reverse-secret' },
+        reverse: { enabled: true, accessToken: options.token ?? 'reverse-secret' },
         sendQueue: {
           interval: options.interval ?? 0,
           jitter: options.jitter ?? 0,

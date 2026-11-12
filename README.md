@@ -8,6 +8,10 @@ AsaBot 是一个使用 TypeScript 编写的协议无关机器人框架，提供�
 
 需要 Node.js **24 或更高版本**、pnpm，以及已经配置好账号的 OneBot 11 实现。项目直接运行 TypeScript，不需要构建。
 
+首次启动也可以使用面板向导：安装依赖并构建面板后直接运行 `pnpm start`，未找到配置文件时会自动生成最小配置。打开 `http://127.0.0.1:5140`，输入启动控制台 stderr 显示的一次性设置码，依次设置面板密码、超管和可选的首个连接。密码至少 8 个字符；向导会将密码明文写入配置文件，之后可改为 `${ASABOT_PANEL_PASSWORD}` 并通过环境变量提供。生成配置时可用 `ASABOT_HOST`、`ASABOT_PORT` 指定监听地址和端口，默认分别为 `127.0.0.1`、`5140`。密码和适配器均为空的已有配置也会进入向导。
+
+也可以按以下步骤手写配置：
+
 1. 在仓库根目录安装依赖并复制配置：
 
    ```powershell
@@ -47,6 +51,7 @@ adapters:
   onebot11:
     connections: []
     reverse:
+      enabled: true
       accessToken: ${ONEBOT_REVERSE_TOKEN:-}
     sendQueue:
       interval: 500ms
@@ -59,7 +64,7 @@ server:
 
 在 `.env` 中设置 `ONEBOT_REVERSE_TOKEN`，然后在 OneBot 实现的网络配置中添加 **OneBot 11 WebSocket 客户端**：URL 填 `ws://<AsaBot地址>:5140/onebot/v11/ws`，token 填相同的值，连接类型选择 Universal。对端通过 `X-Self-ID` 标识当前登录的账号；多个账号可以连接同一个地址。若两者不在同一网络命名空间，需将 `server.host` 改为对端可访问的监听地址，并配置相应的网络和端口映射。
 
-反向 token 为空时不校验连接，启动时会记录警告；也支持 OneBot 11 的 `access_token` 查询参数。`reverse`、面板和对外 API 共用 `server` 的监听地址与端口，只要配置了 `reverse` 就会启动 HTTP 服务。正向与反向连接可以同时使用，同账号的反向新连接通过登录校验后会替换旧反向连接。
+反向 token 为空时不校验连接，启动时会记录警告；也支持 OneBot 11 的 `access_token` 查询参数。反向连接、面板和对外 API 共用 `server` 的监听地址与端口，`reverse.enabled` 为 `true` 时会启动 HTTP 服务。正向与反向连接可以同时使用，同账号的反向新连接通过登录校验后会替换旧反向连接。
 
 发送消息默认按账号限速，相邻发送间隔为 500ms 加 0–300ms 随机抖动；`sendQueue.interval` 设为 `0` 可关闭限速。队列达到 `maxPending` 时新发送会报 `SendQueueFullError`，断线时尚未发出的消息会被拒绝。
 

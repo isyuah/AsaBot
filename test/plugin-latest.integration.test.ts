@@ -33,6 +33,9 @@ describe('plugin package update information', () => {
     const metadata = Promise.withResolvers<Packument>()
     const registry: RegistryClient = {
       metadata: () => metadata.promise,
+      async fullMetadata() {
+        throw new Error('not used')
+      },
       async search() {
         return { total: 0, items: [] }
       },

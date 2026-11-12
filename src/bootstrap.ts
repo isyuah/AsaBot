@@ -15,16 +15,23 @@ export interface CreateAppOptions {
   logger?: Logger
   configPath?: string
   packages?: PackageOptions
+  setupCode?: string
 }
 
 export function createApp(config: Config, options: CreateAppOptions = {}): App {
   const app = new App(config, options.logger ?? createLogger(config.log), {
     configPath: options.configPath,
     packages: options.packages,
+    setupCode: options.setupCode,
   })
   app.plugins.register(createHelpPlugin(app))
   app.plugins.register(createStatusPlugin(app))
   app.plugins.register(createAdminPlugin(app))
+  app.configureAdapters((name, value) => {
+    const definition = adapters[name]
+    if (!definition) throw new ConfigError(`Unknown adapter "${name}"`)
+    return definition.create(value, app)
+  })
   for (const [name, value] of Object.entries(config.adapters)) {
     const definition = Object.hasOwn(adapters, name) ? adapters[name] : undefined
     if (definition === undefined) {
@@ -39,7 +46,7 @@ export function createApp(config: Config, options: CreateAppOptions = {}): App {
       )
       throw new ConfigError(`Configuration validation failed:\n${issues.join('\n')}`)
     }
-    app.useAdapter(definition.create(result.data, app))
+    app.useConfiguredAdapter(definition.create(result.data, app), result.data)
   }
   app.configureServer(() => new HttpServer(app))
   return app

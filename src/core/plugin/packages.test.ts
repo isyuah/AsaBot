@@ -21,6 +21,9 @@ describe('package operation contract', () => {
     let calls = 0
     let fail = false
     const registry: RegistryClient = {
+      async fullMetadata() {
+        throw new Error('not used')
+      },
       async metadata() {
         calls++
         if (fail) throw new Error('registry unavailable')
@@ -68,6 +71,9 @@ describe('package operation contract', () => {
       peerDependencies: { asabot: '^0.1.0' },
     }
     const registry: RegistryClient = {
+      async fullMetadata() {
+        throw new Error('not used')
+      },
       async metadata() {
         return {
           name: manifest.name,
