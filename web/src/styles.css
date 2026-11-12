@@ -201,6 +201,122 @@
   .tabular {
     font-variant-numeric: tabular-nums;
   }
+
+  /* Rendered README content (react-markdown output, no raw HTML). */
+  .markdown {
+    font-size: 13.5px;
+    line-height: 1.7;
+    color: var(--fg-2);
+    overflow-wrap: anywhere;
+  }
+  .markdown > :first-child {
+    margin-top: 0;
+  }
+  .markdown :where(h1, h2, h3, h4) {
+    color: var(--fg);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    line-height: 1.35;
+    margin: 1.6em 0 0.6em;
+  }
+  .markdown h1 {
+    font-size: 19px;
+  }
+  .markdown h2 {
+    font-size: 16px;
+    padding-bottom: 0.35em;
+    border-bottom: 1px solid var(--border);
+  }
+  .markdown :where(h3, h4) {
+    font-size: 14px;
+  }
+  .markdown :where(p, ul, ol, pre, blockquote, table) {
+    margin: 0.75em 0;
+  }
+  .markdown :where(ul, ol) {
+    padding-left: 1.4em;
+  }
+  .markdown ul {
+    list-style: disc;
+  }
+  .markdown ol {
+    list-style: decimal;
+  }
+  .markdown li + li {
+    margin-top: 0.25em;
+  }
+  .markdown li:has(> input[type='checkbox']) {
+    list-style: none;
+    margin-left: -1.4em;
+  }
+  .markdown input[type='checkbox'] {
+    margin-right: 0.5em;
+    accent-color: var(--accent);
+    vertical-align: -1px;
+  }
+  .markdown a {
+    color: var(--accent-soft-fg);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+    text-underline-offset: 3px;
+    transition: text-decoration-color 0.15s;
+  }
+  .markdown a:hover {
+    text-decoration-color: currentColor;
+  }
+  .markdown :where(strong) {
+    color: var(--fg);
+    font-weight: 600;
+  }
+  .markdown :not(pre) > code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    padding: 0.12em 0.4em;
+    border-radius: 5px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--fg);
+  }
+  .markdown pre {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    overflow-x: auto;
+  }
+  .markdown blockquote {
+    padding: 2px 0 2px 14px;
+    border-left: 3px solid var(--accent-soft);
+    color: var(--fg-3);
+  }
+  .markdown table {
+    display: block;
+    overflow-x: auto;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .markdown :where(th, td) {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    text-align: left;
+  }
+  .markdown th {
+    background: var(--surface-2);
+    color: var(--fg);
+    font-weight: 600;
+  }
+  .markdown img {
+    max-width: 100%;
+    border-radius: 8px;
+  }
+  .markdown hr {
+    margin: 1.5em 0;
+    border-color: var(--border);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

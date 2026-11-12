@@ -7,8 +7,10 @@ import type {
   LogLevel,
   LogRecord,
   Overview,
+  PackageDetail,
   PackageOperation,
   PackageSearchItem,
+  PackageSort,
   PlaygroundReply,
   PlaygroundRequest,
   PluginView,
@@ -102,11 +104,12 @@ export const api = {
   uninstallPlugin: (name: string, purge: boolean) =>
     request<{ ok: true }>('POST', `/plugins/${encode(name)}/uninstall`, { purge }),
 
-  searchPackages: (q: string, from = 0) =>
+  searchPackages: (q: string, sort: PackageSort, from = 0) =>
     request<{ total: number; items: PackageSearchItem[] }>(
       'GET',
-      `/packages/search?q=${encode(q)}&from=${from}`,
+      `/packages/search?q=${encode(q)}&sort=${sort}&from=${from}`,
     ),
+  packageInfo: (name: string) => request<PackageDetail>('GET', `/packages/info?name=${encode(name)}`),
   installPackage: (input: { name: string; version?: string; force?: boolean }) =>
     request<PackageOperation>('POST', '/packages/install', input),
   updatePackage: (name: string) => request<PackageOperation>('POST', '/packages/update', { name }),

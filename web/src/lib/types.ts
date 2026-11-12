@@ -98,6 +98,28 @@ export interface PackageSearchItem {
   installedVersion?: string
 }
 
+export type PackageSort = 'relevance' | 'updated' | 'name'
+
+export interface PackageVersion {
+  version: string
+  date?: string
+  peerRange?: string
+  compatible: boolean
+  deprecated?: string
+}
+
+export interface PackageDetail {
+  name: string
+  description?: string
+  license?: string
+  links: PackageSearchItem['links']
+  readme?: string
+  latest?: string
+  installed?: string
+  /** Newest first. */
+  versions: PackageVersion[]
+}
+
 export interface Overview {
   version: string
   node: string

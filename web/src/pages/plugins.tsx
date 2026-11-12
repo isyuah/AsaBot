@@ -20,13 +20,8 @@ import {
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import {
-  hasUpdate,
-  PackageMarket,
-  UninstallDialog,
-  UpdateButton,
-  UploadDialog,
-} from '../components/plugin-manage.tsx'
+import { PackageMarket } from '../components/market.tsx'
+import { hasUpdate, UninstallDialog, UpdateButton, UploadDialog } from '../components/plugin-manage.tsx'
 import { SchemaForm } from '../components/schema-form.tsx'
 import { Button } from '../components/ui/button.tsx'
 import { Sheet } from '../components/ui/dialog.tsx'
