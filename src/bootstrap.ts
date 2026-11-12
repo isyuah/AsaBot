@@ -1,6 +1,5 @@
 import type { Logger } from 'pino'
 import { OneBotAdapter } from './adapters/onebot11/adapter.ts'
-import type { AdapterHost } from './core/adapter.ts'
 import { App } from './core/app.ts'
 import type { Config } from './core/config/schema.ts'
 import { createLogger } from './core/logger.ts'
@@ -21,30 +20,19 @@ export function createApp(config: Config, options: CreateAppOptions = {}): App {
   app.plugins.register(createHelpPlugin(app))
   app.plugins.register(createStatusPlugin(app))
   app.plugins.register(createAdminPlugin(app))
-  for (const connection of config.onebot11.connections) {
-    const url = new URL(connection.url)
-    url.username = ''
-    url.password = ''
-    url.search = ''
-    url.hash = ''
-    const host: AdapterHost = {
-      logger: app.logger,
-      sessionServices: app.sessionServices,
-      emit: (event) => app.emit(event),
-      registerBot: (bot) => {
-        app.registerBot(bot)
-        app.setBotConnection(bot, { connection: 'forward', url: url.toString() })
-      },
-      unregisterBot: (bot) => app.unregisterBot(bot),
-      isSuperuser: (userId) => app.isSuperuser(userId),
-    }
-    app.useAdapter(
-      new OneBotAdapter({ ...config.onebot11, connections: [connection] }, host, {
-        logger: app.logger,
-        ignoreSelf: config.dispatch.ignoreSelf,
+  const adapter = new OneBotAdapter(config.onebot11, app, {
+    logger: app.logger,
+    ignoreSelf: config.dispatch.ignoreSelf,
+  })
+  app.useAdapter(adapter)
+  if (config.server.panelPassword || config.server.apiToken || config.onebot11.reverse !== undefined) {
+    app.useServer(
+      new HttpServer(app, {
+        acceptReverse: (socket, selfId, remoteAddress) =>
+          adapter.acceptReverse(socket, selfId, remoteAddress),
+        closeReverseConnections: () => adapter.closeReverseConnections(),
       }),
     )
   }
-  if (config.server.panelPassword || config.server.apiToken) app.useServer(new HttpServer(app))
   return app
 }

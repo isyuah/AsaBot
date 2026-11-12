@@ -52,7 +52,11 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
         ...options.config?.pluginLoader,
         dirs: options.pluginDirs ?? options.config?.pluginLoader?.dirs ?? [],
       },
-      onebot11: { ...options.config?.onebot11, connections: [{ type: 'forward', url: mock.url }] },
+      onebot11: {
+        ...options.config?.onebot11,
+        sendQueue: { interval: 0, ...options.config?.onebot11?.sendQueue },
+        connections: [{ type: 'forward', url: mock.url }],
+      },
     })
     app = createApp(config, { logger: pino({ level: 'silent' }) })
     for (const plugin of options.plugins ?? []) app.plugins.register(plugin)

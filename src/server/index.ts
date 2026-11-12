@@ -25,6 +25,11 @@ type Env = { Bindings: HttpBindings }
 type ServerContext = Context<Env>
 type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 429 | 500
 
+interface ReverseWebSocketService {
+  acceptReverse(socket: WebSocket, selfId: string, remoteAddress: string): void
+  closeReverseConnections(): Promise<void>
+}
+
 class HttpError extends Error {
   readonly status: ErrorStatus
   readonly code: string
@@ -114,14 +119,18 @@ export class HttpServer implements ServerService {
   private readonly playground: Playground
   private readonly http: Server
   private readonly websocket = new WebSocketServer({ noServer: true })
+  private readonly reverseWebsocket = new WebSocketServer({ noServer: true })
+  private readonly reverse: ReverseWebSocketService
   private readonly clientSessions = new Map<WebSocket, string | undefined>()
+  private stopping = false
   private readonly upgradeHandlers = new Map<
     string,
     (request: IncomingMessage, socket: Duplex, head: Buffer) => void
   >()
 
-  constructor(app: App) {
+  constructor(app: App, reverse: ReverseWebSocketService) {
     this.app = app
+    this.reverse = reverse
     this.playground = new Playground(app)
     const routes = this.routes()
     this.http = createServer(getRequestListener(routes.fetch))
@@ -133,7 +142,35 @@ export class HttpServer implements ServerService {
         )
       })
     }
-    // M5 can register /onebot/v11/ws in the same upgrade dispatch table.
+    if (app.config.onebot11.reverse !== undefined) {
+      this.registerUpgrade('/onebot/v11/ws', (request, socket, head) => {
+        if (this.stopping) return this.rejectUpgrade(socket, 503)
+        const token = app.config.onebot11.reverse?.accessToken ?? ''
+        const url = new URL(request.url ?? '/', 'http://localhost')
+        const bearer = /^Bearer (.+)$/.exec(request.headers.authorization ?? '')?.[1]
+        const queryToken = url.searchParams.get('access_token')
+        if (
+          token &&
+          !(bearer !== undefined && constantTimeEqual(bearer, token)) &&
+          !(queryToken !== null && constantTimeEqual(queryToken, token))
+        )
+          return this.rejectUpgrade(socket, 401)
+        const selfId = request.headers['x-self-id']
+        if (typeof selfId !== 'string' || !/^\d+$/.test(selfId))
+          return this.rejectUpgrade(socket, 400, 'X-Self-ID must contain only digits')
+        const role = request.headers['x-client-role']
+        if (role !== undefined && role !== 'Universal')
+          return this.rejectUpgrade(
+            socket,
+            400,
+            'X-Client-Role must be Universal; split API/Event connections are not supported',
+          )
+        const remoteAddress = request.socket.remoteAddress ?? 'unknown'
+        this.reverseWebsocket.handleUpgrade(request, socket, head, (client) =>
+          this.reverse.acceptReverse(client, selfId, remoteAddress),
+        )
+      })
+    }
     this.http.on('upgrade', (request, socket, head) => {
       let path: string
       try {
@@ -181,18 +218,26 @@ export class HttpServer implements ServerService {
   }
 
   async stop(): Promise<void> {
+    this.stopping = true
     for (const client of this.websocket.clients) client.terminate()
-    if (!this.http.listening) return
-    this.http.closeIdleConnections()
-    await new Promise<void>((resolve, reject) =>
-      this.http.close((error) => (error ? reject(error) : resolve())),
-    )
+    const closed = this.http.listening
+      ? new Promise<void>((resolve, reject) => {
+          this.http.closeIdleConnections()
+          this.http.close((error) => (error ? reject(error) : resolve()))
+        })
+      : Promise.resolve()
+    await Promise.all([this.reverse.closeReverseConnections(), closed])
   }
 
-  private rejectUpgrade(socket: Duplex, status: 400 | 401 | 404): void {
-    const message = { 400: 'Bad Request', 401: 'Unauthorized', 404: 'Not Found' }[status]
+  private rejectUpgrade(socket: Duplex, status: 400 | 401 | 404 | 503, detail?: string): void {
+    const message = { 400: 'Bad Request', 401: 'Unauthorized', 404: 'Not Found', 503: 'Service Unavailable' }[
+      status
+    ]
     const payload = JSON.stringify({
-      error: { code: { 400: 'BAD_REQUEST', 401: 'UNAUTHORIZED', 404: 'NOT_FOUND' }[status], message },
+      error: {
+        code: { 400: 'BAD_REQUEST', 401: 'UNAUTHORIZED', 404: 'NOT_FOUND', 503: 'UNAVAILABLE' }[status],
+        message: detail ?? message,
+      },
     })
     socket.end(
       `HTTP/1.1 ${status} ${message}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(payload)}\r\nConnection: close\r\n\r\n${payload}`,
@@ -321,6 +366,7 @@ export class HttpServer implements ServerService {
           this.app.config.server.panelPassword,
           this.app.config.server.apiToken,
           ...this.app.config.onebot11.connections.map((connection) => connection.accessToken ?? ''),
+          this.app.config.onebot11.reverse?.accessToken ?? '',
         ]) {
           if (secret) reason = reason.replaceAll(secret, '[Redacted]')
         }

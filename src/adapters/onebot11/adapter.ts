@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Logger } from 'pino'
 import WebSocket, { type RawData } from 'ws'
-import type { Adapter, AdapterHost } from '../../core/adapter.ts'
+import type { Adapter, AdapterHost, BotConnectionInfo } from '../../core/adapter.ts'
 import type {
   GroupInfo,
   GroupMemberInfo,
@@ -25,6 +25,7 @@ import type { Message, Sendable } from '../../core/message/index.ts'
 import { LruSet } from '../../core/utils/lru.ts'
 import { OneBotApiImpl } from './api.ts'
 import { incomingMessage } from './message.ts'
+import { SendQueue } from './send-queue.ts'
 import type { OneBot11Config, OneBotConnectionConfig, OneBotFrame, OneBotMessageEvent } from './types.ts'
 
 export interface OneBotAdapterOptions {
@@ -56,7 +57,20 @@ interface ConnectionOptions {
   heartbeatCheckInterval: number
   stableTime: number
   ignoreSelf: boolean
+  sendQueue: OneBot11Config['sendQueue']
 }
+
+type SessionTransport =
+  | { connection: 'forward'; url: string; accessToken?: string }
+  | { connection: 'reverse'; selfId: string; remoteAddress: string; accessToken: string }
+
+const sendActions = new Set([
+  'send_private_msg',
+  'send_group_msg',
+  'send_msg',
+  'send_group_forward_msg',
+  'send_private_forward_msg',
+])
 
 function sanitizedUrl(source: string): string {
   try {
@@ -105,18 +119,28 @@ class OneBotBotImpl implements OneBotBot {
   private currentStatus: 'connecting' | 'online' | 'offline' = 'connecting'
   readonly selfId: string
   nickname: string | undefined
-  private readonly connection: OneBotConnection
+  readonly sendQueue: SendQueue
+  private connection: OneBotSession
 
-  constructor(connection: OneBotConnection, selfId: string) {
+  constructor(connection: OneBotSession, selfId: string, options: ConnectionOptions) {
     this.connection = connection
     this.selfId = selfId
-    this.onebot = new OneBotApiImpl((action, params) => connection.requestForBot(this, action, params), {
-      assertOnline: () => connection.assertOnline(this),
+    this.sendQueue = new SendQueue(options.sendQueue, options.logger, selfId)
+    this.onebot = new OneBotApiImpl((action, params) => this.connection.requestForBot(this, action, params), {
+      assertOnline: () => this.connection.assertOnline(this),
       onMessageSent: (input) => {
         this.sentMessageIds.add(input.messageId)
-        connection.emitMessageSent(this, input)
+        this.connection.emitMessageSent(this, input)
       },
     })
+  }
+
+  setConnection(connection: OneBotSession): void {
+    this.connection = connection
+  }
+
+  usesConnection(connection: OneBotSession): boolean {
+    return this.connection === connection
   }
 
   get status(): 'connecting' | 'online' | 'offline' {
@@ -160,75 +184,76 @@ class OneBotBotImpl implements OneBotBot {
   }
 }
 
-class OneBotConnection {
+class OneBotSession {
   private socket: WebSocket | undefined
-  private reconnectTimer: NodeJS.Timeout | undefined
   private pingTimer: NodeJS.Timeout | undefined
   private pongTimer: NodeJS.Timeout | undefined
   private heartbeatTimer: NodeJS.Timeout | undefined
-  private stableTimer: NodeJS.Timeout | undefined
   private readonly pending = new Map<string, PendingRequest>()
   private stopped = true
   private connected = false
   private echo = 0
-  private backoff: number
   private heartbeatPeriod: number | undefined
   private lastHeartbeatAt: number | undefined
   private waitingForPong = false
   private currentBot: OneBotBotImpl | undefined
+  private previousBot: OneBotBotImpl | undefined
   private readonly pendingEvents: OneBotFrame[] = []
-  private readonly config: OneBotConnectionConfig
+  readonly transport: SessionTransport
   private readonly host: AdapterHost
   private readonly options: ConnectionOptions
+  private readonly adapter: OneBotAdapter
+  private readonly onOnline: () => void
+  private readonly onClose: () => void
+  private closing: Promise<void> | undefined
 
-  constructor(config: OneBotConnectionConfig, host: AdapterHost, options: ConnectionOptions) {
-    this.config = config
+  constructor(
+    transport: SessionTransport,
+    host: AdapterHost,
+    options: ConnectionOptions,
+    adapter: OneBotAdapter,
+    onOnline: () => void,
+    onClose: () => void,
+  ) {
+    this.transport = transport
     this.host = host
     this.options = options
-    this.backoff = options.reconnect.minDelay
+    this.adapter = adapter
+    this.onOnline = onOnline
+    this.onClose = onClose
   }
 
-  start(): void {
-    if (!this.stopped) {
-      return
-    }
+  start(socket: WebSocket): void {
     this.stopped = false
-    this.connect()
+    this.socket = socket
+    socket.on('open', () => this.handleOpen(socket))
+    socket.on('message', (data) => {
+      if (this.socket === socket) this.handleMessage(data)
+    })
+    socket.on('pong', () => {
+      if (this.socket === socket) this.handlePong()
+    })
+    socket.on('close', () => this.handleClose(socket))
+    if (socket.readyState === WebSocket.OPEN) void this.handleOpen(socket)
   }
 
-  async stop(): Promise<void> {
+  stop(reason = 'shutdown'): Promise<void> {
+    if (this.closing !== undefined) return this.closing
     this.stopped = true
-    this.clearReconnect()
-    this.clearLiveness()
-    this.pendingEvents.length = 0
-    this.rejectPending(new NotConnectedError('OneBot connection stopped'))
     const socket = this.socket
-    this.socket = undefined
-    this.connected = false
-    if (socket !== undefined) {
-      if (socket.readyState !== WebSocket.CLOSED) {
-        await new Promise<void>((resolve) => {
-          const timer = setTimeout(() => socket.terminate(), 1_000)
-          socket.once('close', () => {
-            clearTimeout(timer)
-            resolve()
-          })
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.close(1000, 'shutdown')
-          } else {
-            socket.terminate()
-          }
-        })
-      }
-    }
-    if (this.currentBot !== undefined) {
-      const bot = this.currentBot
-      if (bot.status === 'online') {
-        bot.setStatus('offline')
-        this.emitBotOffline(bot)
-      }
-      this.host.unregisterBot(bot)
-    }
+    if (socket === undefined) return Promise.resolve()
+    this.handleClose(socket)
+    if (socket.readyState === WebSocket.CLOSED) return Promise.resolve()
+    this.closing = new Promise<void>((resolve) => {
+      const timer = setTimeout(() => socket.terminate(), 1_000)
+      socket.once('close', () => {
+        clearTimeout(timer)
+        resolve()
+      })
+      if (socket.readyState === WebSocket.OPEN) socket.close(1000, reason)
+      else if (socket.readyState === WebSocket.CONNECTING) socket.terminate()
+    })
+    return this.closing
   }
 
   async requestForBot(
@@ -237,18 +262,30 @@ class OneBotConnection {
     params?: Record<string, unknown>,
   ): Promise<unknown> {
     this.assertOnline(bot)
+    if (sendActions.has(action)) return bot.sendQueue.send(() => this.request(action, params))
     return this.request(action, params)
   }
 
   assertOnline(bot: OneBotBotImpl): void {
     if (
       this.currentBot !== bot ||
+      !bot.usesConnection(this) ||
       bot.status !== 'online' ||
       !this.connected ||
       this.socket?.readyState !== WebSocket.OPEN
     ) {
       throw new NotConnectedError()
     }
+  }
+
+  connectionInfo(): BotConnectionInfo {
+    if (this.transport.connection === 'reverse') return { connection: 'reverse' }
+    const url = new URL(this.transport.url)
+    url.username = ''
+    url.password = ''
+    url.search = ''
+    url.hash = ''
+    return { connection: 'forward', url: url.toString() }
   }
 
   request(action: string, params?: Record<string, unknown>): Promise<unknown> {
@@ -301,46 +338,6 @@ class OneBotConnection {
     this.host.emit(event)
   }
 
-  private connect(): void {
-    if (this.stopped) {
-      return
-    }
-    this.clearReconnect()
-    this.log('debug', { url: sanitizedUrl(this.config.url) }, 'Connecting OneBot forward WebSocket')
-    let socket: WebSocket
-    try {
-      socket = new WebSocket(this.config.url, {
-        headers: this.config.accessToken ? { Authorization: `Bearer ${this.config.accessToken}` } : undefined,
-      })
-    } catch (error) {
-      this.log(
-        'warn',
-        { reason: errorReason(error, this.config.accessToken), url: sanitizedUrl(this.config.url) },
-        'Failed to create OneBot WebSocket',
-      )
-      this.scheduleReconnect()
-      return
-    }
-    this.socket = socket
-    socket.on('open', () => this.handleOpen(socket))
-    socket.on('message', (data) => this.handleMessage(data))
-    socket.on('pong', () => this.handlePong())
-    socket.on('error', (error: Error & { code?: string }) => {
-      if (!this.stopped) {
-        this.log(
-          'warn',
-          {
-            reason: errorReason(error, this.config.accessToken),
-            ...(error.code === undefined ? {} : { code: error.code }),
-            url: sanitizedUrl(this.config.url),
-          },
-          'OneBot WebSocket error',
-        )
-      }
-    })
-    socket.on('close', () => this.handleClose(socket))
-  }
-
   private async handleOpen(socket: WebSocket): Promise<void> {
     if (this.stopped || this.socket !== socket) {
       return
@@ -357,34 +354,28 @@ class OneBotConnection {
         throw new Error('get_login_info returned an invalid user_id')
       }
       const selfId = String(loginId)
-      if (this.currentBot !== undefined && this.currentBot.selfId !== selfId) {
-        const previous = this.currentBot
-        if (previous.status === 'online') {
-          previous.setStatus('offline')
-          this.emitBotOffline(previous)
-        }
-        this.host.unregisterBot(previous)
-        this.currentBot = undefined
+      if (this.transport.connection === 'reverse' && this.transport.selfId !== selfId) {
+        this.log('warn', { loginSelfId: selfId }, 'OneBot reverse login self ID mismatch')
+        socket.close(1008, 'self ID mismatch')
+        return
       }
-      if (this.currentBot === undefined) {
-        this.currentBot = new OneBotBotImpl(this, selfId)
-      }
-      if (typeof login.nickname === 'string') this.currentBot.nickname = login.nickname
-      const bot = this.currentBot
-      this.host.registerBot(bot)
+      if (this.previousBot !== undefined && this.previousBot.selfId !== selfId)
+        this.adapter.forgetPrevious(this, this.previousBot)
+      const bot = this.adapter.claim(this, selfId)
+      this.currentBot = bot
+      this.previousBot = bot
+      if (typeof login.nickname === 'string') bot.nickname = login.nickname
       bot.setStatus('online')
       this.emitBotOnline(bot)
       for (const frame of this.pendingEvents.splice(0)) {
         this.handleEvent(frame)
       }
-      this.stableTimer = setTimeout(() => {
-        this.backoff = this.options.reconnect.minDelay
-      }, this.options.stableTime)
+      this.onOnline()
     } catch (error) {
       if (this.stopped || this.socket !== socket) {
         return
       }
-      this.log('warn', { reason: errorReason(error, this.config.accessToken) }, 'OneBot login failed')
+      this.log('warn', { reason: errorReason(error, this.transport.accessToken) }, 'OneBot login failed')
       socket.close()
     }
   }
@@ -690,7 +681,7 @@ class OneBotConnection {
   }
 
   private clearLiveness(): void {
-    for (const timer of [this.pingTimer, this.pongTimer, this.heartbeatTimer, this.stableTimer]) {
+    for (const timer of [this.pingTimer, this.pongTimer, this.heartbeatTimer]) {
       if (timer !== undefined) {
         clearTimeout(timer)
         clearInterval(timer)
@@ -699,7 +690,6 @@ class OneBotConnection {
     this.pingTimer = undefined
     this.pongTimer = undefined
     this.heartbeatTimer = undefined
-    this.stableTimer = undefined
     this.waitingForPong = false
   }
 
@@ -714,12 +704,16 @@ class OneBotConnection {
     this.lastHeartbeatAt = undefined
     this.pendingEvents.length = 0
     this.rejectPending(new NotConnectedError())
-    if (this.currentBot !== undefined && this.currentBot.status === 'online') {
-      this.currentBot.setStatus('offline')
-      this.emitBotOffline(this.currentBot)
+    if (this.currentBot?.usesConnection(this)) {
+      this.currentBot.sendQueue.cancel()
+      if (this.currentBot.status === 'online') {
+        this.currentBot.setStatus('offline')
+        this.emitBotOffline(this.currentBot)
+      }
     }
+    this.currentBot = undefined
     if (!this.stopped) {
-      this.scheduleReconnect()
+      this.onClose()
     }
   }
 
@@ -731,38 +725,9 @@ class OneBotConnection {
     }
   }
 
-  private scheduleReconnect(): void {
-    if (this.stopped || this.reconnectTimer !== undefined) {
-      return
-    }
-    const base = Math.min(
-      this.options.reconnect.maxDelay,
-      Math.max(this.options.reconnect.minDelay, this.backoff),
-    )
-    const delay = Math.min(
-      this.options.reconnect.maxDelay,
-      Math.max(this.options.reconnect.minDelay, Math.round(base * (0.8 + Math.random() * 0.4))),
-    )
-    this.backoff = Math.min(
-      this.options.reconnect.maxDelay,
-      Math.max(this.options.reconnect.minDelay, base * 2),
-    )
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = undefined
-      this.connect()
-    }, delay)
-  }
-
-  private clearReconnect(): void {
-    if (this.reconnectTimer !== undefined) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = undefined
-    }
-  }
-
   private emitBotOnline(bot: OneBotBotImpl): void {
     this.host.logger.info(
-      { platform: bot.platform, selfId: bot.selfId, url: sanitizedUrl(this.config.url) },
+      { platform: bot.platform, selfId: bot.selfId, ...this.transportLog() },
       'Bot online',
     )
     const event: BotOnlineEvent = {
@@ -781,8 +746,8 @@ class OneBotConnection {
 
   private emitBotOffline(bot: OneBotBotImpl): void {
     this.host.logger.warn(
-      { platform: bot.platform, selfId: bot.selfId, url: sanitizedUrl(this.config.url) },
-      this.stopped ? 'Bot offline (stopping)' : 'Bot offline; reconnecting',
+      { platform: bot.platform, selfId: bot.selfId, ...this.transportLog() },
+      this.stopped ? 'Bot offline (stopping)' : 'Bot offline',
     )
     const event: BotOfflineEvent = {
       id: randomUUID(),
@@ -799,7 +764,117 @@ class OneBotConnection {
   }
 
   private log(level: 'debug' | 'warn', object: Record<string, unknown>, message: string): void {
-    this.options.logger[level](object, message)
+    this.options.logger[level]({ ...this.transportLog(), ...object }, message)
+  }
+
+  private transportLog(): Record<string, unknown> {
+    return this.transport.connection === 'forward'
+      ? { url: sanitizedUrl(this.transport.url) }
+      : { selfId: this.transport.selfId, remoteAddress: this.transport.remoteAddress }
+  }
+}
+
+class OneBotConnection {
+  private readonly session: OneBotSession
+  private readonly config: OneBotConnectionConfig
+  private readonly options: ConnectionOptions
+  private reconnectTimer: NodeJS.Timeout | undefined
+  private stableTimer: NodeJS.Timeout | undefined
+  private backoff: number
+  private stopped = true
+
+  constructor(
+    config: OneBotConnectionConfig,
+    host: AdapterHost,
+    options: ConnectionOptions,
+    adapter: OneBotAdapter,
+  ) {
+    this.config = config
+    this.options = options
+    this.backoff = options.reconnect.minDelay
+    this.session = new OneBotSession(
+      { connection: 'forward', url: config.url, accessToken: config.accessToken },
+      host,
+      options,
+      adapter,
+      () => {
+        this.stableTimer = setTimeout(() => {
+          this.backoff = this.options.reconnect.minDelay
+        }, this.options.stableTime)
+      },
+      () => {
+        if (this.stableTimer !== undefined) clearTimeout(this.stableTimer)
+        this.stableTimer = undefined
+        this.scheduleReconnect()
+      },
+    )
+  }
+
+  start(): void {
+    if (this.stopped) {
+      this.stopped = false
+      this.connect()
+    }
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true
+    if (this.reconnectTimer !== undefined) clearTimeout(this.reconnectTimer)
+    if (this.stableTimer !== undefined) clearTimeout(this.stableTimer)
+    this.reconnectTimer = undefined
+    this.stableTimer = undefined
+    await this.session.stop()
+  }
+
+  private connect(): void {
+    if (this.stopped) return
+    this.options.logger.debug({ url: sanitizedUrl(this.config.url) }, 'Connecting OneBot forward WebSocket')
+    let socket: WebSocket
+    try {
+      socket = new WebSocket(this.config.url, {
+        headers: this.config.accessToken ? { Authorization: `Bearer ${this.config.accessToken}` } : undefined,
+      })
+    } catch (error) {
+      this.options.logger.warn(
+        { reason: errorReason(error, this.config.accessToken), url: sanitizedUrl(this.config.url) },
+        'Failed to create OneBot WebSocket',
+      )
+      this.scheduleReconnect()
+      return
+    }
+    socket.on('error', (error: Error & { code?: string }) => {
+      if (!this.stopped) {
+        this.options.logger.warn(
+          {
+            reason: errorReason(error, this.config.accessToken),
+            ...(error.code === undefined ? {} : { code: error.code }),
+            url: sanitizedUrl(this.config.url),
+          },
+          'OneBot WebSocket error',
+        )
+      }
+    })
+    this.session.start(socket)
+  }
+
+  private scheduleReconnect(): void {
+    if (this.stopped || this.reconnectTimer !== undefined) return
+    const base = Math.min(
+      this.options.reconnect.maxDelay,
+      Math.max(this.options.reconnect.minDelay, this.backoff),
+    )
+    const delay = Math.min(
+      this.options.reconnect.maxDelay,
+      Math.max(this.options.reconnect.minDelay, Math.round(base * (0.8 + Math.random() * 0.4))),
+    )
+    this.backoff = Math.min(
+      this.options.reconnect.maxDelay,
+      Math.max(this.options.reconnect.minDelay, base * 2),
+    )
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined
+      this.connect()
+    }, delay)
   }
 }
 
@@ -813,6 +888,12 @@ function normalizeMessageForEvent(content: Sendable): Message {
 export class OneBotAdapter implements Adapter {
   readonly platform = 'onebot11'
   private readonly connections: OneBotConnection[]
+  private readonly host: AdapterHost
+  private readonly options: ConnectionOptions
+  private readonly reverseToken: string | undefined
+  private readonly bots = new Map<string, OneBotBotImpl>()
+  private readonly reverseSessions = new Map<string, Set<OneBotSession>>()
+  private readonly activeReverseSessions = new Set<OneBotSession>()
   private stopped = true
 
   constructor(
@@ -821,7 +902,13 @@ export class OneBotAdapter implements Adapter {
     options: OneBotAdapterOptions = {},
   ) {
     const settings = Array.isArray(config)
-      ? { connections: config, apiTimeout: 30_000, reconnect: { minDelay: 1_000, maxDelay: 60_000 } }
+      ? {
+          connections: config,
+          apiTimeout: 30_000,
+          reconnect: { minDelay: 1_000, maxDelay: 60_000 },
+          reverse: undefined,
+          sendQueue: { interval: 500, jitter: 300, maxPending: 100 },
+        }
       : config
     const connectionOptions: ConnectionOptions = {
       logger: options.logger ?? host.logger,
@@ -833,10 +920,92 @@ export class OneBotAdapter implements Adapter {
       heartbeatCheckInterval: options.heartbeatCheckInterval ?? 1_000,
       stableTime: options.stableTime ?? 30_000,
       ignoreSelf: options.ignoreSelf ?? true,
+      sendQueue: settings.sendQueue,
     }
+    this.host = host
+    this.options = connectionOptions
+    this.reverseToken = settings.reverse?.accessToken
     this.connections = settings.connections.map(
-      (connection) => new OneBotConnection(connection, host, connectionOptions),
+      (connection) => new OneBotConnection(connection, host, connectionOptions, this),
     )
+  }
+
+  claim(session: OneBotSession, selfId: string): OneBotBotImpl {
+    let bot = this.bots.get(selfId)
+    const existingBot = bot
+    const reverseSessions = this.reverseSessions.get(selfId)
+    const olderReverseSessions: OneBotSession[] = []
+    if (session.transport.connection === 'reverse' && reverseSessions !== undefined) {
+      for (const previous of reverseSessions) {
+        if (previous === session) break
+        olderReverseSessions.push(previous)
+      }
+    }
+    if (
+      existingBot !== undefined &&
+      existingBot.status === 'online' &&
+      !existingBot.usesConnection(session) &&
+      !olderReverseSessions.some((previous) => existingBot.usesConnection(previous))
+    )
+      throw new Error(`Bot onebot11:${selfId} is already online on another connection`)
+    if (session.transport.connection === 'reverse') {
+      for (const previous of olderReverseSessions) {
+        this.options.logger.info(
+          { selfId, remoteAddress: session.transport.remoteAddress },
+          'Replacing OneBot reverse connection',
+        )
+        void previous.stop('replaced')
+      }
+    }
+    if (bot === undefined) {
+      bot = new OneBotBotImpl(session, selfId, this.options)
+      this.host.registerBot(bot, session.connectionInfo())
+      this.bots.set(selfId, bot)
+    } else {
+      this.host.registerBot(bot, session.connectionInfo())
+      bot.setConnection(session)
+    }
+    return bot
+  }
+
+  forgetPrevious(session: OneBotSession, bot: OneBotBotImpl): void {
+    if (this.bots.get(bot.selfId) === bot && bot.status !== 'online' && bot.usesConnection(session)) {
+      this.host.unregisterBot(bot)
+      this.bots.delete(bot.selfId)
+    }
+  }
+
+  acceptReverse(socket: WebSocket, selfId: string, remoteAddress: string): void {
+    if (this.stopped) {
+      socket.close(1001, 'server stopping')
+      return
+    }
+    const session = new OneBotSession(
+      { connection: 'reverse', selfId, remoteAddress, accessToken: this.reverseToken ?? '' },
+      this.host,
+      this.options,
+      this,
+      () => {},
+      () => {},
+    )
+    const sessions = this.reverseSessions.get(selfId) ?? new Set<OneBotSession>()
+    sessions.add(session)
+    this.reverseSessions.set(selfId, sessions)
+    this.activeReverseSessions.add(session)
+    this.options.logger.info({ selfId, remoteAddress }, 'OneBot reverse connection accepted')
+    socket.on('error', (error: Error) => {
+      this.options.logger.warn(
+        { selfId, remoteAddress, reason: errorReason(error, this.reverseToken) },
+        'OneBot reverse WebSocket error',
+      )
+    })
+    socket.once('close', (code) => {
+      sessions.delete(session)
+      if (sessions.size === 0) this.reverseSessions.delete(selfId)
+      this.activeReverseSessions.delete(session)
+      this.options.logger.info({ selfId, remoteAddress, code }, 'OneBot reverse connection closed')
+    })
+    session.start(socket)
   }
 
   async start(): Promise<void> {
@@ -844,9 +1013,14 @@ export class OneBotAdapter implements Adapter {
       return
     }
     this.stopped = false
+    if (this.reverseToken === '') this.options.logger.warn('反向 WS 未设置 token')
     for (const connection of this.connections) {
       connection.start()
     }
+  }
+
+  async closeReverseConnections(): Promise<void> {
+    await Promise.all([...this.activeReverseSessions].map((session) => session.stop()))
   }
 
   async stop(): Promise<void> {
@@ -854,9 +1028,13 @@ export class OneBotAdapter implements Adapter {
       return
     }
     this.stopped = true
-    for (const connection of this.connections) {
-      await connection.stop()
-    }
+    await Promise.all([
+      ...this.connections.map((connection) => connection.stop()),
+      this.closeReverseConnections(),
+    ])
+    for (const bot of this.bots.values()) this.host.unregisterBot(bot)
+    this.bots.clear()
+    this.reverseSessions.clear()
   }
 }
 

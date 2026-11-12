@@ -42,6 +42,16 @@ onebot11:
       url: ws://127.0.0.1:3001
       # 从环境变量或 .env 读取 token；未设置时为空
       accessToken: ${NAPCAT_TOKEN:-}
+  # 取消注释以启用反向 WebSocket（NapCat 主动连接 AsaBot）
+  # reverse:
+  #   accessToken: ${ONEBOT_REVERSE_TOKEN:-}
+  sendQueue:
+    # 同一个账号相邻两次发送消息的最短间隔；0 表示不限速
+    interval: 500ms
+    # 在间隔上增加 0 到此值之间的随机抖动
+    jitter: 300ms
+    # 等待发送的消息上限；断线时排队消息会被拒绝
+    maxPending: 100
 
 pluginLoader:
   # 从这些目录加载插件入口文件
@@ -52,7 +62,7 @@ pluginLoader:
 server:
   # 默认只允许本机访问；如需远程访问，请明确配置监听地址
   host: 127.0.0.1
-  # HTTP 面板与对外 API 共用端口
+  # HTTP 面板、对外 API 与反向 WebSocket 共用端口
   port: 5140
   # 面板密码为空时不启用面板和静态页面
   panelPassword: ${ASABOT_PANEL_PASSWORD:-}

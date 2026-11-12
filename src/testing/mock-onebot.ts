@@ -19,6 +19,12 @@ export interface MockOneBotOptions {
   respondToPing?: boolean
 }
 
+export interface MockReverseOptions {
+  token?: string
+  selfId?: string
+  role?: string | null
+}
+
 export type MockCallHandler = (params: Record<string, unknown>, call: MockCall) => unknown | Promise<unknown>
 
 interface Waiter {
@@ -99,6 +105,25 @@ export class MockOneBot {
       return `ws://127.0.0.1:${(address as AddressInfo).port}`
     }
     return 'ws://127.0.0.1:0'
+  }
+
+  connectReverse(url: string, options: MockReverseOptions = {}): Promise<WebSocket> {
+    const token = options.token ?? this.token
+    const socket = new WebSocket(url, {
+      autoPong: this.respondToPing,
+      headers: {
+        'X-Self-ID': options.selfId ?? this.userId,
+        ...(options.role === null ? {} : { 'X-Client-Role': options.role ?? 'Universal' }),
+        ...(token === undefined ? {} : { Authorization: `Bearer ${token}` }),
+      },
+    })
+    return new Promise((resolve, reject) => {
+      socket.once('open', () => {
+        this.handleConnection(socket)
+        resolve(socket)
+      })
+      socket.on('error', reject)
+    })
   }
 
   onCall(action: string, handler: MockCallHandler): () => void {

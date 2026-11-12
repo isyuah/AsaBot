@@ -38,6 +38,13 @@ export class NotConnectedError extends Error {
   }
 }
 
+export class SendQueueFullError extends Error {
+  constructor() {
+    super('OneBot send queue is full')
+    this.name = 'SendQueueFullError'
+  }
+}
+
 export class NoBotOnlineError extends Error {
   constructor() {
     super('No bot is online')

@@ -1,6 +1,6 @@
 # AsaBot
 
-AsaBot 是一个使用 TypeScript 编写的 QQ 机器人框架。当前通过 OneBot 11 正向 WebSocket 连接 NapCat，提供命令、多轮对话、权限、插件热重载和 SQLite 存储。
+AsaBot 是一个使用 TypeScript 编写的 QQ 机器人框架。支持通过 OneBot 11 正向或反向 WebSocket 连接 NapCat，提供命令、多轮对话、权限、插件热重载和 SQLite 存储。
 
 ## 快速开始
 
@@ -36,6 +36,30 @@ AsaBot 是一个使用 TypeScript 编写的 QQ 机器人框架。当前通过 On
 
 默认数据目录是 `./data`：数据库为 `data/asabot.db`，插件可使用 `data/plugins/<插件名>/`。相对路径以启动进程的当前工作目录为基准。备份数据时应同时考虑 SQLite WAL 文件，建议先停止 AsaBot 再备份整个数据目录。
 
+### 使用反向 WebSocket
+
+反向模式由 NapCat 主动连接 AsaBot。只使用反向模式时，可将配置中的 `connections` 设为空，并启用 `reverse`：
+
+```yaml
+onebot11:
+  connections: []
+  reverse:
+    accessToken: ${ONEBOT_REVERSE_TOKEN:-}
+  sendQueue:
+    interval: 500ms
+    jitter: 300ms
+    maxPending: 100
+server:
+  host: 127.0.0.1
+  port: 5140
+```
+
+在 `.env` 中设置 `ONEBOT_REVERSE_TOKEN`，然后在 NapCat 的网络配置中添加 **OneBot 11 WebSocket 客户端**：URL 填 `ws://<AsaBot地址>:5140/onebot/v11/ws`，token 填相同的值，连接类型选择 Universal。NapCat 会通过 `X-Self-ID` 标识当前登录的 QQ 账号；多个账号可以连接同一个地址。若 NapCat 和 AsaBot 不在同一网络命名空间，需将 `server.host` 改为 NapCat 可访问的监听地址，并配置相应的网络和端口映射。
+
+反向 token 为空时不校验连接，启动时会记录警告；也支持 OneBot 11 的 `access_token` 查询参数。`reverse`、面板和对外 API 共用 `server` 的监听地址与端口，只要配置了 `reverse` 就会启动 HTTP 服务。正向与反向连接可以同时使用，同账号的反向新连接通过登录校验后会替换旧反向连接。
+
+发送消息默认按账号限速，相邻发送间隔为 500ms 加 0–300ms 随机抖动；`sendQueue.interval` 设为 `0` 可关闭限速。队列达到 `maxPending` 时新发送会报 `SendQueueFullError`，断线时尚未发出的消息会被拒绝。
+
 ### 常见问题
 
 - **连接不上 NapCat**：查看 `OneBot WebSocket error` 日志中的 `reason`、`code` 和 URL，例如 `ECONNREFUSED` 通常表示地址、端口、服务监听或容器端口映射需要检查。将 `logLevel` 改为 `debug` 可看到 `Connecting OneBot forward WebSocket`。连接失败后框架会自动重试。
@@ -52,7 +76,7 @@ AsaBot 是一个使用 TypeScript 编写的 QQ 机器人框架。当前通过 On
 | `logLevel`、`dataDir`、`superusers` | 日志级别、数据目录、超管 ID 列表 |
 | `command` | 前缀、@机器人触发方式，以及错误和权限提示 |
 | `dispatch` | 处理器超时、忽略自身消息、prompt 默认和最大超时 |
-| `onebot11` | 正向 WS 地址与 token、API 超时和重连间隔；`connections` 可配置多个账号 |
+| `onebot11` | 正向 WS 地址、反向 WS token、API 超时、重连和发送队列；支持多个账号 |
 | `pluginLoader` | 插件目录和热重载开关；`auto` 在 `NODE_ENV` 不是 `production` 时开启 |
 | `plugins.<name>.enabled` | 插件全局开关，缺省为 `true` |
 | `plugins.<name>.config` | 对应插件的配置；示例 `echo` 支持 `maxLen` 和 `welcome` |
@@ -62,7 +86,7 @@ AsaBot 是一个使用 TypeScript 编写的 QQ 机器人框架。当前通过 On
 
 ## 管理面板与对外 API
 
-通过环境变量或 `.env` 设置 `ASABOT_PANEL_PASSWORD` 以启用面板，设置 `ASABOT_API_TOKEN` 以启用对外 API。两者相互独立；都为空时不监听 HTTP 端口。默认地址为 `http://127.0.0.1:5140`。面板前端构建后访问该地址；在仓库根目录执行 `pnpm --filter web build` 可生成 `web/dist`。面板登录会创建 7 天有效的会话 cookie，进程重启后需要重新登录。
+通过环境变量或 `.env` 设置 `ASABOT_PANEL_PASSWORD` 以启用面板，设置 `ASABOT_API_TOKEN` 以启用对外 API。两者相互独立；都为空且未配置反向 WebSocket 时不监听 HTTP 端口。默认地址为 `http://127.0.0.1:5140`。面板前端构建后访问该地址；在仓库根目录执行 `pnpm --filter web build` 可生成 `web/dist`。面板登录会创建 7 天有效的会话 cookie，进程重启后需要重新登录。
 
 对外 API 使用 `Authorization: Bearer <token>`。例如，在设置 `ASABOT_API_TOKEN` 的 shell 中：
 

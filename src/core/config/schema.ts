@@ -54,6 +54,18 @@ const onebot11Schema = z
       .strict()
       .default(() => ({ minDelay: 1_000, maxDelay: 60_000 })),
     connections: z.array(connectionSchema).default([]),
+    reverse: z
+      .object({ accessToken: z.string().default('') })
+      .strict()
+      .optional(),
+    sendQueue: z
+      .object({
+        interval: durationSchema.default(500),
+        jitter: durationSchema.default(300),
+        maxPending: z.number().int().nonnegative().default(100),
+      })
+      .strict()
+      .default(() => ({ interval: 500, jitter: 300, maxPending: 100 })),
   })
   .strict()
 

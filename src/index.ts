@@ -6,7 +6,7 @@ export type {
   OneBotConnectionConfig,
 } from './adapters/onebot11/index.ts'
 export { createApp } from './bootstrap.ts'
-export type { Adapter, AdapterHost } from './core/adapter.ts'
+export type { Adapter, AdapterHost, BotConnectionInfo } from './core/adapter.ts'
 export { App } from './core/app.ts'
 export type {
   Bot,
@@ -48,6 +48,7 @@ export {
   NotConnectedError,
   PluginConfigError,
   PluginError,
+  SendQueueFullError,
 } from './core/errors.ts'
 export type {
   AnyEvent,

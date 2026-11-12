@@ -1,7 +1,7 @@
 import type { AddressInfo } from 'node:net'
 import type { Hono } from 'hono'
 import type { Logger } from 'pino'
-import type { Adapter, AdapterHost } from './adapter.ts'
+import type { Adapter, AdapterHost, BotConnectionInfo } from './adapter.ts'
 import { type Bot, BotRegistry } from './bot.ts'
 import type { Config } from './config/schema.ts'
 import { Dispatcher } from './dispatch/dispatcher.ts'
@@ -26,10 +26,6 @@ export interface ServerService {
   start(): Promise<void>
   stop(): Promise<void>
   address(): AddressInfo | null
-}
-export interface BotConnectionInfo {
-  connection: 'forward' | 'reverse'
-  url?: string
 }
 type Listener = (event: DispatchEvent) => unknown | Promise<unknown>
 type PublicListener =
@@ -166,8 +162,9 @@ export class App implements AdapterHost {
     return this.dispatcher.whenIdle()
   }
 
-  registerBot(bot: Bot): void {
+  registerBot(bot: Bot, connection?: BotConnectionInfo): void {
     this.bots.register(bot)
+    if (connection !== undefined) this.setBotConnection(bot, connection)
   }
 
   unregisterBot(bot: Bot): void {
