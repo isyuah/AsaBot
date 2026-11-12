@@ -1,4 +1,6 @@
+import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, unlinkSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { dirname } from 'node:path'
 import { Writable } from 'node:stream'
 import pino, { type DestinationStream, type Logger, type StreamEntry } from 'pino'
 
@@ -13,6 +15,11 @@ const redactedFields = [
   '*.password',
   '*.apiToken',
 ]
+// A subscriber failure cannot be sent through the same ring buffer without recursing.
+const subscriberErrorLogger = pino(
+  { redact: { paths: redactedFields, censor: '[Redacted]' } },
+  process.stderr,
+)
 
 export type LogRecord = Readonly<Record<string, unknown>>
 export type LogSubscriber = (record: LogRecord) => void
@@ -34,8 +41,8 @@ class LogRingBuffer {
     for (const subscriber of this.subscribers) {
       try {
         subscriber(entry)
-      } catch {
-        process.emitWarning('A log subscriber threw while receiving a record', { type: 'LogSubscriberError' })
+      } catch (error) {
+        subscriberErrorLogger.error({ err: error }, 'Log subscriber failed')
       }
     }
   }
@@ -88,6 +95,51 @@ export interface CreateLoggerOptions {
   level?: LogLevel
   destination?: DestinationStream
   pretty?: boolean
+  file?: { path: string; maxSize: number; maxFiles: number }
+}
+
+class RotatingFile {
+  private readonly options: NonNullable<CreateLoggerOptions['file']>
+  private readonly warn: (error: unknown) => void
+  private size = 0
+  private initialized = false
+  private failed = false
+
+  constructor(options: NonNullable<CreateLoggerOptions['file']>, warn: (error: unknown) => void) {
+    this.options = options
+    this.warn = warn
+  }
+
+  write(chunk: string): void {
+    if (this.failed) return
+    try {
+      const { path, maxSize, maxFiles } = this.options
+      if (!this.initialized) {
+        mkdirSync(dirname(path), { recursive: true })
+        this.size = existsSync(path) ? statSync(path).size : 0
+        this.initialized = true
+      }
+      const length = Buffer.byteLength(chunk)
+      if (this.size > 0 && this.size + length > maxSize) {
+        if (maxFiles === 1) unlinkSync(path)
+        else {
+          const oldest = `${path}.${maxFiles - 1}`
+          if (existsSync(oldest)) unlinkSync(oldest)
+          for (let index = maxFiles - 2; index >= 1; index--) {
+            const previous = `${path}.${index}`
+            if (existsSync(previous)) renameSync(previous, `${path}.${index + 1}`)
+          }
+          renameSync(path, `${path}.1`)
+        }
+        this.size = 0
+      }
+      appendFileSync(path, chunk)
+      this.size += length
+    } catch (error) {
+      this.failed = true
+      this.warn(error)
+    }
+  }
 }
 
 export function createLogger(options: CreateLoggerOptions = {}): Logger {
@@ -102,14 +154,23 @@ export function createLogger(options: CreateLoggerOptions = {}): Logger {
     { level: 'trace', stream: output },
     { level: 'trace', stream: ringBufferDestination },
   ]
-
-  return pino(
+  let result: Logger
+  if (options.file) {
+    const file = new RotatingFile(options.file, (error) => {
+      queueMicrotask(() =>
+        result.warn({ err: error, path: options.file?.path }, 'Log file write or rotation failed'),
+      )
+    })
+    streams.push({ level: 'trace', stream: file })
+  }
+  result = pino(
     {
       level: options.level ?? 'info',
       redact: { paths: redactedFields, censor: '[Redacted]' },
     },
     pino.multistream(streams),
   )
+  return result
 }
 
 export function getRecentLogs(): LogRecord[] {

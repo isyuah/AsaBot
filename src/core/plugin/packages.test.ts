@@ -31,8 +31,10 @@ describe('package operation contract', () => {
       },
     }
     const host = {
-      serial: async <T>(work: () => Promise<T>) => work(),
       installedPackages: () => new Map([[manifest.name, { manifest, plugin: 'example' }]]),
+      latestChanged() {},
+      latestFailed() {},
+      subscriberFailed() {},
       async installPackage() {
         return { name: 'example', source: 'package' as const, state: 'active' as const, enabled: true }
       },
@@ -85,8 +87,10 @@ describe('package operation contract', () => {
     service = new PackageService(
       { dir, registry: 'http://127.0.0.1:1', npm: 'npm', installTimeout: 1000 },
       {
-        serial: async <T>(work: () => Promise<T>) => work(),
         installedPackages: () => new Map(),
+        latestChanged() {},
+        latestFailed() {},
+        subscriberFailed() {},
         async installPackage(_manifest, _kind, log) {
           await service.runNpm(['install'], log)
           return { name: 'example', source: 'package', state: 'active', enabled: true }

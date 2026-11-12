@@ -1,4 +1,11 @@
-logLevel: info
+log:
+  level: info
+  # 可选：轮转文件保存在数据卷，maxFiles 包含当前文件
+  # file:
+  #   path: /app/data/logs/asabot.log
+  #   maxSize: 10MB
+  #   maxFiles: 5
+# timezone: Asia/Shanghai # 省略时使用环境变量 TZ 或系统时区
 dataDir: /app/data
 # 按需填写超管用户 ID（字符串）
 superusers: []
@@ -7,6 +14,7 @@ pluginLoader:
   dirs: [/app/plugins]
   uploadDir: /app/plugins
   hotReload: auto
+  setupTimeout: 30s
 
 packages:
   dir: /app/data/packages

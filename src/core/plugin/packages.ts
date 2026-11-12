@@ -280,8 +280,10 @@ export class ProcessNpm implements NpmExecutor {
 }
 
 interface PackageHost {
-  serial<T>(work: () => Promise<T>): Promise<T>
   installedPackages(): Map<string, { manifest: PackageManifest; plugin: string }>
+  latestChanged(name: string): void
+  latestFailed(name: string, error: unknown): void
+  subscriberFailed(operation: PackageOperation, error: unknown): void
   installPackage(
     manifest: PackageManifest,
     kind: 'install' | 'update',
@@ -301,6 +303,7 @@ export class PackageService {
   private readonly latestCache = new Map<string, { value?: string; expires: number }>()
   private readonly latestPending = new Map<string, Promise<void>>()
   private readonly timers = new Map<string, NodeJS.Timeout>()
+  private queue: Promise<void> = Promise.resolve()
 
   constructor(
     config: { dir: string; registry: string; npm: string; installTimeout: number },
@@ -366,10 +369,12 @@ export class PackageService {
     const pending = this.registry
       .metadata(name)
       .then((data) => {
-        this.latestCache.set(name, { value: data?.['dist-tags']?.latest, expires: Date.now() + 3_600_000 })
+        this.latestCache.set(name, { value: data['dist-tags']?.latest, expires: Date.now() + 3_600_000 })
+        this.host.latestChanged(name)
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         this.latestCache.set(name, { expires: Date.now() + 3_600_000 })
+        this.host.latestFailed(name, error)
       })
       .finally(() => this.latestPending.delete(name))
     this.latestPending.set(name, pending)
@@ -442,6 +447,14 @@ export class PackageService {
     })
   }
 
+  uninstallAndWait(name: string, purge: boolean): Promise<void> {
+    return this.serial(() => this.host.uninstallPackage(name, purge, () => {}))
+  }
+
+  async whenIdle(): Promise<void> {
+    await this.queue
+  }
+
   list(): PackageOperation[] {
     return this.operations.map((op) => this.snapshot(op))
   }
@@ -491,7 +504,7 @@ export class PackageService {
     this.operations.unshift(op)
     this.operations.splice(20)
     this.emit(op)
-    void this.host.serial(async () => {
+    void this.serial(async () => {
       op.status = 'running'
       this.emit(op)
       try {
@@ -522,10 +535,26 @@ export class PackageService {
     return this.snapshot(op)
   }
 
+  private serial<T>(work: () => Promise<T>): Promise<T> {
+    const result = this.queue.then(work)
+    // The caller receives the rejection; keep the queue usable for subsequent operations.
+    this.queue = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    return result
+  }
+
   private snapshot(op: PackageOperation): PackageOperation {
     return { ...op, log: [...op.log] }
   }
   private emit(op: PackageOperation): void {
-    for (const subscriber of this.subscribers) subscriber(this.snapshot(op))
+    for (const subscriber of this.subscribers) {
+      try {
+        subscriber(this.snapshot(op))
+      } catch (error) {
+        this.host.subscriberFailed(op, error)
+      }
+    }
   }
 }

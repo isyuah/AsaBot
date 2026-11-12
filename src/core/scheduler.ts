@@ -7,16 +7,26 @@ import { parseDuration } from './utils/duration.ts'
 export class Scheduler {
   private readonly logger: Logger
   private readonly signal: AbortSignal
+  private readonly timezone: string
 
-  constructor(logger: Logger, signal: AbortSignal) {
+  constructor(logger: Logger, signal: AbortSignal, timezone: string) {
     this.logger = logger
     this.signal = signal
+    this.timezone = timezone
   }
 
-  cron(expression: string, fn: () => unknown | Promise<unknown>): Disposer {
+  cron(
+    expression: string,
+    fn: (signal: AbortSignal) => unknown | Promise<unknown>,
+    options?: { timezone?: string },
+  ): Disposer {
     let job: Cron
     try {
-      job = new Cron(expression, { protect: true, unref: true }, this.wrap(fn))
+      job = new Cron(
+        expression,
+        { protect: true, unref: true, timezone: options?.timezone ?? this.timezone },
+        this.wrap(fn),
+      )
     } catch (error) {
       throw new Error(
         `Invalid cron expression "${expression}": ${error instanceof Error ? error.message : String(error)}`,
@@ -26,7 +36,7 @@ export class Scheduler {
     return this.track(() => job.stop())
   }
 
-  interval(duration: string | number, fn: () => unknown | Promise<unknown>): Disposer {
+  interval(duration: string | number, fn: (signal: AbortSignal) => unknown | Promise<unknown>): Disposer {
     const delay = parseDuration(duration)
     if (delay <= 0 || delay > 2_147_483_647) throw new Error(`Invalid interval: ${duration}`)
     const task = this.wrap(fn)
@@ -35,19 +45,19 @@ export class Scheduler {
     return this.track(() => clearInterval(timer))
   }
 
-  timeout(duration: string | number, fn: () => unknown | Promise<unknown>): Disposer {
+  timeout(duration: string | number, fn: (signal: AbortSignal) => unknown | Promise<unknown>): Disposer {
     const task = this.wrap(fn)
     const cancel = scheduleTimeout(parseDuration(duration), () => void task(), true)
     return this.track(cancel)
   }
 
-  private wrap(fn: () => unknown | Promise<unknown>): () => Promise<void> {
+  private wrap(fn: (signal: AbortSignal) => unknown | Promise<unknown>): () => Promise<void> {
     let running = false
     return async () => {
       if (running || this.signal.aborted) return
       running = true
       try {
-        await fn()
+        await fn(this.signal)
       } catch (error) {
         this.logger.error({ err: error }, 'Scheduled task failed')
       } finally {

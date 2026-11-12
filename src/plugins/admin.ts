@@ -77,6 +77,7 @@ export function createAdminPlugin(app: App) {
     name: 'admin',
     description: '管理插件与访问控制',
     setup(ctx) {
+      const log = ctx.logger
       ctx
         .command('plugin scan')
         .description('重新扫描插件目录')
@@ -110,7 +111,7 @@ export function createAdminPlugin(app: App) {
               await session.send(`安装 ${args.package} 失败：${reason(error)}`)
             }
           })().catch((error: unknown) =>
-            app.logger.error({ err: error }, 'Failed to send package operation result'),
+            log.error({ err: error, package: args.package }, 'Failed to send package operation result'),
           )
         })
 
@@ -133,7 +134,7 @@ export function createAdminPlugin(app: App) {
               await session.send(`升级 ${args.package} 失败：${reason(error)}`)
             }
           })().catch((error: unknown) =>
-            app.logger.error({ err: error }, 'Failed to send package operation result'),
+            log.error({ err: error, package: args.package }, 'Failed to send package operation result'),
           )
         })
 

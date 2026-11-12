@@ -51,8 +51,8 @@ export function pluginView(app: App, state: PluginState) {
     try {
       const json = JSON.stringify(value)
       if (json !== undefined) config = JSON.parse(json)
-    } catch {
-      app.logger.warn({ plugin: state.name }, 'Plugin configuration is not JSON serializable')
+    } catch (error) {
+      app.logger.warn({ err: error, plugin: state.name }, 'Plugin configuration is not JSON serializable')
     }
   }
   return {

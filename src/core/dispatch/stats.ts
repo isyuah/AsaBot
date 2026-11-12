@@ -7,14 +7,19 @@ export interface StatsPoint {
 const minute = 60_000
 const retention = 24 * 60 * minute
 
-function localDayStart(now: number): number {
-  const date = new Date(now)
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
-}
-
 export class MessageStats {
   private readonly buckets = new Map<number, StatsPoint>()
-  private daily: StatsPoint = { t: Number.NaN, received: 0, sent: 0 }
+  private readonly dayFormatter: Intl.DateTimeFormat
+  private daily = { day: '', received: 0, sent: 0 }
+
+  constructor(timezone: string) {
+    this.dayFormatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+  }
 
   record(direction: 'received' | 'sent', now = Date.now()): void {
     this.prune(now)
@@ -25,8 +30,8 @@ export class MessageStats {
       this.buckets.set(t, point)
     }
     point[direction]++
-    const day = localDayStart(now)
-    if (this.daily.t !== day) this.daily = { t: day, received: 0, sent: 0 }
+    const day = this.dayFormatter.format(now)
+    if (this.daily.day !== day) this.daily = { day, received: 0, sent: 0 }
     this.daily[direction]++
   }
 
@@ -55,7 +60,7 @@ export class MessageStats {
   }
 
   today(now = Date.now()): { received: number; sent: number } {
-    return this.daily.t === localDayStart(now)
+    return this.daily.day === this.dayFormatter.format(now)
       ? { received: this.daily.received, sent: this.daily.sent }
       : { received: 0, sent: 0 }
   }

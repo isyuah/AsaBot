@@ -226,7 +226,7 @@ describe('commands', () => {
     await say('/explode')
     expect(sent(bot)).toEqual(['命令执行出错，请稍后重试'])
     expect(error).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: 'plugin', command: 'explode', eventId: expect.any(String) }),
+      expect.objectContaining({ plugin: 'plugin', command: 'explode', eventId: expect.any(String) }),
       'Command failed',
     )
     const quiet = dispatchFixture({ command: { replyOnError: false } })

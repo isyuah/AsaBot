@@ -184,6 +184,22 @@ describe('HTTP service contract', () => {
     ).toBe(429)
   })
 
+  it('validates and updates the runtime log level through the panel', async () => {
+    const { t, url } = await start()
+    const cookie = await login(url)
+    expect(await (await request(url, cookie, '/logs/level')).json()).toEqual({ level: 'silent' })
+    expect(await (await request(url, cookie, '/logs/level', 'PUT', { level: 'warn' })).json()).toEqual({
+      level: 'warn',
+    })
+    expect(t.app.logger.isLevelEnabled('info')).toBe(false)
+    const invalid = await request(url, cookie, '/logs/level', 'PUT', { level: 'invalid' })
+    expect(invalid.status).toBe(400)
+    expect(await invalid.json()).toMatchObject({
+      error: { code: 'BAD_REQUEST', issues: [{ path: 'level' }] },
+    })
+    expect(t.app.config.log.level).toBe('info')
+  })
+
   it('provides views, plugin operations, config validation, access control and dynamic routes', async () => {
     const { url } = await start()
     const cookie = await login(url)

@@ -85,7 +85,7 @@ export async function runMain(): Promise<void> {
   }
 
   const config = await loadConfig(configPath)
-  const app = createApp(config, { logger: createLogger({ level: config.logLevel }), configPath })
+  const app = createApp(config, { configPath })
   installProcessHandlers(app)
   app.logger.info({ configPath }, 'Starting AsaBot')
   await app.start()

@@ -10,7 +10,7 @@ import { PluginConfigError, PluginError } from '../errors.ts'
 import { Context } from './context.ts'
 import type { PluginDefinition } from './definition.ts'
 import { importPlugin, registerPluginRoots } from './loader.ts'
-import { type PackageManifest, type PackageOptions, PackageService } from './packages.ts'
+import { type PackageManifest, type PackageOptions, PackageService, redact } from './packages.ts'
 import type { PluginState } from './types.ts'
 import { ManagementError, uploadContents } from './upload.ts'
 
@@ -26,6 +26,10 @@ interface Entry {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function ignoredEntry(name: string): boolean {
+  return name.startsWith('_') || name.startsWith('.') || /\.(?:test|spec)\.|\.d\.ts$/.test(name)
 }
 
 function validateDefinition(value: unknown): PluginDefinition {
@@ -59,7 +63,9 @@ export class PluginManager {
   private readonly entries = new Map<string, Entry>()
   private readonly files = new Map<string, Entry>()
   private readonly duplicates: Entry[] = []
+  private readonly uninstalling = new Set<string>()
   private readonly watchers: FSWatcher[] = []
+  private readonly packageUpdateSubscribers = new Set<(state: PluginState) => void>()
   private readonly timers = new Map<string, NodeJS.Timeout>()
   private releaseRoots?: () => void
   private queue: Promise<void> = Promise.resolve()
@@ -79,8 +85,32 @@ export class PluginManager {
     this.packages = new PackageService(
       app.config.packages,
       {
-        serial: (work) => this.serial(work),
         installedPackages: () => this.installedPackages(),
+        latestChanged: (name) => {
+          const entry = [...this.entries.values()].find((item) => item.manifest?.name === name)
+          if (entry) {
+            for (const subscriber of this.packageUpdateSubscribers) {
+              try {
+                subscriber({ ...entry.state })
+              } catch (error) {
+                this.app.logger.error(
+                  { err: error, plugin: entry.state.name },
+                  'Package update subscriber failed',
+                )
+              }
+            }
+          }
+        },
+        latestFailed: (name, error) =>
+          this.app.logger.warn(
+            { package: name, reason: redact(errorMessage(error)) },
+            'Registry update check failed',
+          ),
+        subscriberFailed: (operation, error) =>
+          this.app.logger.error(
+            { err: error, package: operation.name, operation: operation.id },
+            'Package operation subscriber failed',
+          ),
         installPackage: (manifest, kind, log) => this.installPackage(manifest, kind, log),
         uninstallPackage: (name, purge, log) => this.uninstallPackage(name, purge, log),
       },
@@ -153,6 +183,7 @@ export class PluginManager {
     for (const dir of this.dirs) {
       await mkdir(dir, { recursive: true })
       const watcher = watch(dir, { recursive: true }, (_event, filename) => {
+        if (filename !== null && ignoredEntry(filename.toString().split(/[\\/]/, 1)[0] as string)) return
         const path = filename === null ? dir : resolve(dir, filename.toString())
         const existing = this.timers.get(path)
         if (existing) clearTimeout(existing)
@@ -180,6 +211,7 @@ export class PluginManager {
 
   async stop(): Promise<void> {
     await this.stopWatching()
+    await this.packages.whenIdle()
     for (const entry of this.ordered().reverse()) {
       if (entry.context) await this.unload(entry)
       this.setState(entry, 'disabled')
@@ -191,7 +223,7 @@ export class PluginManager {
 
   enable(name: string): Promise<void> {
     return this.serial(async () => {
-      const entry = this.require(name)
+      const entry = this.requireAvailable(name)
       await this.persist(name, 'enabled', true)
       this.entryConfig(name).enabled = true
       entry.state.enabled = true
@@ -202,7 +234,7 @@ export class PluginManager {
 
   disable(name: string): Promise<void> {
     return this.serial(async () => {
-      const entry = this.require(name)
+      const entry = this.requireAvailable(name)
       await this.persist(name, 'enabled', false)
       this.entryConfig(name).enabled = false
       entry.state.enabled = false
@@ -212,7 +244,7 @@ export class PluginManager {
 
   reload(name: string): Promise<void> {
     return this.serial(async () => {
-      const entry = this.require(name)
+      const entry = this.requireAvailable(name)
       if (entry.manifest && !entry.definition && !entry.state.path) {
         const path = await this.packageEntry(entry.manifest)
         entry.state.path = path
@@ -310,11 +342,13 @@ export class PluginManager {
   }
 
   uninstall(name: string, purge = false): Promise<void> {
+    const entry = this.requireAvailable(name)
+    if (entry.manifest) return this.packages.uninstallAndWait(entry.manifest.name, purge)
     return this.serial(async () => {
-      const entry = this.require(name)
+      const entry = this.requireAvailable(name)
       if (entry.state.source === 'builtin')
         throw new ManagementError(409, 'Built-in plugins cannot be uninstalled')
-      if (entry.manifest) return this.uninstallPackage(entry.manifest.name, purge, () => {})
+      if (entry.manifest) throw new ManagementError(409, 'Plugin source changed during uninstall')
       const path = entry.state.path as string
       const root = this.dirs.find((dir) => this.isInside(dir, path))
       if (!root) throw new ManagementError(409, 'Plugin is outside plugin directories')
@@ -341,9 +375,14 @@ export class PluginManager {
     return manifest ? this.packages.info(manifest) : undefined
   }
 
+  subscribePackageUpdates(subscriber: (state: PluginState) => void): () => void {
+    this.packageUpdateSubscribers.add(subscriber)
+    return () => this.packageUpdateSubscribers.delete(subscriber)
+  }
+
   updateConfig(name: string, value: unknown): Promise<void> {
     return this.serial(async () => {
-      const entry = this.require(name)
+      const entry = this.requireAvailable(name)
       this.validateConfig(entry, value)
       await this.persist(name, 'config', value)
       this.entryConfig(name).config = value
@@ -352,7 +391,7 @@ export class PluginManager {
   }
 
   setGroupEnabled(name: string, groupKey: string, enabled: boolean): void {
-    this.require(name)
+    this.requireAvailable(name)
     this.app.storage.setGroupEnabled(name, groupKey, enabled)
   }
 
@@ -375,6 +414,12 @@ export class PluginManager {
   private require(name: string): Entry {
     const entry = this.entries.get(name)
     if (!entry) throw new PluginError(`Unknown plugin "${name}"`)
+    return entry
+  }
+
+  private requireAvailable(name: string): Entry {
+    const entry = this.require(name)
+    if (this.uninstalling.has(name)) throw new ManagementError(409, 'Plugin package is being uninstalled')
     return entry
   }
 
@@ -440,6 +485,7 @@ export class PluginManager {
       throw error
     }
     for (const item of names.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (ignoredEntry(item.name)) continue
       let path: string | undefined
       if (item.isFile() && /\.(ts|js)$/.test(item.name) && !item.name.endsWith('.d.ts'))
         path = join(dir, item.name)
@@ -642,16 +688,20 @@ export class PluginManager {
     const spec = `${manifest.name}@${kind === 'update' ? 'latest' : manifest.version}`
     await this.packages.runNpm(this.packages.installArgs(spec), log)
     try {
-      const installed = await this.packages.manifest(manifest.name)
-      if (
-        installed.name !== manifest.name ||
-        installed.version !== manifest.version ||
-        !installed.keywords?.includes('asabot-plugin')
-      )
-        throw new ManagementError(409, 'Installed package does not match registry metadata')
-      const entry = await this.addPackage(installed, previous)
-      await this.reconcile()
-      return { ...entry.state }
+      return await this.serial(async () => {
+        const installed = await this.packages.manifest(manifest.name)
+        if (
+          installed.name !== manifest.name ||
+          installed.version !== manifest.version ||
+          !installed.keywords?.includes('asabot-plugin')
+        )
+          throw new ManagementError(409, 'Installed package does not match registry metadata')
+        if (previous && this.entries.get(previous.state.name) !== previous)
+          throw new ManagementError(409, 'Plugin changed during package installation')
+        const entry = await this.addPackage(installed, previous)
+        await this.reconcile()
+        return { ...entry.state }
+      })
     } catch (error) {
       try {
         if (oldManifest)
@@ -672,21 +722,37 @@ export class PluginManager {
   }
 
   private async uninstallPackage(name: string, purge: boolean, log: (line: string) => void): Promise<void> {
-    const entry = [...this.entries.values()].find((item) => item.manifest?.name === name)
-    if (!entry) throw new ManagementError(404, 'Package is not installed')
-    const enabled = entry.state.enabled
-    await this.removeEntries([entry])
+    const { entry, enabled } = await this.serial(async () => {
+      const entry = [...this.entries.values()].find((item) => item.manifest?.name === name)
+      if (!entry) throw new ManagementError(404, 'Package is not installed')
+      const enabled = entry.state.enabled
+      this.uninstalling.add(entry.state.name)
+      entry.state.enabled = false
+      try {
+        await this.reconcile()
+      } catch (error) {
+        entry.state.enabled = enabled
+        this.uninstalling.delete(entry.state.name)
+        throw error
+      }
+      return { entry, enabled }
+    })
     try {
       await this.packages.runNpm(['uninstall', name, '--ignore-scripts', '--no-audit', '--no-fund'], log)
     } catch (error) {
-      entry.state.enabled = enabled
-      this.entries.set(entry.state.name, entry)
-      if (entry.state.path) this.files.set(entry.state.path, entry)
-      await this.reconcile()
+      await this.serial(async () => {
+        entry.state.enabled = enabled
+        this.uninstalling.delete(entry.state.name)
+        await this.reconcile()
+      })
       throw error
     }
-    if (purge) await this.purge(entry.state.name)
-    await this.reconcile()
+    await this.serial(async () => {
+      this.uninstalling.delete(entry.state.name)
+      await this.removeEntries([entry])
+      if (purge) await this.purge(entry.state.name)
+      await this.reconcile()
+    })
   }
 
   private ordered(): Entry[] {
@@ -794,7 +860,26 @@ export class PluginManager {
         this.app.logger.warn({ plugin: entry.state.name }, 'Plugin has configuration but no schema')
       const parsed = this.validateConfig(entry, value)
       context = new Context(this.app, entry.state.name, parsed)
-      await entry.definition?.setup(context)
+      let timedOut = false
+      let timer: NodeJS.Timeout | undefined
+      const setup = Promise.resolve().then(() => entry.definition?.setup(context as Context<unknown>))
+      void setup.catch((error: unknown) => {
+        if (timedOut)
+          this.app.logger.error({ err: error, plugin: entry.state.name }, 'Plugin setup failed after timeout')
+      })
+      try {
+        await Promise.race([
+          setup,
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => {
+              timedOut = true
+              reject(new PluginError('setup 超时'))
+            }, this.app.config.pluginLoader.setupTimeout)
+          }),
+        ])
+      } finally {
+        if (timer) clearTimeout(timer)
+      }
       entry.context = context
       entry.failure = undefined
       this.setState(entry, 'active')

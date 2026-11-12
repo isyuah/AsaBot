@@ -19,7 +19,7 @@ ENV NODE_ENV=production
 # A directory, not a single file: write-back renames a temp file over the config, which fails on a file bind mount.
 ENV ASABOT_CONFIG=/app/config/asabot.config.yaml
 WORKDIR /app
-RUN apk add --no-cache tini \
+RUN apk add --no-cache tini tzdata \
     && mkdir -p /app/data /app/plugins /app/config \
     && chown node:node /app /app/data /app/plugins /app/config
 

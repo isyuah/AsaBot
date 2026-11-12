@@ -1,5 +1,13 @@
-# 日志级别：trace、debug、info、warn、error
-logLevel: info
+log:
+  # trace、debug、info、warn、error；面板可以临时调整，重启后恢复
+  level: info
+  # 可选：日志文件按大小轮转，maxFiles 包含当前文件
+  # file:
+  #   path: ./data/logs/asabot.log
+  #   maxSize: 10MB
+  #   maxFiles: 5
+# cron 和“今日”统计的 IANA 时区；省略时优先使用 TZ，其次使用系统时区
+# timezone: Asia/Shanghai
 # 数据库及插件数据目录
 dataDir: ./data
 # 超管用户 ID，必须用引号保留为字符串
@@ -61,6 +69,8 @@ pluginLoader:
   uploadDir: ./plugins
   # auto 表示非 production 环境启用热重载，也可设为 true 或 false
   hotReload: auto
+  # 插件 setup 超时后回收资源并标记为 failed
+  setupTimeout: 30s
 
 packages:
   # 插件包和 npm 缓存目录，默认位于 dataDir/packages

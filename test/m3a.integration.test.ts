@@ -187,6 +187,55 @@ describe('plugins through the virtual adapter', () => {
     expect(await t.say('/good')).toEqual(['ok'])
   })
 
+  it('times out a hanging setup, disposes its resources and loads the next plugin', async () => {
+    let signal: AbortSignal | undefined
+    let cleaned = false
+    const releaseLate = Promise.withResolvers<void>()
+    const lateFinished = Promise.withResolvers<void>()
+    const hanging = definePlugin({
+      name: 'hanging',
+      setup(ctx) {
+        signal = ctx.signal
+        ctx.command('leaked').action(() => 'leaked')
+        ctx.onDispose(() => {
+          cleaned = true
+        })
+        return new Promise<void>(() => {})
+      },
+    })
+    const next = definePlugin({
+      name: 'next',
+      setup(ctx) {
+        ctx.command('next').action(() => 'ready')
+      },
+    })
+    const late = definePlugin({
+      name: 'late',
+      async setup(ctx) {
+        await releaseLate.promise
+        try {
+          ctx.command('late-command').action(() => 'late')
+        } finally {
+          lateFinished.resolve()
+        }
+      },
+    })
+    const t = await testApp({
+      plugins: [hanging, late, next],
+      config: { pluginLoader: { setupTimeout: 20 } },
+    })
+    expect(t.app.plugins.get('hanging')).toMatchObject({ state: 'failed', error: 'setup 超时' })
+    expect(signal?.aborted).toBe(true)
+    expect(cleaned).toBe(true)
+    expect(await t.say('/leaked')).toEqual([])
+    expect(t.app.plugins.get('next')?.state).toBe('active')
+    expect(await t.say('/next')).toEqual(['ready'])
+    releaseLate.resolve()
+    await lateFinished.promise
+    expect(t.app.plugins.get('late')).toMatchObject({ state: 'failed', error: 'setup 超时' })
+    expect(await t.say('/late-command')).toEqual([])
+  })
+
   it('reconciles dependencies in order, handles cycles and restores dependents', async () => {
     const calls: string[] = []
     const base = definePlugin({
@@ -285,6 +334,7 @@ describe('plugins through the virtual adapter', () => {
 
   it('isolates timer errors, skips overlap and stops on unload', async () => {
     let runs = 0
+    let taskSignal: AbortSignal | undefined
     let release!: () => void
     const blocked = new Promise<void>((resolve) => {
       release = resolve
@@ -292,7 +342,8 @@ describe('plugins through the virtual adapter', () => {
     const plugin = definePlugin({
       name: 'timer',
       setup(ctx) {
-        ctx.interval(10, async () => {
+        ctx.interval(10, async (signal) => {
+          taskSignal = signal
           runs++
           await blocked
           throw new Error('timer error')
@@ -306,6 +357,7 @@ describe('plugins through the virtual adapter', () => {
     await new Promise((resolve) => setTimeout(resolve, 30))
     expect(runs).toBeGreaterThan(1)
     await t.app.plugins.disable('timer')
+    expect(taskSignal?.aborted).toBe(true)
     const stopped = runs
     await new Promise((resolve) => setTimeout(resolve, 30))
     expect(runs).toBe(stopped)
@@ -345,6 +397,34 @@ describe('plugins through the virtual adapter', () => {
 })
 
 describe('storage and YAML', () => {
+  it('purges only tables owned by the exact plugin, including after migration drops', async () => {
+    const storage = new Storage(await directory())
+    storage.open()
+    try {
+      storage.migrate('foo', [
+        'CREATE TABLE p_foo_items (value TEXT)',
+        'CREATE TABLE temporary_foo (value TEXT)',
+        'DROP TABLE temporary_foo',
+      ])
+      storage.migrate('foo_bar', [
+        'CREATE TABLE p_foo_bar_items (value TEXT)',
+        'CREATE TABLE temporary_foo (value TEXT)',
+      ])
+      storage.db.exec('CREATE TABLE p_foo_direct (value TEXT)')
+      storage.purgePlugin('foo')
+      const names = storage.db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .all()
+        .map((row) => row.name)
+      expect(names).not.toContain('p_foo_items')
+      expect(names).toEqual(expect.arrayContaining(['p_foo_bar_items', 'temporary_foo', 'p_foo_direct']))
+      expect(
+        storage.db.prepare('SELECT plugin FROM plugin_tables WHERE table_name = ?').get('temporary_foo'),
+      ).toMatchObject({ plugin: 'foo_bar' })
+    } finally {
+      storage.close()
+    }
+  })
   it('rolls back migrations, runs them once and persists KV, access and group state', async () => {
     const dir = await directory()
     const storage = new Storage(dir)

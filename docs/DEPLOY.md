@@ -37,6 +37,8 @@ cp asabot.config.docker.yaml config/asabot.config.yaml
 
 创建 `.env`，至少设置非空的 `ASABOT_PANEL_PASSWORD`。按需设置 `ASABOT_API_TOKEN`、`ONEBOT_TOKEN` 和 `ONEBOT_REVERSE_TOKEN`，连接 token 要与对应 OneBot 服务一致。使用较长的随机值，并限制 `.env` 的读取权限，不要提交该文件。Docker 示例配置在容器内监听 `0.0.0.0:5140`，Compose 默认只把端口发布到宿主机的 `127.0.0.1:5140`。
 
+Compose 的 `TZ` 默认为 `Asia/Shanghai`，可在 `.env` 中设置其他 IANA 时区，例如 `TZ=Europe/London`。配置文件中的 `timezone` 优先于 `TZ`；两者都未设置时使用系统时区。cron 和面板的“今日”统计使用该时区，单个 cron 任务也可单独指定时区。直接使用 `docker run` 时可通过 `-e TZ=Asia/Shanghai` 设置。
+
 ```sh
 docker compose up -d --build
 docker compose ps

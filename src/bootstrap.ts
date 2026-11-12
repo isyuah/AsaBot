@@ -18,7 +18,7 @@ export interface CreateAppOptions {
 }
 
 export function createApp(config: Config, options: CreateAppOptions = {}): App {
-  const app = new App(config, options.logger ?? createLogger({ level: config.logLevel }), {
+  const app = new App(config, options.logger ?? createLogger(config.log), {
     configPath: options.configPath,
     packages: options.packages,
   })

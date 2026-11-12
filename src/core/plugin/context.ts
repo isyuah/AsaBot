@@ -43,7 +43,7 @@ export class Context<Config = undefined> {
     this.value = config
     this.childLogger = app.logger.child({ plugin: name })
     this.scope = { owner: name, signal: this.controller.signal }
-    this.scheduler = new Scheduler(this.childLogger, this.controller.signal)
+    this.scheduler = new Scheduler(this.childLogger, this.controller.signal, app.config.timezone)
     this.kv = app.storage.store(name, () => this.assertActive())
   }
 
@@ -147,15 +147,19 @@ export class Context<Config = undefined> {
     }
     register(this.routeApp)
   }
-  cron(expression: string, fn: () => unknown | Promise<unknown>): Disposer {
+  cron(
+    expression: string,
+    fn: (signal: AbortSignal) => unknown | Promise<unknown>,
+    options?: { timezone?: string },
+  ): Disposer {
     this.assertActive()
-    return this.scheduler.cron(expression, fn)
+    return this.scheduler.cron(expression, fn, options)
   }
-  interval(duration: string | number, fn: () => unknown | Promise<unknown>): Disposer {
+  interval(duration: string | number, fn: (signal: AbortSignal) => unknown | Promise<unknown>): Disposer {
     this.assertActive()
     return this.scheduler.interval(duration, fn)
   }
-  timeout(duration: string | number, fn: () => unknown | Promise<unknown>): Disposer {
+  timeout(duration: string | number, fn: (signal: AbortSignal) => unknown | Promise<unknown>): Disposer {
     this.assertActive()
     return this.scheduler.timeout(duration, fn)
   }
@@ -182,6 +186,7 @@ export class Context<Config = undefined> {
   }
 
   private assertActive(): void {
-    if (this.disposed) throw new PluginError(`Plugin "${this.owner}" context has been disposed`)
+    if (this.disposed || this.controller.signal.aborted)
+      throw new PluginError(`Plugin "${this.owner}" context has been disposed`)
   }
 }

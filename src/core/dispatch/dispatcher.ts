@@ -558,7 +558,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
       this.logger.error(
         {
           err: error,
-          owner: scope.owner,
+          plugin: scope.owner,
           event: event.name,
           eventId: event.id,
           ...(command === undefined ? {} : { command }),
@@ -579,7 +579,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
     } catch (error) {
       if (isCancellation(error, signal)) {
         if (timeout.signal.aborted && signal.reason === timeout.signal.reason)
-          this.logger.warn({ owner: scope.owner, event: event.name, eventId: event.id }, '处理器超时')
+          this.logger.warn({ plugin: scope.owner, event: event.name, eventId: event.id }, '处理器超时')
       } else {
         logError(error)
         if (onError !== undefined) {
@@ -587,7 +587,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
             await onError(view)
           } catch (replyError) {
             this.logger.error(
-              { err: replyError, owner: scope.owner, event: event.name, eventId: event.id },
+              { err: replyError, plugin: scope.owner, event: event.name, eventId: event.id },
               'Failed to send error reply',
             )
           }

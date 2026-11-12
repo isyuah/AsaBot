@@ -66,7 +66,7 @@ server:
 
 ### 常见问题
 
-- **连接不上服务**：查看 `OneBot WebSocket error` 日志中的 `reason`、`code` 和 URL，例如 `ECONNREFUSED` 通常表示地址、端口、服务监听或容器端口映射需要检查。将 `logLevel` 改为 `debug` 可看到 `Connecting OneBot forward WebSocket`。连接失败后框架会自动重试。
+- **连接不上服务**：查看 `OneBot WebSocket error` 日志中的 `reason`、`code` 和 URL，例如 `ECONNREFUSED` 通常表示地址、端口、服务监听或容器端口映射需要检查。将 `log.level` 改为 `debug` 可看到 `Connecting OneBot forward WebSocket`。连接失败后框架会自动重试。
 - **token 不一致**：对端会拒绝 WebSocket 握手，日志通常包含 `401` 等服务端返回的错误，机器人不会上线并会继续重连。核对对端的 token 和 `ONEBOT_TOKEN`；不要把 token 写进 URL 或提交到仓库。
 - **启动后没有命令回复**：先查看 `/ping` 和 `/status`，再检查插件状态、访问控制、群插件开关和命令前缀。`AsaBot started` 表示框架已启动，适配器仍可能处于重连中。
 - **插件加载失败**：超管使用 `/plugin list` 查看失败原因，详细信息见日志；修复插件文件后会自动尝试重载。
@@ -77,7 +77,7 @@ server:
 
 | 配置项 | 用途 |
 | --- | --- |
-| `logLevel`、`dataDir`、`superusers` | 日志级别、数据目录、超管 ID 列表 |
+| `log`、`timezone`、`dataDir`、`superusers` | 日志级别和可选的轮转文件、时区、数据目录、超管 ID 列表 |
 | `command` | 前缀、@机器人触发方式，以及错误和权限提示 |
 | `dispatch` | 处理器超时、忽略自身消息、prompt 默认和最大超时 |
 | `adapters.onebot11` | 正向 WS 地址、反向 WS token、API 超时、重连和发送队列；支持多个账号 |
@@ -126,7 +126,7 @@ curl -X POST http://127.0.0.1:5140/api/v1/send \
 
 面板可以搜索、安装、升级和卸载 npm 插件包。超管可以使用 `/plugin install <包名>`、`/plugin update <包名>` 和 `/plugin uninstall <插件名>`；安装时加 `-f` 可跳过框架版本检查。面板的包操作使用 npm 包名，插件卸载和聊天命令使用插件的 `name`。包代码与框架运行在同一进程，拥有进程的完整权限，只安装信任的插件。
 
-文件和包插件默认保存在对应插件目录及 `data/packages`。卸载默认保留配置和数据；选择清除数据或在聊天命令后加 `--purge` 会一并删除插件的配置、KV、迁移记录、群开关、约定表及数据目录。内置插件不能卸载。
+文件和包插件默认保存在对应插件目录及 `data/packages`。卸载默认保留配置和数据；选择清除数据或在聊天命令后加 `--purge` 会一并删除插件的配置、KV、迁移记录、群开关、迁移中创建的表及数据目录。内置插件不能卸载。
 
 ### 开发并发布插件包
 
@@ -165,7 +165,7 @@ export default definePlugin({
 })
 ```
 
-默认发现 `plugins/<name>.ts` 和 `plugins/<name>/index.ts`；文件默认导出 `definePlugin(...)` 的结果。`name` 由小写英文字母、数字、`-` 和 `_` 组成且必须全局唯一，`core` 是保留名。插件可声明 `version`、`description`、`depends: ['其他插件名']` 和 zod 配置 schema；从 `asabot` 导入 `z`。例如 `plugins/echo.ts` 和 `plugins/guess.ts` 分别演示配置、观察者、命令和多轮游戏。
+默认发现 `plugins/<name>.ts` 和 `plugins/<name>/index.ts`；文件默认导出 `definePlugin(...)` 的结果。顶层以 `_` 或 `.` 开头的文件和目录，以及 `*.test.*`、`*.spec.*`、`*.d.ts` 均被忽略。`name` 由小写英文字母、数字、`-` 和 `_` 组成且必须全局唯一，`core` 是保留名。插件可声明 `version`、`description`、`depends: ['其他插件名']` 和 zod 配置 schema；从 `asabot` 导入 `z`。例如 `plugins/echo.ts` 和 `plugins/guess.ts` 分别演示配置、观察者、命令和多轮游戏。
 
 ### Context 一览
 
@@ -264,9 +264,9 @@ ctx.db.prepare('INSERT OR REPLACE INTO p_scores_best (user_id, score) VALUES (?,
   .run(session.userId, 3)
 ```
 
-迁移按插件记录已执行版本，只执行新增步骤；约定表名以 `p_<插件名>_` 开头。`session` 在上例中来自命令或事件处理器。
+迁移按插件记录已执行版本，只执行新增步骤；约定表名以 `p_<插件名>_` 开头。建表应通过 `ctx.migrate`，框架记录迁移创建的表的归属，清除插件数据时才会删除这些表；直接通过 `ctx.db.exec` 创建的表不会被自动清除。`session` 在上例中来自命令或事件处理器。
 
-定时任务可以用 `ctx.cron('0 9 * * *', fn)`、`ctx.interval('10m', fn)` 或 `ctx.timeout('30s', fn)`。插件卸载时自动停止，同一任务上次尚未结束时会跳过本次，任务异常会记录日志。
+定时任务可以用 `ctx.cron('0 9 * * *', fn)`、`ctx.interval('10m', fn)` 或 `ctx.timeout('30s', fn)`。回调接收 `AbortSignal`，插件卸载时信号会中止并自动停止任务；同一任务上次尚未结束时会跳过本次，任务异常会记录日志。cron 默认使用配置的 `timezone`，也可用第三个参数 `{ timezone: 'Europe/London' }` 单独指定。
 
 ### 按群开关与热重载
 

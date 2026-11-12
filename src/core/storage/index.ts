@@ -20,6 +20,7 @@ const coreMigrations = [
     PRIMARY KEY (plugin, group_key));
    CREATE TABLE access_list (list TEXT NOT NULL, subject TEXT NOT NULL, key TEXT NOT NULL,
     PRIMARY KEY (list, subject, key));`,
+  `CREATE TABLE plugin_tables (plugin TEXT NOT NULL, table_name TEXT PRIMARY KEY);`,
 ]
 
 export class Storage {
@@ -116,7 +117,33 @@ export class Storage {
     try {
       const row = db.prepare('SELECT version FROM migrations WHERE plugin = ?').get(owner)
       const version = row === undefined ? 0 : Number(row.version)
-      for (let index = version; index < steps.length; index++) db.exec(steps[index] as string)
+      const tables = (): Set<string> =>
+        new Set(
+          db
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
+            )
+            .all()
+            .map((item) => String(item.name)),
+        )
+      const changes: { name: string; added: boolean }[] = []
+      for (let index = version; index < steps.length; index++) {
+        const before = tables()
+        db.exec(steps[index] as string)
+        const after = tables()
+        for (const name of before) if (!after.has(name)) changes.push({ name, added: false })
+        for (const name of after) if (!before.has(name)) changes.push({ name, added: true })
+        if (after.has('plugin_tables')) {
+          for (const change of changes.splice(0)) {
+            if (change.added)
+              db.prepare('INSERT INTO plugin_tables (plugin, table_name) VALUES (?, ?)').run(
+                owner,
+                change.name,
+              )
+            else db.prepare('DELETE FROM plugin_tables WHERE table_name = ?').run(change.name)
+          }
+        }
+      }
       if (steps.length > version) {
         db.prepare(
           'INSERT INTO migrations VALUES (?, ?) ON CONFLICT(plugin) DO UPDATE SET version = excluded.version',
@@ -161,11 +188,11 @@ export class Storage {
       for (const table of ['kv', 'migrations', 'plugin_group_state']) {
         db.prepare(`DELETE FROM ${table} WHERE plugin = ?`).run(owner)
       }
-      const prefix = `p_${owner}_`
-      for (const row of db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()) {
-        const name = String(row.name)
-        if (name.startsWith(prefix)) db.exec(`DROP TABLE IF EXISTS "${name.replaceAll('"', '""')}"`)
+      for (const row of db.prepare('SELECT table_name FROM plugin_tables WHERE plugin = ?').all(owner)) {
+        const name = String(row.table_name)
+        db.exec(`DROP TABLE IF EXISTS "${name.replaceAll('"', '""')}"`)
       }
+      db.prepare('DELETE FROM plugin_tables WHERE plugin = ?').run(owner)
       db.exec('COMMIT')
     } catch (error) {
       db.exec('ROLLBACK')

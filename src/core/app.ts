@@ -76,7 +76,7 @@ export class App implements AdapterHost {
   readonly bots = new BotRegistry()
   readonly storage: Storage
   readonly plugins: PluginManager
-  readonly stats = new MessageStats()
+  readonly stats: MessageStats
   readonly startedAt = Date.now()
   server?: ServerService
   private serverFactory?: () => ServerService
@@ -97,6 +97,7 @@ export class App implements AdapterHost {
   ) {
     this.config = config
     this.logger = logger
+    this.stats = new MessageStats(config.timezone)
     this.dispatcher = new Dispatcher(config, logger, this.shutdown.signal)
     this.sessionServices = this.dispatcher
     this.events = new CoreEvents(this.dispatcher)
@@ -112,8 +113,11 @@ export class App implements AdapterHost {
       for (const subscriber of this.dispatchSubscribers) {
         try {
           subscriber(event)
-        } catch {
-          this.logger.error('Dispatch subscriber failed')
+        } catch (error) {
+          this.logger.error(
+            { err: error, event: event.name, eventId: event.id },
+            'Dispatch subscriber failed',
+          )
         }
       }
     }

@@ -236,7 +236,7 @@ describe('dispatcher pipeline', () => {
     expect(signal?.aborted).toBe(true)
     expect(warn).toHaveBeenCalledTimes(1)
     expect(warn).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: 'example', event: 'message.group' }),
+      expect.objectContaining({ plugin: 'example', event: 'message.group' }),
       '处理器超时',
     )
     expect(error).not.toHaveBeenCalled()
@@ -288,7 +288,7 @@ describe('dispatcher pipeline', () => {
     await vi.waitFor(() =>
       expect(error).toHaveBeenCalledWith(
         expect.objectContaining({
-          owner: 'plugin',
+          plugin: 'plugin',
           err: expect.objectContaining({ message: 'late failure' }),
         }),
         'Command failed',

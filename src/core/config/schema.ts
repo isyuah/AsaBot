@@ -17,6 +17,50 @@ export const durationSchema = z
     }
   })
 
+export const logLevelSchema = z.enum(['trace', 'debug', 'info', 'warn', 'error'])
+
+const timezoneSchema = z
+  .string()
+  .min(1)
+  .refine((value) => {
+    try {
+      new Intl.DateTimeFormat('en', { timeZone: value })
+      return true
+    } catch {
+      return false
+    }
+  }, 'Invalid IANA timezone')
+
+const fileSizeSchema = z.union([z.number(), z.string()]).transform((value, context) => {
+  const match = typeof value === 'string' ? /^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)$/i.exec(value) : undefined
+  const units: Record<string, number> = { B: 1, KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3 }
+  const size =
+    typeof value === 'number'
+      ? value
+      : match
+        ? Number(match[1]) * (units[(match[2] as string).toUpperCase()] as number)
+        : NaN
+  if (!Number.isSafeInteger(size) || size <= 0) {
+    context.issues.push({ code: 'custom', message: 'Invalid file size', input: value })
+    return z.NEVER
+  }
+  return size
+})
+
+const logSchema = z
+  .object({
+    level: logLevelSchema.default('info'),
+    file: z
+      .object({
+        path: z.string().min(1),
+        maxSize: fileSizeSchema.default(10 * 1024 * 1024),
+        maxFiles: z.number().int().min(1).default(5),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+
 const commandSchema = z
   .object({
     prefixes: z.array(z.string()).default(['/']),
@@ -41,6 +85,9 @@ const pluginLoaderSchema = z
     dirs: z.array(z.string()).default(['./plugins']),
     uploadDir: z.string().min(1).optional(),
     hotReload: z.union([z.literal('auto'), z.boolean()]).default('auto'),
+    setupTimeout: durationSchema
+      .refine((value) => value > 0 && value <= 2_147_483_647, 'Invalid setup timeout')
+      .default(30_000),
   })
   .strict()
 
@@ -71,7 +118,10 @@ const serverSchema = z
 
 export const configSchema = z
   .object({
-    logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
+    log: logSchema.default(() => logSchema.parse({})),
+    timezone: timezoneSchema.prefault(
+      () => process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
+    ),
     dataDir: z.string().min(1).default('./data'),
     superusers: z.array(z.string()).default([]),
     command: commandSchema.default(() => commandSchema.parse({})),

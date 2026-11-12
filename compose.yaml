@@ -3,6 +3,9 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
+    # 容器时区；配置文件中的 timezone 会优先于 TZ
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
       - "127.0.0.1:5140:5140"
     volumes:

@@ -259,27 +259,59 @@ try {
   const gate = installedNpm.pauseNext()
   const forced = await begin('/packages/install', { name: 'asabot-incompatible', force: true })
   await gate.entered.promise
-  let uploadFinished = false
+  const queuedInstall = await begin('/packages/install', { name: 'asabot-m8-e2e', version: '^1.0.0' })
+  const queuedOperations = (await (await request('/packages/operations')).json()) as {
+    id: string
+    status: string
+  }[]
+  assert.equal(queuedOperations.find((operation) => operation.id === queuedInstall.id)?.status, 'queued')
   const queuedUpload = request('/plugins/upload', 'POST', {
     filename: 'queued.js',
-    content: Buffer.from(`export default { name: 'queued', setup() {} }`).toString('base64'),
-  }).then((response) => {
-    uploadFinished = true
-    return response
+    content: Buffer.from(
+      `import { definePlugin, z } from 'asabot'; export default definePlugin({ name: 'queued', config: z.object({ label: z.string().default('initial') }), setup() {} })`,
+    ).toString('base64'),
   })
   try {
-    await delay(100)
-    assert.equal(uploadFinished, false)
+    const response = await Promise.race([
+      queuedUpload,
+      delay(5000).then(() => {
+        throw new Error('Plugin management blocked by npm')
+      }),
+    ])
+    assert.equal(response.status, 201)
+    assert.equal((await request('/plugins/queued/disable', 'POST')).status, 200)
+    assert.equal((await request('/plugins/queued/enable', 'POST')).status, 200)
+    assert.equal((await request('/plugins/queued/reload', 'POST')).status, 200)
+    assert.equal(
+      (await request('/plugins/queued/config', 'PUT', { config: { label: 'changed' } })).status,
+      200,
+    )
   } finally {
     gate.release.resolve()
   }
   assert.equal((await waitOperation(forced.id)).status, 'succeeded')
-  assert.equal((await queuedUpload).status, 201)
+  assert.equal((await waitOperation(queuedInstall.id)).status, 'succeeded')
   assert.deepEqual(await say('/incompatible-answer'), ['package-v1-relative-v1'])
+  const removeGate = installedNpm.pauseNext()
   const forcedRemove = await begin('/packages/uninstall', { name: 'asabot-incompatible', purge: false })
+  await removeGate.entered.promise
+  try {
+    assert.equal(app.plugins.get('incompatible')?.state, 'disabled')
+    assert.equal(
+      (
+        await request('/plugins/upload', 'POST', {
+          filename: 'conflict.js',
+          content: Buffer.from(`export default { name: 'incompatible', setup() {} }`).toString('base64'),
+        })
+      ).status,
+      409,
+    )
+    assert.equal((await request('/plugins/queued/disable', 'POST')).status, 200)
+    assert.equal((await request('/plugins/queued/enable', 'POST')).status, 200)
+  } finally {
+    removeGate.release.resolve()
+  }
   assert.equal((await waitOperation(forcedRemove.id)).status, 'succeeded')
-  const install = await begin('/packages/install', { name: 'asabot-m8-e2e', version: '^1.0.0' })
-  assert.equal((await waitOperation(install.id)).status, 'succeeded')
   assert.deepEqual(await say('/package-answer'), ['package-v1-relative-v1'])
   const search = (await (await request('/packages/search?q=e2e&from=0')).json()) as {
     items: { installed: boolean; installedVersion: string }[]

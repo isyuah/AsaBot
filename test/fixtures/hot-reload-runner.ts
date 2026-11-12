@@ -7,12 +7,19 @@ import { createTestApp } from '../../src/testing/index.ts'
 const dir = await mkdtemp(join(tmpdir(), 'asabot-hot-'))
 const plugin = join(dir, 'hello')
 const entry = join(plugin, 'index.ts')
-const shared = join(plugin, 'shared.ts')
+const shared = join(plugin, 'shared.test.ts')
 await mkdir(plugin)
+for (const name of ['_ignored.ts', '.ignored.js', 'unused.test.ts', 'unused.spec.js', 'types.d.ts']) {
+  await writeFile(join(dir, name), `export default { name: 'ignored', setup() {} }`)
+}
+for (const name of ['_hidden', '.private', 'example.test.dir']) {
+  await mkdir(join(dir, name))
+  await writeFile(join(dir, name, 'index.ts'), `export default { name: 'ignored', setup() {} }`)
+}
 await writeFile(
   entry,
   `import { definePlugin } from 'asabot'
-import { answer } from './shared.ts'
+import { answer } from './shared.test.ts'
 export default definePlugin({ name: 'hello', setup(ctx) { ctx.command('hello').action(() => answer) } })\n`,
 )
 await writeFile(shared, `export const answer = 'first'\n`)
@@ -36,6 +43,10 @@ function assertEqual(actual: unknown, expected: unknown): void {
     throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
 }
 try {
+  assertEqual(t.app.plugins.get('ignored'), undefined)
+  await writeFile(join(dir, '_late.ts'), `export default { name: 'ignored', setup() {} }`)
+  await writeFile(join(dir, 'late.spec.js'), `export default { name: 'ignored', setup() {} }`)
+  assertEqual(await t.app.plugins.rescan(), { added: [], removed: [] })
   assertEqual(await t.say('/hello'), ['first'])
   let active = nextState('hello', 'active')
   await writeFile(shared, `export const answer = 'second'\n`)
@@ -45,7 +56,7 @@ try {
   await writeFile(
     entry,
     `import { definePlugin } from 'asabot'
-import { answer } from './shared.ts'
+import { answer } from './shared.test.ts'
 export default definePlugin({ name: 'hello', setup(ctx) { ctx.command('hello').action(() => answer + '!') } })\n`,
   )
   await active
@@ -116,6 +127,7 @@ export default definePlugin({ name: 'new-plugin', setup(ctx) { ctx.command('new'
   )
   await active
   assertEqual(await t.say('/new'), ['new'])
+  assertEqual(t.app.plugins.get('ignored'), undefined)
   active = nextState('consumer', 'active')
   await writeFile(
     join(dir, 'consumer.ts'),

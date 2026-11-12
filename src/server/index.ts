@@ -11,6 +11,7 @@ import WebSocket, { WebSocketServer } from 'ws'
 import { z } from 'zod'
 import type { App, ServerService } from '../core/app.ts'
 import type { Bot } from '../core/bot.ts'
+import { logLevelSchema } from '../core/config/schema.ts'
 import type { DispatchEvent } from '../core/dispatch/types.ts'
 import { PluginConfigError } from '../core/errors.ts'
 import type { MessageSentEvent } from '../core/event/index.ts'
@@ -270,7 +271,7 @@ export class HttpServer implements ServerService {
             error.message,
           ),
         )
-      this.app.logger.error('HTTP request failed')
+      this.app.logger.error({ err: error, method: c.req.method, path: c.req.path }, 'HTTP request failed')
       return failure(c, new HttpError(500, 'INTERNAL_ERROR', 'Internal server error'))
     })
     routes.get('/healthz', (c) => {
@@ -380,10 +381,9 @@ export class HttpServer implements ServerService {
       )
     })
     panel.post('/send', async (c) => c.json(await this.send(await body(c, sendSchema))))
-    panel.get('/plugins', async (c) => {
-      await this.app.plugins.packages.ensureLatest()
-      return c.json(this.app.plugins.list().map((plugin) => pluginView(this.app, plugin)))
-    })
+    panel.get('/plugins', (c) =>
+      c.json(this.app.plugins.list().map((plugin) => pluginView(this.app, plugin))),
+    )
     panel.post('/plugins/rescan', async (c) => {
       const result = await this.app.plugins.rescan()
       return c.json({
@@ -510,6 +510,12 @@ export class HttpServer implements ServerService {
       )
       return c.json(limit === 0 ? [] : records.slice(-limit))
     })
+    panel.get('/logs/level', (c) => c.json({ level: this.app.logger.level }))
+    panel.put('/logs/level', async (c) => {
+      const input = await body(c, z.object({ level: logLevelSchema }).strict())
+      this.app.logger.level = input.level
+      return c.json({ level: this.app.logger.level })
+    })
     panel.post('/playground', async (c) => c.json(await this.playground.run(await body(c, playgroundSchema))))
     panel.get('/ws', () => {
       throw new HttpError(400, 'BAD_REQUEST', 'WebSocket upgrade required')
@@ -566,14 +572,18 @@ export class HttpServer implements ServerService {
       }
       try {
         client.send(JSON.stringify(frame))
-      } catch {
+      } catch (error) {
         client.terminate()
+        this.app.logger.warn({ err: error }, 'Panel WebSocket send failed')
       }
     }
     push({ type: 'hello', overview: overview(this.app) })
     const unsubscribeLogs = subscribeLogs((record) => push({ type: 'log', record }))
     const unsubscribePackages = this.app.plugins.packages.subscribe((operation) =>
       push({ type: 'package', operation: this.packageOperation(operation) }),
+    )
+    const unsubscribePackageUpdates = this.app.plugins.subscribePackageUpdates((plugin) =>
+      push({ type: 'plugin', plugin: pluginView(this.app, plugin) }),
     )
     const unsubscribeEvents = this.app.subscribeDispatch((event) => {
       const frame = this.eventFrame(event)
@@ -597,13 +607,17 @@ export class HttpServer implements ServerService {
       )
     }
     scheduleStats()
-    client.on('error', () => client.terminate())
+    client.on('error', (error) => {
+      client.terminate()
+      this.app.logger.warn({ err: error }, 'Panel WebSocket failed')
+    })
     client.once('close', () => {
       this.clientSessions.delete(client)
       clearInterval(ping)
       clearTimeout(stats)
       unsubscribeLogs()
       unsubscribePackages()
+      unsubscribePackageUpdates()
       unsubscribeEvents()
     })
   }
