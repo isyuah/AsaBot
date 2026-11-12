@@ -20,7 +20,7 @@ afterEach(async () => {
   for (const app of apps.splice(0)) await app.dispose()
 })
 
-describe('M3b through OneBot', () => {
+describe('M3b through the virtual adapter', () => {
   it('loads examples, aliases, options and cooldowns', async () => {
     const t = await start()
     expect(await t.say('/echo hi')).toEqual(['hi'])
@@ -51,12 +51,15 @@ describe('M3b through OneBot', () => {
   it('reports a prompt timeout', async () => {
     const t = await start({ config: { dispatch: { promptTimeout: 500 } } })
     expect(await t.say('/猜数')).toEqual([expect.stringContaining('1 到 100')])
-    const call = await t.mock.waitForCall(
-      'send_group_msg',
-      (item) => JSON.stringify(item.params.message).includes('猜数超时'),
-      2_000,
+    await vi.waitFor(
+      () =>
+        expect(
+          t.mock.bot.sends.some(
+            (item) => item.target === '10' && JSON.stringify(item.message).includes('猜数超时'),
+          ),
+        ).toBe(true),
+      { timeout: 2_000 },
     )
-    expect(call.params.group_id).toBe(10)
   })
 
   it('shows visible commands and their details without revealing restricted commands', async () => {
@@ -108,7 +111,7 @@ describe('M3b through OneBot', () => {
       '运行时长',
       process.version,
       'RSS',
-      'onebot11:10000 online',
+      'virtual:10000 online',
       'active',
       'failed 1',
       'disabled 0',
@@ -156,30 +159,28 @@ describe('M3b through OneBot', () => {
       '不能屏蔽超管',
     ])
     expect(await t.say([seg.text('/acl block user '), seg.at('21')], { user: '99' })).toEqual([
-      '已添加 block user onebot11:21',
+      '已添加 block user virtual:21',
     ])
     expect(await t.say('/ping', { user: '21' })).toEqual([])
     expect(await t.say('/acl list', { user: '99' })).toEqual([
-      expect.stringContaining('block user onebot11:21'),
+      expect.stringContaining('block user virtual:21'),
     ])
     expect(await t.say([seg.text('/acl remove block user '), seg.at('21')], { user: '99' })).toEqual([
-      '已移除 block user onebot11:21',
+      '已移除 block user virtual:21',
     ])
     expect(await t.say('/ping', { user: '21' })).toEqual(['pong'])
-    expect(await t.say('/acl block group', { user: '99' })).toEqual(['已添加 block group onebot11:10'])
+    expect(await t.say('/acl block group', { user: '99' })).toEqual(['已添加 block group virtual:10'])
     expect(await t.say('/ping', { user: '21' })).toEqual([])
-    expect(await t.say('/acl remove block group', { user: '99' })).toEqual(['已移除 block group onebot11:10'])
-    expect(await t.say('/acl allow user 21', { user: '99' })).toEqual(['已添加 allow user onebot11:21'])
+    expect(await t.say('/acl remove block group', { user: '99' })).toEqual(['已移除 block group virtual:10'])
+    expect(await t.say('/acl allow user 21', { user: '99' })).toEqual(['已添加 allow user virtual:21'])
     expect(await t.say('/ping', { user: '22' })).toEqual([])
     expect(await t.say('/ping', { user: '21' })).toEqual(['pong'])
-    expect(await t.say('/acl remove allow user 21', { user: '99' })).toEqual([
-      '已移除 allow user onebot11:21',
-    ])
-    expect(await t.say('/acl allow group 11', { user: '99' })).toEqual(['已添加 allow group onebot11:11'])
+    expect(await t.say('/acl remove allow user 21', { user: '99' })).toEqual(['已移除 allow user virtual:21'])
+    expect(await t.say('/acl allow group 11', { user: '99' })).toEqual(['已添加 allow group virtual:11'])
     expect(await t.say('/ping', { user: '21' })).toEqual([])
     expect(await t.say('/ping', { user: '21', group: '11' })).toEqual(['pong'])
     expect(await t.say('/acl remove allow group 11', { user: '99' })).toEqual([
-      '已移除 allow group onebot11:11',
+      '已移除 allow group virtual:11',
     ])
     expect(await t.say('/acl block group', { user: '99', group: null })).toEqual([
       expect.stringContaining('指定群'),
@@ -191,15 +192,27 @@ describe('M3b through OneBot', () => {
 
   it('reports the result when admin reloads itself and refuses to disable itself', async () => {
     const t = await start()
-    t.mock.emitGroupMessage({ groupId: '10', userId: '99', message: '/plugin reload admin' })
-    await t.mock.waitForCall('send_group_msg', (item) =>
-      JSON.stringify(item.params.message).includes('已重载插件 admin'),
-    )
+    expect(await t.say('/plugin reload admin', { user: '99' })).toEqual([
+      expect.stringContaining('已重载插件 admin'),
+    ])
     expect(t.app.plugins.get('admin')?.state).toBe('active')
     expect(await t.say('/plugin disable admin', { user: '99' })).toEqual([
       expect.stringContaining('不能在聊天中停用 admin'),
     ])
     expect(t.app.plugins.get('admin')?.state).toBe('active')
+  })
+
+  it('manages access for nonnumeric user and group IDs', async () => {
+    const t = await start()
+    expect(await t.say('/acl block user user-alice', { user: '99' })).toEqual([
+      '已添加 block user virtual:user-alice',
+    ])
+    expect(await t.say([seg.text('/acl allow user '), seg.at('user-bob')], { user: '99' })).toEqual([
+      '已添加 allow user virtual:user-bob',
+    ])
+    expect(await t.say('/acl block group room-alpha', { user: '99' })).toEqual([
+      '已添加 block group virtual:room-alpha',
+    ])
   })
 
   it('provides access to later pages of plugin and access lists', async () => {
@@ -208,36 +221,32 @@ describe('M3b through OneBot', () => {
     )
     const t = await start({ plugins })
     for (let index = 0; index < 31; index++) {
-      t.app.storage.access.add('block', 'group', `onebot11:${index + 100}`)
+      t.app.storage.access.add('block', 'group', `virtual:${index + 100}`)
     }
     expect(await t.say('/plugin list -p 2', { user: '99' })).toEqual([expect.stringContaining('sample-30')])
-    expect(await t.say('/acl list -p 2', { user: '99' })).toEqual([expect.stringContaining('onebot11:130')])
+    expect(await t.say('/acl list -p 2', { user: '99' })).toEqual([expect.stringContaining('virtual:130')])
     expect(await t.say('/acl list -p 3', { user: '99' })).toEqual([expect.stringContaining('没有第 3 页')])
   })
 
   it('welcomes group members only when configured and enabled in that group', async () => {
     const t = await start({ config: { plugins: { echo: { config: { welcome: true } } } } })
     const event = {
-      time: Math.floor(Date.now() / 1_000),
-      self_id: 10000,
-      notice_type: 'group_increase',
-      sub_type: 'approve',
-      group_id: 10,
-      user_id: 21,
-      operator_id: 22,
+      name: 'notice.group_increase.approve',
+      noticeType: 'group_increase',
+      subType: 'approve',
+      groupId: '10',
+      userId: '21',
+      operatorId: '22',
     }
-    t.mock.emitNotice(event)
-    const call = await t.mock.waitForCall('send_group_msg', (item) =>
-      JSON.stringify(item.params.message).includes('欢迎'),
-    )
-    expect(call.params.message).toEqual([seg.text('欢迎 '), { type: 'at', data: { qq: 21 } }])
+    await t.mock.emitNotice(event)
+    expect(t.mock.bot.sends.at(-1)?.message).toEqual([seg.text('欢迎 '), seg.at('21')])
     await t.say('/plugin off echo', { user: '99' })
-    const before = t.mock.calls.length
-    t.mock.emitNotice(event)
+    const before = t.mock.bot.sends.length
+    await t.mock.emitNotice(event)
     // A subsequent message establishes that the notice has reached the app before checking its effects.
     await t.say('/ping')
     expect(
-      t.mock.calls.slice(before).filter((item) => JSON.stringify(item.params.message).includes('欢迎')),
+      t.mock.bot.sends.slice(before).filter((item) => JSON.stringify(item.message).includes('欢迎')),
     ).toEqual([])
   })
 })

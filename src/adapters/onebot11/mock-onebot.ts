@@ -1,7 +1,8 @@
 import type { IncomingMessage } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import WebSocket, { WebSocketServer } from 'ws'
-import type { Message, Sendable } from '../core/message/index.ts'
+import type { Message, Sendable } from '../../core/message/index.ts'
+import { outgoingSegment } from './conversion.ts'
 
 export interface MockCall {
   action: string
@@ -181,7 +182,9 @@ export class MockOneBot {
       group_id: Number(input.groupId),
       user_id: Number(input.userId),
       message:
-        typeof input.message === 'string' ? [{ type: 'text', data: { text: input.message } }] : input.message,
+        typeof input.message === 'string'
+          ? [{ type: 'text', data: { text: input.message } }]
+          : input.message.map(outgoingSegment),
       raw_message: typeof input.message === 'string' ? input.message : undefined,
       sender: {
         user_id: Number(input.userId),
@@ -201,7 +204,9 @@ export class MockOneBot {
       message_id: this.nextMessageId++,
       user_id: Number(input.userId),
       message:
-        typeof input.message === 'string' ? [{ type: 'text', data: { text: input.message } }] : input.message,
+        typeof input.message === 'string'
+          ? [{ type: 'text', data: { text: input.message } }]
+          : input.message.map(outgoingSegment),
       raw_message: typeof input.message === 'string' ? input.message : undefined,
       sender: { user_id: Number(input.userId), nickname: input.nickname ?? input.userId },
     })

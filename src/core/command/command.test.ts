@@ -58,7 +58,7 @@ describe('commands', () => {
   it('validates option defaults and applies optional parameter defaults', async () => {
     const { app, say } = dispatchFixture()
     expect(() =>
-      app.dispatcher.command(scope, 'bad').option('user', '-u <who:user>', { default: 'abc' }),
+      app.dispatcher.command(scope, 'bad').option('user', '-u <who:user>', { default: 'not a token' }),
     ).toThrow(/默认值/)
     let parsed: unknown
     app.dispatcher.command(scope, 'defaults [count:integer=2] [name]').action(({ args }) => {
@@ -73,6 +73,28 @@ describe('commands', () => {
     expect(parsed).toEqual({ n: 1, text: [seg.text('only')] })
     await say('/optional 3 some text')
     expect(parsed).toEqual({ n: 3, text: [seg.text('some text')] })
+  })
+
+  it('accepts opaque user IDs in mentions, tokens and defaults', async () => {
+    const { app, bot, say } = dispatchFixture()
+    app.dispatcher.command(scope, 'who <user:user>').action(({ args }) => args.user)
+    app.dispatcher.command(scope, 'default [user:user=user-a]').action(({ args }) => args.user)
+    app.dispatcher
+      .command(scope, 'option')
+      .option('user', '-u <user:user>', { default: 'user-b' })
+      .action(({ options }) => options.user)
+    await say('/who user:alice')
+    await say([seg.text('/who '), seg.at('user@example.test')])
+    await say('/default')
+    await say('/option')
+    await say('/who "two users"')
+    expect(sent(bot)).toEqual([
+      'user:alice',
+      'user@example.test',
+      'user-a',
+      'user-b',
+      '参数 <user> 应为用户 ID 或 @用户。用法：/who <user>',
+    ])
   })
 
   it('reports missing, invalid, unclosed quotes and unknown options with usage', async () => {

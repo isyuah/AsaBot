@@ -18,23 +18,20 @@ export const seg = {
   text(text: string): TypedSegment<'text'> {
     return { type: 'text', data: { text } }
   },
-  at(qq: string): TypedSegment<'at'> {
-    return { type: 'at', data: { qq } }
+  at(id: string): TypedSegment<'at'> {
+    return { type: 'at', data: { id } }
   },
   atAll(): TypedSegment<'at'> {
-    return { type: 'at', data: { qq: 'all' } }
+    return { type: 'at', data: { id: 'all' } }
   },
   face(id: string | number): TypedSegment<'face'> {
     return { type: 'face', data: { id: String(id) } }
   },
-  image(
-    source: string | Buffer,
-    options: { url?: string; summary?: string; subType?: number } = {},
-  ): TypedSegment<'image'> {
+  image(source: string | Buffer, options: { url?: string; summary?: string } = {}): TypedSegment<'image'> {
     return { type: 'image', data: { file: mediaSource(source), ...options } }
   },
-  record(source: string | Buffer, options: { url?: string } = {}): TypedSegment<'record'> {
-    return { type: 'record', data: { file: mediaSource(source), ...options } }
+  audio(source: string | Buffer, options: { url?: string } = {}): TypedSegment<'audio'> {
+    return { type: 'audio', data: { file: mediaSource(source), ...options } }
   },
   video(source: string | Buffer, options: { url?: string } = {}): TypedSegment<'video'> {
     return { type: 'video', data: { file: mediaSource(source), ...options } }
@@ -44,9 +41,6 @@ export const seg = {
   },
   file(source: string | Buffer, options: { name?: string } = {}): TypedSegment<'file'> {
     return { type: 'file', data: { file: mediaSource(source), ...options } }
-  },
-  json(data: string): TypedSegment<'json'> {
-    return { type: 'json', data: { data } }
   },
   forward(id: string | number): TypedSegment<'forward'> {
     return { type: 'forward', data: { id: String(id) } }

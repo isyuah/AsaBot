@@ -1,12 +1,7 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 
 const sessionLifetime = 7 * 24 * 60 * 60 * 1_000
 const attemptWindow = 60_000
-
-export function constantTimeEqual(actual: string, expected: string): boolean {
-  const digest = (value: string): Buffer => createHash('sha256').update(value).digest()
-  return timingSafeEqual(digest(actual), digest(expected))
-}
 
 export class PanelAuth {
   private readonly sessions = new Map<string, number>()

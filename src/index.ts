@@ -1,26 +1,15 @@
 export { z } from 'zod'
-export { OneBotAdapter } from './adapters/onebot11/adapter.ts'
-export type {
-  OneBot11Config,
-  OneBotAdapterOptions,
-  OneBotConnectionConfig,
-} from './adapters/onebot11/index.ts'
 export { createApp } from './bootstrap.ts'
-export type { Adapter, AdapterHost, BotConnectionInfo } from './core/adapter.ts'
+export type { Adapter, AdapterHost, BotInfo, UpgradeHandler } from './core/adapter.ts'
 export { App } from './core/app.ts'
 export type {
   Bot,
   GroupInfo,
   GroupMemberInfo,
-  OneBotApi,
-  OneBotBot,
-  OneBotForwardNode,
-  OneBotMessageInfo,
-  OneBotVersionInfo,
   SendResult,
   UserInfo,
 } from './core/bot.ts'
-export { BotRegistry, isOneBot } from './core/bot.ts'
+export { BotRegistry } from './core/bot.ts'
 export type { CommandDefinition, OptionDefinition, OptionSettings } from './core/command/builder.ts'
 export { CommandBuilder } from './core/command/builder.ts'
 export { formatUsage } from './core/command/parse.ts'
@@ -40,7 +29,6 @@ export type {
   Scope,
 } from './core/dispatch/types.ts'
 export {
-  ApiError,
   ApiTimeoutError,
   CommandConflictError,
   ConfigError,
@@ -87,10 +75,8 @@ export {
 export type { Message, Segment, Sendable } from './core/message/index.ts'
 export {
   normalizeSendable,
-  parseCQ,
   plainText,
   seg,
-  toCQ,
 } from './core/message/index.ts'
 export type { Permission, Rule } from './core/permission.ts'
 export { perm } from './core/permission.ts'

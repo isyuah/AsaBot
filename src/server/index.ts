@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { createServer, type IncomingMessage, type Server } from 'node:http'
+import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { Duplex } from 'node:stream'
 import { fileURLToPath } from 'node:url'
@@ -16,7 +16,8 @@ import { PluginConfigError } from '../core/errors.ts'
 import type { MessageSentEvent } from '../core/event/index.ts'
 import { getRecentLogs, subscribeLogs } from '../core/logger.ts'
 import { plainText } from '../core/message/index.ts'
-import { constantTimeEqual, PanelAuth } from './auth.ts'
+import { constantTimeEqual } from '../core/utils/security.ts'
+import { PanelAuth } from './auth.ts'
 import { Playground } from './playground.ts'
 import { accessSchema, playgroundSchema, sendSchema } from './schemas.ts'
 import { botView, commandView, overview, pluginView } from './views.ts'
@@ -24,11 +25,6 @@ import { botView, commandView, overview, pluginView } from './views.ts'
 type Env = { Bindings: HttpBindings }
 type ServerContext = Context<Env>
 type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 429 | 500
-
-interface ReverseWebSocketService {
-  acceptReverse(socket: WebSocket, selfId: string, remoteAddress: string): void
-  closeReverseConnections(): Promise<void>
-}
 
 class HttpError extends Error {
   readonly status: ErrorStatus
@@ -65,6 +61,28 @@ function issuePath(path: PropertyKey[]): string {
       '',
     ) || '<root>'
   )
+}
+
+function configSecrets(value: unknown, key = ''): string[] {
+  if (typeof value === 'string') {
+    if (/token|password|secret/i.test(key)) return value ? [value] : []
+    try {
+      const url = new URL(value)
+      return [
+        url.password,
+        ...[...url.searchParams]
+          .filter(([name]) => /token|password|secret/i.test(name))
+          .map(([, secret]) => secret),
+      ].filter(Boolean)
+    } catch {
+      return []
+    }
+  }
+  if (Array.isArray(value)) return value.flatMap((item) => configSecrets(item))
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value).flatMap(([name, item]) => configSecrets(item, name))
+  }
+  return []
 }
 
 async function body<T extends z.ZodType>(c: ServerContext, schema: T): Promise<z.output<T>> {
@@ -119,55 +137,17 @@ export class HttpServer implements ServerService {
   private readonly playground: Playground
   private readonly http: Server
   private readonly websocket = new WebSocketServer({ noServer: true })
-  private readonly reverseWebsocket = new WebSocketServer({ noServer: true })
-  private readonly reverse: ReverseWebSocketService
   private readonly clientSessions = new Map<WebSocket, string | undefined>()
-  private stopping = false
-  private readonly upgradeHandlers = new Map<
-    string,
-    (request: IncomingMessage, socket: Duplex, head: Buffer) => void
-  >()
-
-  constructor(app: App, reverse: ReverseWebSocketService) {
+  constructor(app: App) {
     this.app = app
-    this.reverse = reverse
     this.playground = new Playground(app)
     const routes = this.routes()
     this.http = createServer(getRequestListener(routes.fetch))
     if (app.config.server.panelPassword) {
-      this.registerUpgrade('/api/panel/ws', (request, socket, head) => {
+      app.registerUpgrade('/api/panel/ws', (request, socket, head) => {
         if (!this.auth.authenticated(request.headers.cookie)) return this.rejectUpgrade(socket, 401)
         this.websocket.handleUpgrade(request, socket, head, (client) =>
           this.connect(client, request.headers.cookie),
-        )
-      })
-    }
-    if (app.config.onebot11.reverse !== undefined) {
-      this.registerUpgrade('/onebot/v11/ws', (request, socket, head) => {
-        if (this.stopping) return this.rejectUpgrade(socket, 503)
-        const token = app.config.onebot11.reverse?.accessToken ?? ''
-        const url = new URL(request.url ?? '/', 'http://localhost')
-        const bearer = /^Bearer (.+)$/.exec(request.headers.authorization ?? '')?.[1]
-        const queryToken = url.searchParams.get('access_token')
-        if (
-          token &&
-          !(bearer !== undefined && constantTimeEqual(bearer, token)) &&
-          !(queryToken !== null && constantTimeEqual(queryToken, token))
-        )
-          return this.rejectUpgrade(socket, 401)
-        const selfId = request.headers['x-self-id']
-        if (typeof selfId !== 'string' || !/^\d+$/.test(selfId))
-          return this.rejectUpgrade(socket, 400, 'X-Self-ID must contain only digits')
-        const role = request.headers['x-client-role']
-        if (role !== undefined && role !== 'Universal')
-          return this.rejectUpgrade(
-            socket,
-            400,
-            'X-Client-Role must be Universal; split API/Event connections are not supported',
-          )
-        const remoteAddress = request.socket.remoteAddress ?? 'unknown'
-        this.reverseWebsocket.handleUpgrade(request, socket, head, (client) =>
-          this.reverse.acceptReverse(client, selfId, remoteAddress),
         )
       })
     }
@@ -178,7 +158,7 @@ export class HttpServer implements ServerService {
       } catch {
         return this.rejectUpgrade(socket, 400)
       }
-      const handler = this.upgradeHandlers.get(path)
+      const handler = this.app.getUpgrade(path)
       if (handler) handler(request, socket, head)
       else this.rejectUpgrade(socket, 404)
     })
@@ -187,14 +167,6 @@ export class HttpServer implements ServerService {
   address(): AddressInfo | null {
     const address = this.http.address()
     return typeof address === 'object' ? address : null
-  }
-
-  registerUpgrade(
-    path: string,
-    handler: (request: IncomingMessage, socket: Duplex, head: Buffer) => void,
-  ): void {
-    if (this.upgradeHandlers.has(path)) throw new Error(`WebSocket upgrade path already registered: ${path}`)
-    this.upgradeHandlers.set(path, handler)
   }
 
   async start(): Promise<void> {
@@ -218,7 +190,6 @@ export class HttpServer implements ServerService {
   }
 
   async stop(): Promise<void> {
-    this.stopping = true
     for (const client of this.websocket.clients) client.terminate()
     const closed = this.http.listening
       ? new Promise<void>((resolve, reject) => {
@@ -226,7 +197,7 @@ export class HttpServer implements ServerService {
           this.http.close((error) => (error ? reject(error) : resolve()))
         })
       : Promise.resolve()
-    await Promise.all([this.reverse.closeReverseConnections(), closed])
+    await closed
   }
 
   private rejectUpgrade(socket: Duplex, status: 400 | 401 | 404 | 503, detail?: string): void {
@@ -362,12 +333,7 @@ export class HttpServer implements ServerService {
         else await this.app.plugins.reload(name)
       } catch (error) {
         let reason = error instanceof Error ? error.message : 'Plugin operation failed'
-        for (const secret of [
-          this.app.config.server.panelPassword,
-          this.app.config.server.apiToken,
-          ...this.app.config.onebot11.connections.map((connection) => connection.accessToken ?? ''),
-          this.app.config.onebot11.reverse?.accessToken ?? '',
-        ]) {
+        for (const secret of configSecrets(this.app.config)) {
           if (secret) reason = reason.replaceAll(secret, '[Redacted]')
         }
         throw new HttpError(409, 'CONFLICT', reason)

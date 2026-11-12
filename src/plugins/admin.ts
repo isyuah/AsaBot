@@ -32,12 +32,12 @@ function targetFromRest(subject: AccessSubject, target: Message | undefined, ses
       mention?.type === 'at' &&
       target.every((segment) => segment.type === 'at' || segment.type === 'text')
     ) {
-      const id = String(mention.data.qq)
-      if (/^\d+$/.test(id) && !plainText(target).trim()) return id
+      const id = mention.data.id
+      if (typeof id === 'string' && id.length > 0 && !plainText(target).trim()) return id
     }
     const id = plainText(target).trim()
-    if (target.every((segment) => segment.type === 'text') && /^\d+$/.test(id)) return id
-    throw new Error('用户必须是数字 ID 或 @用户')
+    if (target.every((segment) => segment.type === 'text') && id && !/\s/.test(id)) return id
+    throw new Error('用户必须是单个用户 ID 或 @用户')
   }
   const id = plainText(target).trim()
   if (!id || /\s/.test(id) || target.some((segment) => segment.type !== 'text')) {

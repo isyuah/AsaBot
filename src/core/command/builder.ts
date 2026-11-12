@@ -53,7 +53,8 @@ function parseOption(name: string, source: string, settings: OptionSettings): Op
       const type = argument.type
       const valid =
         type === 'string' || type === 'user'
-          ? typeof defaultValue === 'string' && (type !== 'user' || /^\d+$/.test(defaultValue))
+          ? typeof defaultValue === 'string' &&
+            (type !== 'user' || (defaultValue.length > 0 && !/\s/.test(defaultValue)))
           : type === 'number' || type === 'integer' || type === 'duration'
             ? typeof defaultValue === 'number' &&
               Number.isFinite(defaultValue) &&

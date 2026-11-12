@@ -18,7 +18,7 @@ it('runs the README prompt and storage example', async () => {
   try {
     expect(await t.say('/greet')).toEqual(['你叫什么名字？'])
     expect(await t.say('小明')).toEqual(['你好，小明！'])
-    expect(t.app.storage.store('greet').get('name:onebot11:20')).toBe('小明')
+    expect(t.app.storage.store('greet').get('name:virtual:20')).toBe('小明')
   } finally {
     await t.dispose()
   }

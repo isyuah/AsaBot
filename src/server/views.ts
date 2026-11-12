@@ -12,13 +12,13 @@ const version = (
 ).version
 
 export function botView(app: App, bot: Bot) {
-  const info = app.getBotConnection(bot)
+  const info = app.getBotInfo(bot)
   return {
     platform: bot.platform,
     selfId: bot.selfId,
     ...(bot.nickname === undefined ? {} : { nickname: bot.nickname }),
     status: bot.status,
-    connection: info?.connection ?? 'forward',
+    connection: info?.connection ?? '',
     ...(info?.url === undefined ? {} : { url: info.url }),
   }
 }

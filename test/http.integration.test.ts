@@ -183,7 +183,7 @@ describe('HTTP service contract', () => {
     expect(overview).toMatchObject({
       version: expect.any(String),
       node: process.version,
-      bots: [{ platform: 'onebot11', selfId: '10000', status: 'online', connection: 'forward' }],
+      bots: [{ platform: 'virtual', selfId: '10000', status: 'online', connection: '虚拟' }],
       plugins: { active: 4 },
       today: { received: 0, sent: 0 },
     })
@@ -272,14 +272,42 @@ describe('HTTP service contract', () => {
     expect(await say('/secret', '99', '10', true)).toEqual(['secret'])
     expect(await say('/limited')).toEqual(['limited'])
     expect(await say('/limited')).toEqual([expect.stringContaining('冷却中')])
-    await request(url, cookie, '/plugins/panel-sample/groups/playground%3A10', 'PUT', { enabled: false })
+    await request(url, cookie, '/plugins/panel-sample/groups/virtual%3A10', 'PUT', { enabled: false })
     expect(await say('/dialog')).toEqual([])
-    await request(url, cookie, '/acl', 'POST', { list: 'block', subject: 'user', key: 'playground:21' })
+    await request(url, cookie, '/acl', 'POST', { list: 'block', subject: 'user', key: 'virtual:21' })
     expect(await say('/ping', '21', null)).toEqual([])
     const result = await (await request(url, cookie, '/overview')).json()
     expect(result.today).toEqual({ received: 1, sent: 1 })
     expect(await (await request(url, cookie, '/stats/messages?range=1h')).json()).toHaveLength(60)
     expect(await (await request(url, cookie, '/stats/messages?range=24h')).json()).toHaveLength(96)
+  })
+
+  it('accepts protocol-independent segments and nonnumeric targets', async () => {
+    const { t, url } = await start()
+    const cookie = await login(url)
+    const message = [
+      { type: 'at', data: { id: 'user-alice' } },
+      { type: 'audio', data: { file: 'base64://AA==' } },
+      { type: 'image', data: { file: 'https://example.invalid/image', extra: 2 } },
+      { type: 'custom', data: { value: true } },
+    ]
+    expect(
+      (
+        await request(url, cookie, '/send', 'POST', {
+          target: { type: 'group', id: 'room-alpha' },
+          message,
+        })
+      ).status,
+    ).toBe(200)
+    expect(t.mock.bot.sends.at(-1)).toMatchObject({ target: 'room-alpha', message })
+    expect(
+      (
+        await request(url, cookie, '/send', 'POST', {
+          target: { type: 'private', id: 'user-alice' },
+          message: [{ type: 'at', data: {} }],
+        })
+      ).status,
+    ).toBe(400)
   })
 
   it('pushes hello then messages and sends through the authenticated external API', async () => {
@@ -320,7 +348,7 @@ describe('HTTP service contract', () => {
       await secondHello
       expect(frames[0]).toMatchObject({ type: 'hello', overview: { bots: expect.any(Array) } })
       second.terminate()
-      t.mock.emitGroupMessage({ groupId: '10', userId: '20', message: 'hello' })
+      await t.say('hello')
       await waitFor(() => frames.some((frame) => frame.type === 'message'))
       expect(frames.find((frame) => frame.type === 'message')).toMatchObject({
         direction: 'in',
@@ -336,9 +364,11 @@ describe('HTTP service contract', () => {
       })
       expect(response.status).toBe(200)
       expect(await response.json()).toEqual({ messageId: expect.any(String) })
-      expect(
-        (await t.mock.waitForCall('send_group_msg', (call) => call.params.group_id === 123)).params.message,
-      ).toEqual([{ type: 'text', data: { text: 'from api' } }])
+      expect(t.mock.bot.sends.at(-1)).toMatchObject({
+        type: 'group',
+        target: '123',
+        message: [{ type: 'text', data: { text: 'from api' } }],
+      })
       await waitFor(() => frames.some((frame) => frame.type === 'message' && frame.direction === 'out'))
       const closed = new Promise<void>((resolve) => socket.once('close', () => resolve()))
       expect((await request(url, cookie, '/logout', 'POST')).status).toBe(200)

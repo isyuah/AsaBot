@@ -23,7 +23,7 @@ export function stripLeadingMention(message: Message, selfId: string): Message {
       }
       break
     }
-    if (first?.type === 'at' && first.data.qq === selfId) {
+    if (first?.type === 'at' && first.data.id === selfId) {
       result.shift()
       continue
     }
@@ -54,7 +54,7 @@ export function createSession(init: SessionInit, services: SessionServices): Ses
   const isReplyToSelf = init.message.some(
     (segment) => segment.type === 'reply' && init.sentMessageIds?.has(String(segment.data.id)) === true,
   )
-  const hasMention = init.message.some((segment) => segment.type === 'at' && segment.data.qq === init.selfId)
+  const hasMention = init.message.some((segment) => segment.type === 'at' && segment.data.id === init.selfId)
   const toMe = init.messageType === 'private' || hasMention || isReplyToSelf
   const session: Session = {
     id: init.id,

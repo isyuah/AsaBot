@@ -1,5 +1,6 @@
-import type { Message, Segment } from '../../core/message/index.ts'
-import { parseCQ } from '../../core/message/index.ts'
+import type { Message } from '../../core/message/index.ts'
+import { incomingSegment } from './conversion.ts'
+import { parseCQ } from './cq.ts'
 
 export function incomingMessage(value: unknown): Message {
   if (typeof value === 'string') {
@@ -16,17 +17,6 @@ export function incomingMessage(value: unknown): Message {
     if (typeof entry.type !== 'string' || entry.data === null || typeof entry.data !== 'object') {
       throw new Error('Invalid OneBot message segment')
     }
-    const data = { ...(entry.data as Record<string, unknown>) }
-    if (entry.type === 'at' && data.qq !== undefined) {
-      data.qq = String(data.qq)
-    }
-    if (['reply', 'face', 'forward'].includes(entry.type) && data.id !== undefined) {
-      data.id = String(data.id)
-    }
-    if (entry.type === 'image' && data.sub_type !== undefined) {
-      data.subType = Number(data.sub_type)
-      delete data.sub_type
-    }
-    return { type: entry.type, data } as Segment
+    return incomingSegment({ type: entry.type, data: entry.data as Record<string, unknown> })
   })
 }

@@ -1,25 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { stripLeadingMention } from '../event/index.ts'
-import { normalizeSendable, parseCQ, seg, toCQ } from './index.ts'
-
-describe('CQ message conversion', () => {
-  it('round trips escaped text, parameters, and unknown segments', () => {
-    const source = 'a&b[c],x'
-    const message = [seg.text(source), { type: 'mystery', data: { value: 'a&b[c],x' } }]
-    const cq = toCQ(message)
-    expect(cq).toBe('a&amp;b&#91;c&#93;,x[CQ:mystery,value=a&amp;b&#91;c&#93;&#44;x]')
-    expect(toCQ(parseCQ(cq))).toBe(cq)
-    expect(parseCQ(cq)).toEqual(message)
-  })
-
-  it('keeps plain strings as text when normalizing sendables', () => {
-    expect(normalizeSendable('[CQ:at,qq=123]literal')).toEqual([seg.text('[CQ:at,qq=123]literal')])
-    expect(parseCQ('&#44; [CQ:unknown,value=&#44;]')).toEqual([
-      seg.text('&#44; '),
-      { type: 'unknown', data: { value: ',' } },
-    ])
-  })
-})
+import { seg } from './index.ts'
 
 describe('stripLeadingMention', () => {
   it('strips a leading reply, whitespace, and self mention', () => {

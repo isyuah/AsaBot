@@ -50,7 +50,7 @@ export function interpolateConfigValues(value: unknown, env: NodeJS.ProcessEnv =
   return interpolateValue(value, '', env)
 }
 
-function formatIssuePath(path: PropertyKey[]): string {
+export function formatIssuePath(path: PropertyKey[]): string {
   return (
     path.reduce<string>((result, part) => {
       if (typeof part === 'number') {

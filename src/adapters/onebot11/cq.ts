@@ -1,4 +1,5 @@
-import type { Message, Segment } from './types.ts'
+import type { Message, Segment } from '../../core/message/index.ts'
+import { incomingSegment, outgoingSegment } from './conversion.ts'
 
 function escapeText(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('[', '&#91;').replaceAll(']', '&#93;')
@@ -36,7 +37,7 @@ function encodeSegment(segment: Segment): string {
 }
 
 export function toCQ(message: Message): string {
-  return message.map(encodeSegment).join('')
+  return message.map((segment) => encodeSegment(outgoingSegment(segment))).join('')
 }
 
 function splitParameters(source: string): string[] {
@@ -72,7 +73,7 @@ export function parseCQ(source: string): Message {
         data[key] = decodeParameter(part.slice(equals + 1))
       }
     }
-    message.push({ type, data } as Segment)
+    message.push(incomingSegment({ type, data }))
     cursor = match.index + match[0].length
   }
   if (cursor < source.length || message.length === 0) {

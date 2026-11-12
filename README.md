@@ -1,10 +1,10 @@
 # AsaBot
 
-AsaBot 是一个使用 TypeScript 编写的 QQ 机器人框架。支持通过 OneBot 11 正向或反向 WebSocket 连接 NapCat，提供命令、多轮对话、权限、插件热重载和 SQLite 存储。
+AsaBot 是一个使用 TypeScript 编写的协议无关机器人框架，提供命令、多轮对话、权限、插件热重载和 SQLite 存储。支持 OneBot 11 协议，NapCat、Lagrange.OneBot、LLOneBot 等实现都能接入。
 
 ## 快速开始
 
-需要 Node.js **24 或更高版本**、pnpm，以及已登录 QQ 的 NapCat。项目直接运行 TypeScript，不需要构建。
+需要 Node.js **24 或更高版本**、pnpm，以及已经配置好账号的 OneBot 11 实现。项目直接运行 TypeScript，不需要构建。
 
 1. 在仓库根目录安装依赖并复制配置：
 
@@ -15,15 +15,15 @@ AsaBot 是一个使用 TypeScript 编写的 QQ 机器人框架。支持通过 On
 
    macOS/Linux 可用 `cp asabot.config.example.yaml asabot.config.yaml`。
 
-2. 在 NapCat 的网络配置中开启 **OneBot 11 WebSocket 服务端**，例如监听端口 `3001`，并设置 token。编辑 `asabot.config.yaml`，把 `superusers` 里的 `10001` 改成自己的 QQ 号；如果 NapCat 不在本机，也要修改 `onebot11.connections[0].url`。
+2. 使用正向 WebSocket：在 OneBot 实现中开启 **OneBot 11 WebSocket 服务端**，例如监听端口 `3001`，并设置 token。编辑 `asabot.config.yaml`，把 `superusers` 里的 `10001` 改成自己的用户 ID，并按需修改 `adapters.onebot11.connections[0].url`。
 
-   示例配置连接 `ws://127.0.0.1:3001`，从 `NAPCAT_TOKEN` 环境变量读取 token。可以在仓库根目录创建 `.env`，内容为：
+   示例配置连接 `ws://127.0.0.1:3001`，从 `ONEBOT_TOKEN` 环境变量读取 token。可以在仓库根目录创建 `.env`，内容为：
 
    ```dotenv
-   NAPCAT_TOKEN=填写与NapCat一致的token
+   ONEBOT_TOKEN=填写与OneBot实现一致的token
    ```
 
-   `.env` 和实际配置文件已被 Git 忽略；也可以在启动前设置同名环境变量。如果 NapCat 没有设置 token，可不设置该变量。NapCat 在 Docker 中运行时，需要映射服务端口（例如 `3001:3001`）并确保服务监听容器网络地址；如果 AsaBot 也在容器中，可以让两者处于同一个网络，并把 URL 换成 NapCat 的容器名和端口。容器里的 `127.0.0.1` 指向容器自身。
+   `.env` 和实际配置文件已被 Git 忽略；也可以在启动前设置同名环境变量。如果 OneBot 实现没有设置 token，可不设置该变量。服务运行在 Docker 中时，需要映射服务端口并确保服务监听容器网络地址；如果 AsaBot 也在容器中，可以让两者处于同一个网络，并把 URL 换成服务的容器名和端口。容器里的 `127.0.0.1` 指向容器自身。
 
 3. 在仓库根目录启动：
 
@@ -38,32 +38,34 @@ AsaBot 是一个使用 TypeScript 编写的 QQ 机器人框架。支持通过 On
 
 ### 使用反向 WebSocket
 
-反向模式由 NapCat 主动连接 AsaBot。只使用反向模式时，可将配置中的 `connections` 设为空，并启用 `reverse`：
+反向模式由 OneBot 实现主动连接 AsaBot。只使用反向模式时，可将配置中的 `connections` 设为空，并启用 `reverse`：
 
 ```yaml
-onebot11:
-  connections: []
-  reverse:
-    accessToken: ${ONEBOT_REVERSE_TOKEN:-}
-  sendQueue:
-    interval: 500ms
-    jitter: 300ms
-    maxPending: 100
+adapters:
+  onebot11:
+    connections: []
+    reverse:
+      accessToken: ${ONEBOT_REVERSE_TOKEN:-}
+    sendQueue:
+      interval: 500ms
+      jitter: 300ms
+      maxPending: 100
 server:
   host: 127.0.0.1
   port: 5140
 ```
 
-在 `.env` 中设置 `ONEBOT_REVERSE_TOKEN`，然后在 NapCat 的网络配置中添加 **OneBot 11 WebSocket 客户端**：URL 填 `ws://<AsaBot地址>:5140/onebot/v11/ws`，token 填相同的值，连接类型选择 Universal。NapCat 会通过 `X-Self-ID` 标识当前登录的 QQ 账号；多个账号可以连接同一个地址。若 NapCat 和 AsaBot 不在同一网络命名空间，需将 `server.host` 改为 NapCat 可访问的监听地址，并配置相应的网络和端口映射。
+在 `.env` 中设置 `ONEBOT_REVERSE_TOKEN`，然后在 OneBot 实现的网络配置中添加 **OneBot 11 WebSocket 客户端**：URL 填 `ws://<AsaBot地址>:5140/onebot/v11/ws`，token 填相同的值，连接类型选择 Universal。对端通过 `X-Self-ID` 标识当前登录的账号；多个账号可以连接同一个地址。若两者不在同一网络命名空间，需将 `server.host` 改为对端可访问的监听地址，并配置相应的网络和端口映射。
 
 反向 token 为空时不校验连接，启动时会记录警告；也支持 OneBot 11 的 `access_token` 查询参数。`reverse`、面板和对外 API 共用 `server` 的监听地址与端口，只要配置了 `reverse` 就会启动 HTTP 服务。正向与反向连接可以同时使用，同账号的反向新连接通过登录校验后会替换旧反向连接。
 
 发送消息默认按账号限速，相邻发送间隔为 500ms 加 0–300ms 随机抖动；`sendQueue.interval` 设为 `0` 可关闭限速。队列达到 `maxPending` 时新发送会报 `SendQueueFullError`，断线时尚未发出的消息会被拒绝。
 
+
 ### 常见问题
 
-- **连接不上 NapCat**：查看 `OneBot WebSocket error` 日志中的 `reason`、`code` 和 URL，例如 `ECONNREFUSED` 通常表示地址、端口、服务监听或容器端口映射需要检查。将 `logLevel` 改为 `debug` 可看到 `Connecting OneBot forward WebSocket`。连接失败后框架会自动重试。
-- **token 不一致**：NapCat 会拒绝 WebSocket 握手，日志通常包含 `401` 等服务端返回的错误，机器人不会上线并会继续重连。核对 NapCat 的 token 和 `NAPCAT_TOKEN`；不要把 token 写进 URL 或提交到仓库。
+- **连接不上服务**：查看 `OneBot WebSocket error` 日志中的 `reason`、`code` 和 URL，例如 `ECONNREFUSED` 通常表示地址、端口、服务监听或容器端口映射需要检查。将 `logLevel` 改为 `debug` 可看到 `Connecting OneBot forward WebSocket`。连接失败后框架会自动重试。
+- **token 不一致**：对端会拒绝 WebSocket 握手，日志通常包含 `401` 等服务端返回的错误，机器人不会上线并会继续重连。核对对端的 token 和 `ONEBOT_TOKEN`；不要把 token 写进 URL 或提交到仓库。
 - **启动后没有命令回复**：先查看 `/ping` 和 `/status`，再检查插件状态、访问控制、群插件开关和命令前缀。`AsaBot started` 表示框架已启动，适配器仍可能处于重连中。
 - **插件加载失败**：超管使用 `/plugin list` 查看失败原因，详细信息见日志；修复插件文件后会自动尝试重载。
 
@@ -76,7 +78,7 @@ server:
 | `logLevel`、`dataDir`、`superusers` | 日志级别、数据目录、超管 ID 列表 |
 | `command` | 前缀、@机器人触发方式，以及错误和权限提示 |
 | `dispatch` | 处理器超时、忽略自身消息、prompt 默认和最大超时 |
-| `onebot11` | 正向 WS 地址、反向 WS token、API 超时、重连和发送队列；支持多个账号 |
+| `adapters.onebot11` | 正向 WS 地址、反向 WS token、API 超时、重连和发送队列；支持多个账号 |
 | `pluginLoader` | 插件目录和热重载开关；`auto` 在 `NODE_ENV` 不是 `production` 时开启 |
 | `plugins.<name>.enabled` | 插件全局开关，缺省为 `true` |
 | `plugins.<name>.config` | 对应插件的配置；示例 `echo` 支持 `maxLen` 和 `welcome` |
@@ -109,7 +111,7 @@ curl -X POST http://127.0.0.1:5140/api/v1/send \
 | `/plugin enable <name>`、`/plugin disable <name>`、`/plugin reload <name>` | 超管 | 管理全局插件 |
 | `/plugin on <name>`、`/plugin off <name>` | 群主、群管理员或超管 | 在当前群开启或关闭插件；不能在群内关闭 `admin` |
 | `/acl list` | 超管 | 查看访问控制列表；`-p` 翻页 |
-| `/acl block user <用户>`、`/acl allow user <用户>` | 超管 | 屏蔽或允许用户，用户可用数字 ID 或 @用户 |
+| `/acl block user <用户>`、`/acl allow user <用户>` | 超管 | 屏蔽或允许用户，用户可用 ID 或 @用户 |
 | `/acl block group [群]`、`/acl allow group [群]` | 超管 | 屏蔽或允许群；省略群 ID 时使用当前群 |
 | `/acl remove <block\|allow> <user\|group> [目标]` | 超管 | 移除条目；对象为群且省略目标时使用当前群 |
 
@@ -168,7 +170,7 @@ ctx.command('repeat <text:rest>')
   })
 ```
 
-命令路径在参数之前，例如 `plugin reload <name>`；最长路径优先。另行声明 `ctx.command('tool info')` 即可注册子命令，别名也可以是完整路径。`<name:type>` 表示必填，`[name:type]` 表示可选，`[name:integer=3]` 表示有默认值；省略类型时为 `string`。类型包括 `string`、`number`、`integer`、`boolean`、`user`、`duration`、`image` 和 `rest`：`user` 接受数字 ID 或 @用户并返回 ID 字符串，`image` 接受图片段，`duration` 返回毫秒数，`rest` 返回保留非文本段的消息数组，只能放在最后。
+命令路径在参数之前，例如 `plugin reload <name>`；最长路径优先。另行声明 `ctx.command('tool info')` 即可注册子命令，别名也可以是完整路径。`<name:type>` 表示必填，`[name:type]` 表示可选，`[name:integer=3]` 表示有默认值；省略类型时为 `string`。类型包括 `string`、`number`、`integer`、`boolean`、`user`、`duration`、`image` 和 `rest`：`user` 接受单个非空用户 ID 或 @用户并返回 ID 字符串，`image` 接受图片段，`duration` 返回毫秒数，`rest` 返回保留非文本段的消息数组，只能放在最后。
 
 选项支持 `-n 2`、`--times 2`、`--times=2`；无参数选项可声明为 `.option('silent', '-s, --silent')`。选项与普通位置参数可以交错，但一旦开始读取 `rest`，之后都视为内容；`--` 也会结束选项解析。命令路径和别名区分大小写。action 返回字符串或消息段时，框架会发送它；返回 `undefined` 则不自动发送。
 
@@ -222,7 +224,7 @@ ctx.db.prepare('INSERT OR REPLACE INTO p_scores_best (user_id, score) VALUES (?,
 
 ### 测试插件
 
-`asabot/testing` 的 `createTestApp` 使用真实 WS 连接本地 MockOneBot 和临时数据库。下面的测试对应上面的 `plugins/hello.ts`：
+`asabot/testing` 的 `createTestApp` 使用进程内虚拟适配器和临时数据库，不连接网络。下面的测试对应上面的 `plugins/hello.ts`：
 
 ```ts
 import { createTestApp } from 'asabot/testing'
@@ -239,6 +241,8 @@ it('打招呼', async () => {
 })
 ```
 
-`say` 默认模拟群 `10` 中用户 `20` 的消息，可传 `{ group: '11', user: '21', role: 'admin' }`，或用 `{ group: null }` 模拟私聊。返回值是本次发送内容的数组；测试结束调用 `dispose()`。也可传 `pluginDirs` 加载目录、传 `config` 覆盖配置，使用 `t.app` 和 `t.mock` 检查状态或模拟其他 OneBot 事件。上述最小插件和多轮对话示例均由仓库中的测试实际运行。
+`say` 默认模拟群 `10` 中用户 `20` 的消息，可传 `{ group: 'room-a', user: 'user-a', role: 'admin' }`，或用 `{ group: null }` 模拟私聊。返回值是本次发送内容的数组；测试结束调用 `dispose()`。也可传 `pluginDirs` 加载目录、传 `config` 覆盖配置，使用 `t.app` 和虚拟适配器 `t.mock` 检查状态或模拟通知。测试 OneBot 协议时可从 `asabot/onebot11/testing` 导入 `MockOneBot`。
+
+消息段通过 `seg.at(id)`、`seg.audio(file)` 等构造，未知的平台消息段会保留。需要 OneBot 专属能力时，从 `asabot/onebot11` 导入 `isOneBot`、`parseCQ`、`toCQ`、`ApiError` 和相关类型；字符串始终作为纯文本发送。`createTestApp` 不接受外部适配器配置。
 
 项目检查命令：`pnpm typecheck`、`pnpm lint`、`pnpm test`。

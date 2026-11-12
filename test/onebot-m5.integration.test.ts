@@ -7,13 +7,14 @@ import pino from 'pino'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import WebSocket from 'ws'
 import { OneBotAdapter } from '../src/adapters/onebot11/adapter.ts'
+import { onebot11Schema } from '../src/adapters/onebot11/config.ts'
+import { MockOneBot } from '../src/adapters/onebot11/testing.ts'
 import { createApp } from '../src/bootstrap.ts'
 import { App } from '../src/core/app.ts'
 import type { Bot } from '../src/core/bot.ts'
 import { configSchema } from '../src/core/config/schema.ts'
 import { NotConnectedError, SendQueueFullError } from '../src/core/errors.ts'
 import { HttpServer } from '../src/server/index.ts'
-import { MockOneBot } from '../src/testing/mock-onebot.ts'
 
 const apps: App[] = []
 const mocks: MockOneBot[] = []
@@ -49,15 +50,17 @@ async function setup(
     dataDir: directory,
     pluginLoader: { dirs: [], hotReload: false },
     server: { port: 0 },
-    onebot11: {
-      apiTimeout: 1_000,
-      reconnect: { minDelay: 15, maxDelay: 30 },
-      connections: options.forwardUrl ? [{ type: 'forward', url: options.forwardUrl }] : [],
-      reverse: { accessToken: options.token ?? 'reverse-secret' },
-      sendQueue: {
-        interval: options.interval ?? 0,
-        jitter: options.jitter ?? 0,
-        maxPending: options.maxPending ?? 100,
+    adapters: {
+      onebot11: {
+        apiTimeout: 1_000,
+        reconnect: { minDelay: 15, maxDelay: 30 },
+        connections: options.forwardUrl ? [{ type: 'forward', url: options.forwardUrl }] : [],
+        reverse: { accessToken: options.token ?? 'reverse-secret' },
+        sendQueue: {
+          interval: options.interval ?? 0,
+          jitter: options.jitter ?? 0,
+          maxPending: options.maxPending ?? 100,
+        },
       },
     },
   })
@@ -65,15 +68,9 @@ async function setup(
   let app: App
   if (options.liveness) {
     app = new App(config, logger)
-    const adapter = new OneBotAdapter(config.onebot11, app, options.liveness)
+    const adapter = new OneBotAdapter(onebot11Schema.parse(config.adapters.onebot11), app, options.liveness)
     app.useAdapter(adapter)
-    app.useServer(
-      new HttpServer(app, {
-        acceptReverse: (socket, selfId, remoteAddress) =>
-          adapter.acceptReverse(socket, selfId, remoteAddress),
-        closeReverseConnections: () => adapter.closeReverseConnections(),
-      }),
-    )
+    app.useServer(new HttpServer(app))
   } else {
     app = createApp(config, { logger })
   }
@@ -130,7 +127,7 @@ describe('OneBot reverse WebSocket', () => {
     await Promise.all([first.connectReverse(url), second.connectReverse(url)])
     const bots = await Promise.all([online(app, '10001'), online(app, '10002')])
     expect(app.bots.list()).toHaveLength(2)
-    for (const bot of bots) expect(app.getBotConnection(bot)).toEqual({ connection: 'reverse' })
+    for (const bot of bots) expect(app.getBotInfo(bot)).toEqual({ connection: '反向 WS' })
     first.emitGroupMessage({ groupId: '10', userId: '20', message: 'hello' })
     second.emitGroupMessage({ groupId: '11', userId: '21', message: 'hello' })
     const [firstCall, secondCall] = await Promise.all([
@@ -257,12 +254,12 @@ describe('OneBot reverse WebSocket', () => {
     const rejected = await reverse.connectReverse(url)
     await closed(rejected)
     expect(bot.status).toBe('online')
-    expect(app.getBotConnection(bot)?.connection).toBe('forward')
+    expect(app.getBotInfo(bot)?.connection).toBe('正向 WS')
     await forward.close()
     await vi.waitFor(() => expect(bot.status).toBe('offline'), { interval: 5 })
     await reverse.connectReverse(url)
     expect(await online(app, '10001')).toBe(bot)
-    expect(app.getBotConnection(bot)).toEqual({ connection: 'reverse' })
+    expect(app.getBotInfo(bot)).toEqual({ connection: '反向 WS' })
   })
 
   it('keeps a reverse Bot while a forward connection retries, then allows the forward connection to take over', async () => {
@@ -289,7 +286,7 @@ describe('OneBot reverse WebSocket', () => {
       { interval: 5 },
     )
     expect(bot.status).toBe('online')
-    expect(app.getBotConnection(bot)).toEqual({ connection: 'reverse' })
+    expect(app.getBotInfo(bot)).toEqual({ connection: '反向 WS' })
     const close = closed(socket)
     socket.close(1000, 'restart')
     await close
@@ -297,7 +294,7 @@ describe('OneBot reverse WebSocket', () => {
       () => {
         expect(app.getBot('onebot11', '10001')).toBe(bot)
         expect(bot.status).toBe('online')
-        expect(app.getBotConnection(bot)?.connection).toBe('forward')
+        expect(app.getBotInfo(bot)?.connection).toBe('正向 WS')
       },
       { interval: 5 },
     )

@@ -1,7 +1,9 @@
 import type { Logger } from 'pino'
-import { OneBotAdapter } from './adapters/onebot11/adapter.ts'
+import { adapters } from './adapters/index.ts'
 import { App } from './core/app.ts'
+import { formatIssuePath } from './core/config/load.ts'
 import type { Config } from './core/config/schema.ts'
+import { ConfigError } from './core/errors.ts'
 import { createLogger } from './core/logger.ts'
 import { createAdminPlugin } from './plugins/admin.ts'
 import { createHelpPlugin } from './plugins/help.ts'
@@ -20,19 +22,22 @@ export function createApp(config: Config, options: CreateAppOptions = {}): App {
   app.plugins.register(createHelpPlugin(app))
   app.plugins.register(createStatusPlugin(app))
   app.plugins.register(createAdminPlugin(app))
-  const adapter = new OneBotAdapter(config.onebot11, app, {
-    logger: app.logger,
-    ignoreSelf: config.dispatch.ignoreSelf,
-  })
-  app.useAdapter(adapter)
-  if (config.server.panelPassword || config.server.apiToken || config.onebot11.reverse !== undefined) {
-    app.useServer(
-      new HttpServer(app, {
-        acceptReverse: (socket, selfId, remoteAddress) =>
-          adapter.acceptReverse(socket, selfId, remoteAddress),
-        closeReverseConnections: () => adapter.closeReverseConnections(),
-      }),
-    )
+  for (const [name, value] of Object.entries(config.adapters)) {
+    const definition = Object.hasOwn(adapters, name) ? adapters[name] : undefined
+    if (definition === undefined) {
+      throw new ConfigError(
+        `Unknown adapter "${name}". Available adapters: ${Object.keys(adapters).join(', ')}`,
+      )
+    }
+    const result = definition.configSchema.safeParse(value)
+    if (!result.success) {
+      const issues = result.error.issues.map(
+        (issue) => `${formatIssuePath(['adapters', name, ...issue.path])}: ${issue.message}`,
+      )
+      throw new ConfigError(`Configuration validation failed:\n${issues.join('\n')}`)
+    }
+    app.useAdapter(definition.create(result.data, app))
   }
+  app.configureServer(() => new HttpServer(app))
   return app
 }

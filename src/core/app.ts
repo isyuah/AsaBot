@@ -1,7 +1,7 @@
 import type { AddressInfo } from 'node:net'
 import type { Hono } from 'hono'
 import type { Logger } from 'pino'
-import type { Adapter, AdapterHost, BotConnectionInfo } from './adapter.ts'
+import type { Adapter, AdapterHost, BotInfo, UpgradeHandler } from './adapter.ts'
 import { type Bot, BotRegistry } from './bot.ts'
 import type { Config } from './config/schema.ts'
 import { Dispatcher } from './dispatch/dispatcher.ts'
@@ -72,8 +72,12 @@ export class App implements AdapterHost {
   readonly stats = new MessageStats()
   readonly startedAt = Date.now()
   server?: ServerService
+  private serverFactory?: () => ServerService
+  private serverStarting?: Promise<void>
   private readonly adapters: Adapter[] = []
-  private readonly botConnections = new WeakMap<Bot, BotConnectionInfo>()
+  private readonly botInfo = new WeakMap<Bot, BotInfo>()
+  private readonly upgrades = new Map<string, UpgradeHandler>()
+  private readonly untrackedBots = new WeakSet<Bot>()
   private readonly routes = new Map<string, Hono>()
   private readonly dispatchSubscribers = new Set<(event: DispatchEvent) => void>()
   private readonly shutdown = new AbortController()
@@ -90,7 +94,7 @@ export class App implements AdapterHost {
     this.dispatcher.accessFilter = (event) => this.storage.allows(event)
     this.dispatcher.isEnabledFor = (owner, event) => this.plugins.isEnabledFor(owner, event)
     this.dispatcher.onDispatch = (event) => {
-      if (event.platform !== 'playground') {
+      if (!event.bot || !this.untrackedBots.has(event.bot)) {
         if (event.kind === 'message') this.stats.record('received')
         else if (event.name === 'bot.message.sent') this.stats.record('sent')
       }
@@ -109,17 +113,66 @@ export class App implements AdapterHost {
     this.server = server
   }
 
+  configureServer(factory: () => ServerService): void {
+    if (this.state !== 'created' || this.serverFactory)
+      throw new Error('Server must be configured before start')
+    this.serverFactory = factory
+  }
+
+  private async startServerIfNeeded(): Promise<void> {
+    if (
+      !this.server &&
+      this.serverFactory &&
+      (this.hasUpgrades || this.config.server.panelPassword || this.config.server.apiToken)
+    ) {
+      this.server = this.serverFactory()
+    }
+    if (this.server) {
+      this.serverStarting ??= this.server.start()
+      await this.serverStarting
+    }
+  }
+
   subscribeDispatch(subscriber: (event: DispatchEvent) => void): () => void {
     this.dispatchSubscribers.add(subscriber)
     return () => this.dispatchSubscribers.delete(subscriber)
   }
 
-  setBotConnection(bot: Bot, info: BotConnectionInfo): void {
-    this.botConnections.set(bot, info)
+  get ignoreSelf(): boolean {
+    return this.config.dispatch.ignoreSelf
   }
 
-  getBotConnection(bot: Bot): BotConnectionInfo | undefined {
-    return this.botConnections.get(bot)
+  setBotInfo(bot: Bot, info: BotInfo): void {
+    this.botInfo.set(bot, info)
+  }
+
+  getBotInfo(bot: Bot): BotInfo | undefined {
+    return this.botInfo.get(bot)
+  }
+
+  registerUpgrade(path: string, handler: UpgradeHandler): void {
+    if (this.upgrades.has(path)) throw new Error(`WebSocket upgrade path already registered: ${path}`)
+    this.upgrades.set(path, handler)
+    if (this.state === 'running') {
+      queueMicrotask(() => {
+        if (this.state !== 'running') return
+        void this.startServerIfNeeded().catch((error: unknown) => {
+          this.logger.error({ err: error }, 'Failed to start HTTP server')
+        })
+      })
+    }
+  }
+
+  getUpgrade(path: string): UpgradeHandler | undefined {
+    return this.upgrades.get(path)
+  }
+
+  get hasUpgrades(): boolean {
+    return this.upgrades.size > 0
+  }
+
+  excludeBotFromStats(bot: Bot): void {
+    this.untrackedBots.add(bot)
   }
 
   setPluginRoute(name: string, route: Hono): () => void {
@@ -162,9 +215,8 @@ export class App implements AdapterHost {
     return this.dispatcher.whenIdle()
   }
 
-  registerBot(bot: Bot, connection?: BotConnectionInfo): void {
+  registerBot(bot: Bot): void {
     this.bots.register(bot)
-    if (connection !== undefined) this.setBotConnection(bot, connection)
   }
 
   unregisterBot(bot: Bot): void {
@@ -208,7 +260,7 @@ export class App implements AdapterHost {
       }
     }
     try {
-      await this.server?.start()
+      await this.startServerIfNeeded()
       await this.plugins.watch()
     } catch (error) {
       await this.stop()
@@ -224,7 +276,6 @@ export class App implements AdapterHost {
 
     this.state = 'stopped'
     await this.plugins.stopWatching()
-    await this.server?.stop()
     this.shutdown.abort(new DOMException('App stopped', 'AbortError'))
     await this.whenIdle()
     await this.plugins.stop()
@@ -235,6 +286,14 @@ export class App implements AdapterHost {
         this.logger.error({ err: error, platform: adapter.platform }, 'Failed to stop adapter')
       }
     }
+    if (this.serverStarting) {
+      try {
+        await this.serverStarting
+      } catch (error) {
+        this.logger.debug({ err: error }, 'HTTP server startup failed before shutdown')
+      }
+    }
+    await this.server?.stop()
     for (const bot of this.bots.list()) {
       this.unregisterBot(bot)
     }

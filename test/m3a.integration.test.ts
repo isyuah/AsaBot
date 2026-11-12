@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pino from 'pino'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { createApp } from '../src/bootstrap.ts'
 import { loadConfig } from '../src/core/config/load.ts'
@@ -29,7 +29,7 @@ afterEach(async () => {
   for (const dir of directories.splice(0)) await rm(dir, { recursive: true, force: true })
 })
 
-describe('plugins through OneBot', () => {
+describe('plugins through the virtual adapter', () => {
   it('runs multiple prompt rounds without sleeping, including middleware', async () => {
     const plugin = definePlugin({
       name: 'dialog',
@@ -74,7 +74,7 @@ describe('plugins through OneBot', () => {
       finished = true
       return result
     })
-    await t.mock.waitForCall('send_group_msg')
+    await vi.waitFor(() => expect(t.mock.bot.sends).toHaveLength(1))
     await new Promise<void>((resolve) => setImmediate(resolve))
     expect(finished).toBe(false)
     release()
@@ -102,7 +102,7 @@ describe('plugins through OneBot', () => {
       finished = true
       return result
     })
-    await t.mock.waitForCall('send_group_msg')
+    await vi.waitFor(() => expect(t.mock.bot.sends).toHaveLength(1))
     await new Promise<void>((resolve) => setImmediate(resolve))
     expect(finished).toBe(false)
     release()
@@ -261,26 +261,26 @@ describe('plugins through OneBot', () => {
       },
     })
     const t = await testApp({ plugins: [plugin] })
-    t.app.plugins.setGroupEnabled('guarded', 'onebot11:10', false)
+    t.app.plugins.setGroupEnabled('guarded', 'virtual:10', false)
     expect(await t.say('/guarded')).toEqual([])
     expect(observed).toBe(0)
     expect(middlewareRuns).toBe(0)
     expect(await t.say('match-trigger')).toEqual([])
     expect(await t.say('/guarded', { group: '11' })).toEqual(['allowed'])
     expect(await t.say('match-trigger', { group: '11' })).toEqual(['matched'])
-    t.app.plugins.setGroupEnabled('guarded', 'onebot11:10', true)
+    t.app.plugins.setGroupEnabled('guarded', 'virtual:10', true)
     const access = t.app.storage.access
-    access.add('allow', 'user', 'onebot11:20')
-    access.add('allow', 'group', 'onebot11:10')
+    access.add('allow', 'user', 'virtual:20')
+    access.add('allow', 'group', 'virtual:10')
     expect(await t.say('/guarded', { user: '21' })).toEqual([])
     expect(await t.say('/guarded', { group: '11' })).toEqual([])
     expect(await t.say('/guarded', { group: null })).toEqual(['allowed'])
     expect(await t.say('/guarded')).toEqual(['allowed'])
-    access.add('block', 'group', 'onebot11:10')
+    access.add('block', 'group', 'virtual:10')
     expect(await t.say('/guarded')).toEqual([])
     expect(await t.say('/guarded', { user: '99', superuser: true })).toEqual(['allowed'])
-    access.remove('block', 'group', 'onebot11:10')
-    expect(access.list('allow', 'group')).toEqual([{ list: 'allow', subject: 'group', key: 'onebot11:10' }])
+    access.remove('block', 'group', 'virtual:10')
+    expect(access.list('allow', 'group')).toEqual([{ list: 'allow', subject: 'group', key: 'virtual:10' }])
   })
 
   it('isolates timer errors, skips overlap and stops on unload', async () => {
@@ -363,8 +363,8 @@ describe('storage and YAML', () => {
       storage.store('example').set('value', { answer: 42 })
       storage.store('example').set('expired', 1, { ttl: 0 })
       expect(storage.store('example').get('expired')).toBeUndefined()
-      storage.access.add('allow', 'user', 'onebot11:1')
-      storage.setGroupEnabled('example', 'onebot11:2', false)
+      storage.access.add('allow', 'user', 'virtual:1')
+      storage.setGroupEnabled('example', 'virtual:2', false)
     } finally {
       storage.close()
     }
@@ -374,7 +374,7 @@ describe('storage and YAML', () => {
       expect(reopened.store('example').get('value')).toEqual({ answer: 42 })
       expect(reopened.store('example').keys()).toEqual(['value'])
       expect(reopened.access.list()).toHaveLength(1)
-      expect(reopened.isGroupEnabled('example', 'onebot11:2')).toBe(false)
+      expect(reopened.isGroupEnabled('example', 'virtual:2')).toBe(false)
     } finally {
       reopened.close()
     }

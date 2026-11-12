@@ -5,14 +5,13 @@ const segment = z
   .superRefine((value, context) => {
     const required: Record<string, string> = {
       text: 'text',
-      at: 'qq',
+      at: 'id',
       face: 'id',
       image: 'file',
-      record: 'file',
+      audio: 'file',
       video: 'file',
       reply: 'id',
       file: 'file',
-      json: 'data',
       forward: 'id',
     }
     const field = required[value.type]

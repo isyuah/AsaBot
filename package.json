@@ -8,7 +8,9 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/testing/index.ts"
+    "./testing": "./src/testing/index.ts",
+    "./onebot11": "./src/adapters/onebot11/index.ts",
+    "./onebot11/testing": "./src/adapters/onebot11/testing.ts"
   },
   "scripts": {
     "dev": "node --watch src/main.ts",

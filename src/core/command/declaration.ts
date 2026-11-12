@@ -32,10 +32,15 @@ export function parseValue(type: ArgumentType, value: string | Segment): unknown
     throw new Error('图片')
   }
   if (type === 'user') {
-    if (typeof value !== 'string' && value.type === 'at' && /^\d+$/.test(String(value.data.qq))) {
-      return String(value.data.qq)
+    if (
+      typeof value !== 'string' &&
+      value.type === 'at' &&
+      typeof value.data.id === 'string' &&
+      value.data.id
+    ) {
+      return value.data.id
     }
-    if (typeof value === 'string' && /^\d+$/.test(value)) return value
+    if (typeof value === 'string' && value.length > 0 && !/\s/.test(value)) return value
     throw new Error('用户 ID 或 @用户')
   }
   if (type === 'rest') {

@@ -1,17 +1,10 @@
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import type {
-  GroupInfo,
-  GroupMemberInfo,
-  OneBotApi,
-  OneBotForwardNode,
-  OneBotMessageInfo,
-  OneBotVersionInfo,
-  SendResult,
-  UserInfo,
-} from '../../core/bot.ts'
+import type { GroupInfo, GroupMemberInfo, SendResult, UserInfo } from '../../core/bot.ts'
 import type { Message, Segment, Sendable } from '../../core/message/index.ts'
 import { normalizeSendable } from '../../core/message/index.ts'
+import type { OneBotApi, OneBotForwardNode, OneBotMessageInfo, OneBotVersionInfo } from './bot.ts'
+import { idNumber, outgoingSegment } from './conversion.ts'
 import { incomingMessage } from './message.ts'
 import type { OneBotMessage } from './types.ts'
 
@@ -26,14 +19,6 @@ export interface OneBotApiHooks {
     messageId: string
     message: Sendable
   }) => void
-}
-
-function idNumber(value: string): number {
-  const number = Number(value)
-  if (!/^-?\d+$/.test(value) || !Number.isSafeInteger(number)) {
-    throw new Error(`OneBot IDs must be numeric, got ${value}`)
-  }
-  return number
 }
 
 async function normalizeMediaFile(value: string): Promise<string> {
@@ -53,27 +38,17 @@ async function normalizeMediaFile(value: string): Promise<string> {
 }
 
 async function normalizeSegment(segment: Segment): Promise<Segment> {
-  const data: Record<string, unknown> = { ...segment.data }
-  if (segment.type === 'at' && data.qq !== 'all') {
-    data.qq = idNumber(String(data.qq))
-  }
-  // forward ids are opaque string resids in NapCat, so only reply/face ids are numeric.
-  if (segment.type === 'face' || segment.type === 'reply') {
-    data.id = idNumber(String(data.id))
-  }
+  const result = outgoingSegment(segment)
+  const data: Record<string, unknown> = result.data
   if (
     segment.type === 'image' ||
-    segment.type === 'record' ||
+    segment.type === 'audio' ||
     segment.type === 'video' ||
     segment.type === 'file'
   ) {
     data.file = await normalizeMediaFile(String(data.file))
   }
-  if (segment.type === 'image' && data.subType !== undefined) {
-    data.sub_type = data.subType
-    delete data.subType
-  }
-  return { type: segment.type, data } as Segment
+  return result
 }
 
 export async function normalizeOutbound(content: Sendable): Promise<OneBotMessage> {

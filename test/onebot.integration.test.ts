@@ -1,20 +1,27 @@
-import { mkdtemp, rmdir, unlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, rmdir, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Writable } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OneBotAdapter } from '../src/adapters/onebot11/adapter.ts'
+import { type ApiError, isOneBot, onebot11Schema } from '../src/adapters/onebot11/index.ts'
+import { MockOneBot } from '../src/adapters/onebot11/testing.ts'
 import { createApp } from '../src/bootstrap.ts'
 import { App } from '../src/core/app.ts'
-import { isOneBot } from '../src/core/bot.ts'
 import { configSchema } from '../src/core/config/schema.ts'
-import { type ApiError, ApiTimeoutError, NotConnectedError } from '../src/core/errors.ts'
+import { ApiTimeoutError, NotConnectedError } from '../src/core/errors.ts'
 import type { Session } from '../src/core/event/index.ts'
 import { createLogger } from '../src/core/logger.ts'
 import { seg } from '../src/core/message/index.ts'
-import { MockOneBot } from '../src/testing/mock-onebot.ts'
 
 const resources: Array<{ app: App; mock: MockOneBot }> = []
+const dataDirectories: string[] = []
+
+async function dataDirectory(): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), 'asabot-onebot-'))
+  dataDirectories.push(directory)
+  return directory
+}
 
 afterEach(async () => {
   for (const { app, mock } of resources.splice(0)) {
@@ -24,16 +31,21 @@ afterEach(async () => {
       await mock.close()
     }
   }
+  for (const directory of dataDirectories.splice(0)) await rm(directory, { recursive: true, force: true })
 })
 
 async function setup(options: ConstructorParameters<typeof MockOneBot>[0] = {}) {
   const mock = new MockOneBot(options)
   await mock.ready
   const config = configSchema.parse({
-    onebot11: {
-      apiTimeout: 100,
-      reconnect: { minDelay: 10, maxDelay: 30 },
-      connections: [{ type: 'forward', url: mock.url, accessToken: 'test-token' }],
+    dataDir: await dataDirectory(),
+    pluginLoader: { dirs: [], hotReload: false },
+    adapters: {
+      onebot11: {
+        apiTimeout: 100,
+        reconnect: { minDelay: 10, maxDelay: 30 },
+        connections: [{ type: 'forward', url: mock.url, accessToken: 'test-token' }],
+      },
     },
   })
   const app = createApp(config)
@@ -161,7 +173,7 @@ describe('OneBot forward adapter', () => {
     const file = join(directory, 'image.bin')
     await writeFile(file, Buffer.from('media'))
     try {
-      await bot.sendGroup('200', [seg.image(file), seg.record(Buffer.from('record'))])
+      await bot.sendGroup('200', [seg.image(file), seg.audio(Buffer.from('record'))])
       const call = await mock.waitForCall('send_group_msg')
       expect(call.params.message).toEqual([
         { type: 'image', data: { file: 'base64://bWVkaWE=' } },
@@ -181,7 +193,8 @@ describe('OneBot forward adapter', () => {
     const received = new Promise<Session>((resolve) => {
       app.events.on('message.group', (session) => resolve(session))
     })
-    // NapCat reports images by platform file name plus URL, and forwards by an opaque string resid.
+    // Implementations report images by platform file name plus URL, and forwards by an opaque resource id
+    // (NapCat uses a string resid). Both must survive a re-send unchanged.
     mock.emitGroupMessage({
       groupId: '200',
       userId: '300',
@@ -209,10 +222,14 @@ describe('OneBot forward adapter', () => {
       return { user_id: 10000, nickname: 'MockBot' }
     })
     const config = configSchema.parse({
-      onebot11: {
-        apiTimeout: 500,
-        reconnect: { minDelay: 10, maxDelay: 30 },
-        connections: [{ type: 'forward', url: mock.url, accessToken: 'test-token' }],
+      dataDir: await dataDirectory(),
+      pluginLoader: { dirs: [], hotReload: false },
+      adapters: {
+        onebot11: {
+          apiTimeout: 500,
+          reconnect: { minDelay: 10, maxDelay: 30 },
+          connections: [{ type: 'forward', url: mock.url, accessToken: 'test-token' }],
+        },
       },
     })
     const app = createApp(config)
@@ -361,15 +378,19 @@ describe('OneBot forward adapter', () => {
     const mock = new MockOneBot({ token: 'test-token', respondToPing: false })
     await mock.ready
     const config = configSchema.parse({
-      onebot11: {
-        apiTimeout: 100,
-        reconnect: { minDelay: 10, maxDelay: 20 },
-        connections: [{ type: 'forward', url: mock.url, accessToken: 'test-token' }],
+      dataDir: await dataDirectory(),
+      pluginLoader: { dirs: [], hotReload: false },
+      adapters: {
+        onebot11: {
+          apiTimeout: 100,
+          reconnect: { minDelay: 10, maxDelay: 20 },
+          connections: [{ type: 'forward', url: mock.url, accessToken: 'test-token' }],
+        },
       },
     })
     const app = new App(config)
     app.useAdapter(
-      new OneBotAdapter(config.onebot11, app, {
+      new OneBotAdapter(onebot11Schema.parse(config.adapters.onebot11), app, {
         pingInterval: 15,
         pongTimeout: 15,
         heartbeatCheckInterval: 5,
@@ -400,14 +421,20 @@ describe('OneBot forward adapter', () => {
     const mock = new MockOneBot({ token: 'test-token', heartbeat: true, heartbeatInterval: 20 })
     await mock.ready
     const config = configSchema.parse({
-      onebot11: {
-        apiTimeout: 100,
-        reconnect: { minDelay: 10, maxDelay: 20 },
-        connections: [{ type: 'forward', url: mock.url, accessToken: 'test-token' }],
+      dataDir: await dataDirectory(),
+      pluginLoader: { dirs: [], hotReload: false },
+      adapters: {
+        onebot11: {
+          apiTimeout: 100,
+          reconnect: { minDelay: 10, maxDelay: 20 },
+          connections: [{ type: 'forward', url: mock.url, accessToken: 'test-token' }],
+        },
       },
     })
     const app = new App(config)
-    app.useAdapter(new OneBotAdapter(config.onebot11, app, { heartbeatCheckInterval: 5 }))
+    app.useAdapter(
+      new OneBotAdapter(onebot11Schema.parse(config.adapters.onebot11), app, { heartbeatCheckInterval: 5 }),
+    )
     resources.push({ app, mock })
     const heartbeat = new Promise<void>((resolve) => app.events.on('meta.heartbeat', () => resolve()))
     const offline = waitForEvent(app, 'bot.offline')
@@ -432,15 +459,19 @@ describe('OneBot forward adapter', () => {
       },
     })
     const config = configSchema.parse({
-      onebot11: {
-        reconnect: { minDelay: 5, maxDelay: 10 },
-        connections: [
-          {
-            type: 'forward',
-            url: `${mock.url}?access_token=url-secret&other=ok`,
-            accessToken: 'wrong-token',
-          },
-        ],
+      dataDir: await dataDirectory(),
+      pluginLoader: { dirs: [], hotReload: false },
+      adapters: {
+        onebot11: {
+          reconnect: { minDelay: 5, maxDelay: 10 },
+          connections: [
+            {
+              type: 'forward',
+              url: `${mock.url}?access_token=url-secret&other=ok`,
+              accessToken: 'wrong-token',
+            },
+          ],
+        },
       },
     })
     const app = createApp(config, { logger: createLogger({ level: 'debug', destination, pretty: false }) })

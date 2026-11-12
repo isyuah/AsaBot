@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { parseDuration } from '../utils/duration.ts'
 
-const durationSchema = z
+export const durationSchema = z
   .union([z.number().finite().nonnegative(), z.string()])
   .transform((value, context) => {
     try {
@@ -35,40 +35,6 @@ const dispatchSchema = z
   })
   .strict()
 
-const connectionSchema = z
-  .object({
-    type: z.literal('forward'),
-    url: z.url(),
-    accessToken: z.string().optional(),
-  })
-  .strict()
-
-const onebot11Schema = z
-  .object({
-    apiTimeout: durationSchema.default(30_000),
-    reconnect: z
-      .object({
-        minDelay: durationSchema.default(1_000),
-        maxDelay: durationSchema.default(60_000),
-      })
-      .strict()
-      .default(() => ({ minDelay: 1_000, maxDelay: 60_000 })),
-    connections: z.array(connectionSchema).default([]),
-    reverse: z
-      .object({ accessToken: z.string().default('') })
-      .strict()
-      .optional(),
-    sendQueue: z
-      .object({
-        interval: durationSchema.default(500),
-        jitter: durationSchema.default(300),
-        maxPending: z.number().int().nonnegative().default(100),
-      })
-      .strict()
-      .default(() => ({ interval: 500, jitter: 300, maxPending: 100 })),
-  })
-  .strict()
-
 const pluginLoaderSchema = z
   .object({
     dirs: z.array(z.string()).default(['./plugins']),
@@ -99,7 +65,7 @@ export const configSchema = z
     superusers: z.array(z.string()).default([]),
     command: commandSchema.default(() => commandSchema.parse({})),
     dispatch: dispatchSchema.default(() => dispatchSchema.parse({})),
-    onebot11: onebot11Schema.default(() => onebot11Schema.parse({})),
+    adapters: z.record(z.string(), z.unknown()).default({}),
     pluginLoader: pluginLoaderSchema.default(() => pluginLoaderSchema.parse({})),
     plugins: z.record(z.string(), pluginEntrySchema).default({}),
     server: serverSchema.default(() => serverSchema.parse({})),

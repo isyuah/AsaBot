@@ -1,16 +1,10 @@
 import { randomUUID } from 'node:crypto'
+import type { Duplex } from 'node:stream'
 import type { Logger } from 'pino'
-import WebSocket, { type RawData } from 'ws'
-import type { Adapter, AdapterHost, BotConnectionInfo } from '../../core/adapter.ts'
-import type {
-  GroupInfo,
-  GroupMemberInfo,
-  OneBotApi,
-  OneBotBot,
-  SendResult,
-  UserInfo,
-} from '../../core/bot.ts'
-import { ApiError, ApiTimeoutError, NotConnectedError } from '../../core/errors.ts'
+import WebSocket, { type RawData, WebSocketServer } from 'ws'
+import type { Adapter, AdapterHost, BotInfo } from '../../core/adapter.ts'
+import type { GroupInfo, GroupMemberInfo, SendResult, UserInfo } from '../../core/bot.ts'
+import { ApiTimeoutError, NotConnectedError } from '../../core/errors.ts'
 import type {
   BotOfflineEvent,
   BotOnlineEvent,
@@ -23,7 +17,10 @@ import type {
 import { createSession } from '../../core/event/index.ts'
 import type { Message, Sendable } from '../../core/message/index.ts'
 import { LruSet } from '../../core/utils/lru.ts'
+import { constantTimeEqual } from '../../core/utils/security.ts'
 import { OneBotApiImpl } from './api.ts'
+import type { OneBotApi, OneBotBot } from './bot.ts'
+import { ApiError } from './errors.ts'
 import { incomingMessage } from './message.ts'
 import { SendQueue } from './send-queue.ts'
 import type { OneBot11Config, OneBotConnectionConfig, OneBotFrame, OneBotMessageEvent } from './types.ts'
@@ -278,14 +275,14 @@ class OneBotSession {
     }
   }
 
-  connectionInfo(): BotConnectionInfo {
-    if (this.transport.connection === 'reverse') return { connection: 'reverse' }
+  connectionInfo(): BotInfo {
+    if (this.transport.connection === 'reverse') return { connection: '反向 WS' }
     const url = new URL(this.transport.url)
     url.username = ''
     url.password = ''
     url.search = ''
     url.hash = ''
-    return { connection: 'forward', url: url.toString() }
+    return { connection: '正向 WS', url: url.toString() }
   }
 
   request(action: string, params?: Record<string, unknown>): Promise<unknown> {
@@ -894,22 +891,11 @@ export class OneBotAdapter implements Adapter {
   private readonly bots = new Map<string, OneBotBotImpl>()
   private readonly reverseSessions = new Map<string, Set<OneBotSession>>()
   private readonly activeReverseSessions = new Set<OneBotSession>()
+  private readonly reverseWebsocket = new WebSocketServer({ noServer: true })
   private stopped = true
 
-  constructor(
-    config: OneBot11Config | OneBotConnectionConfig[],
-    host: AdapterHost,
-    options: OneBotAdapterOptions = {},
-  ) {
-    const settings = Array.isArray(config)
-      ? {
-          connections: config,
-          apiTimeout: 30_000,
-          reconnect: { minDelay: 1_000, maxDelay: 60_000 },
-          reverse: undefined,
-          sendQueue: { interval: 500, jitter: 300, maxPending: 100 },
-        }
-      : config
+  constructor(config: OneBot11Config, host: AdapterHost, options: OneBotAdapterOptions = {}) {
+    const settings = config
     const connectionOptions: ConnectionOptions = {
       logger: options.logger ?? host.logger,
       apiTimeout: options.apiTimeout ?? settings.apiTimeout,
@@ -927,6 +913,50 @@ export class OneBotAdapter implements Adapter {
     this.reverseToken = settings.reverse?.accessToken
     this.connections = settings.connections.map(
       (connection) => new OneBotConnection(connection, host, connectionOptions, this),
+    )
+    if (settings.reverse !== undefined) {
+      host.registerUpgrade('/onebot/v11/ws', (request, socket, head) => {
+        if (this.stopped) return this.rejectUpgrade(socket, 503)
+        const token = settings.reverse?.accessToken ?? ''
+        const url = new URL(request.url ?? '/', 'http://localhost')
+        const bearer = /^Bearer (.+)$/.exec(request.headers.authorization ?? '')?.[1]
+        const queryToken = url.searchParams.get('access_token')
+        if (
+          token &&
+          !(bearer !== undefined && constantTimeEqual(bearer, token)) &&
+          !(queryToken !== null && constantTimeEqual(queryToken, token))
+        )
+          return this.rejectUpgrade(socket, 401)
+        const selfId = request.headers['x-self-id']
+        if (typeof selfId !== 'string' || !/^\d+$/.test(selfId) || !Number.isSafeInteger(Number(selfId))) {
+          return this.rejectUpgrade(socket, 400, 'X-Self-ID must contain only safe integer digits')
+        }
+        const role = request.headers['x-client-role']
+        if (role !== undefined && role !== 'Universal') {
+          return this.rejectUpgrade(
+            socket,
+            400,
+            'X-Client-Role must be Universal; split API/Event connections are not supported',
+          )
+        }
+        const remoteAddress = request.socket.remoteAddress ?? 'unknown'
+        this.reverseWebsocket.handleUpgrade(request, socket, head, (client) =>
+          this.acceptReverse(client, selfId, remoteAddress),
+        )
+      })
+    }
+  }
+
+  private rejectUpgrade(socket: Duplex, status: 400 | 401 | 503, detail?: string): void {
+    const message = { 400: 'Bad Request', 401: 'Unauthorized', 503: 'Service Unavailable' }[status]
+    const payload = JSON.stringify({
+      error: {
+        code: { 400: 'BAD_REQUEST', 401: 'UNAUTHORIZED', 503: 'UNAVAILABLE' }[status],
+        message: detail ?? message,
+      },
+    })
+    socket.end(
+      `HTTP/1.1 ${status} ${message}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(payload)}\r\nConnection: close\r\n\r\n${payload}`,
     )
   }
 
@@ -959,12 +989,13 @@ export class OneBotAdapter implements Adapter {
     }
     if (bot === undefined) {
       bot = new OneBotBotImpl(session, selfId, this.options)
-      this.host.registerBot(bot, session.connectionInfo())
+      this.host.registerBot(bot)
       this.bots.set(selfId, bot)
     } else {
-      this.host.registerBot(bot, session.connectionInfo())
+      this.host.registerBot(bot)
       bot.setConnection(session)
     }
+    this.host.setBotInfo(bot, session.connectionInfo())
     return bot
   }
 
@@ -975,7 +1006,7 @@ export class OneBotAdapter implements Adapter {
     }
   }
 
-  acceptReverse(socket: WebSocket, selfId: string, remoteAddress: string): void {
+  private acceptReverse(socket: WebSocket, selfId: string, remoteAddress: string): void {
     if (this.stopped) {
       socket.close(1001, 'server stopping')
       return
@@ -1019,7 +1050,7 @@ export class OneBotAdapter implements Adapter {
     }
   }
 
-  async closeReverseConnections(): Promise<void> {
+  private async closeReverseConnections(): Promise<void> {
     await Promise.all([...this.activeReverseSessions].map((session) => session.stop()))
   }
 

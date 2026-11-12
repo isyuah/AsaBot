@@ -43,14 +43,14 @@ describe('loadConfig', () => {
     delete process.env.ASABOT_CONFIG_MISSING
     const defaultPath = await writeConfig(`dataDir: \${ASABOT_CONFIG_MISSING:-./fallback}\n`)
     const missingPath = await writeConfig(
-      `onebot11:\n  connections:\n    - type: forward\n      url: \${ASABOT_CONFIG_MISSING}\n`,
+      `adapters:\n  custom:\n    connections:\n      - url: \${ASABOT_CONFIG_MISSING}\n`,
     )
 
     try {
       const config = await loadConfig(defaultPath)
       expect(config.dataDir).toBe('./fallback')
       await expect(loadConfig(missingPath)).rejects.toThrow(
-        'Missing environment variable "ASABOT_CONFIG_MISSING" at onebot11.connections[0].url',
+        'Missing environment variable "ASABOT_CONFIG_MISSING" at adapters.custom.connections[0].url',
       )
     } finally {
       if (previous !== undefined) {
@@ -60,10 +60,8 @@ describe('loadConfig', () => {
   })
 
   it('aggregates validation errors with field paths', async () => {
-    const path = await writeConfig('onebot11:\n  connections:\n    - type: reverse\n      url: invalid\n')
+    const path = await writeConfig('command:\n  prefixes: invalid\nserver:\n  port: -1\n')
 
-    await expect(loadConfig(path)).rejects.toThrow(
-      /onebot11\.connections\[0\]\.type:.*\nonebot11\.connections\[0\]\.url:/,
-    )
+    await expect(loadConfig(path)).rejects.toThrow(/command\.prefixes:.*\nserver\.port:/)
   })
 })
