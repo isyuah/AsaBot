@@ -334,6 +334,46 @@ describe('HTTP service contract', () => {
     ).toBe(400)
   })
 
+  it('rejects local-file media from every HTTP message input', async () => {
+    const { t, url } = await start()
+    const cookie = await login(url)
+    const before = t.mock.bot.sends.length
+    for (const file of [
+      'file:///etc/passwd',
+      'FILE:C:/secrets.txt',
+      '/etc/passwd',
+      'C:\\Users\\bot\\.env',
+      '\\\\host\\share\\a.png',
+    ]) {
+      const response = await request(url, cookie, '/send', 'POST', {
+        target: { type: 'group', id: '1' },
+        message: [
+          { type: 'text', data: { text: 'x' } },
+          { type: 'file', data: { file } },
+        ],
+      })
+      expect(response.status, file).toBe(400)
+      expect(await response.json()).toMatchObject({
+        error: { code: 'BAD_REQUEST', issues: [{ path: 'message[1].data.file' }] },
+      })
+    }
+    const playground = await request(url, cookie, '/playground', 'POST', {
+      user: { id: '1' },
+      message: [{ type: 'image', data: { file: 'file:///etc/passwd' } }],
+    })
+    expect(playground.status).toBe(400)
+    const external = await fetch(`${url}/api/v1/send`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer api-secret', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        target: { type: 'group', id: '1' },
+        message: [{ type: 'audio', data: { file: '/root/.env' } }],
+      }),
+    })
+    expect(external.status).toBe(400)
+    expect(t.mock.bot.sends.length).toBe(before)
+  })
+
   it('pushes hello then messages and sends through the authenticated external API', async () => {
     const { t, url } = await start()
     const cookie = await login(url)

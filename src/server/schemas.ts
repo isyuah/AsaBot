@@ -1,5 +1,9 @@
 import { z } from 'zod'
 
+const mediaTypes = new Set(['image', 'audio', 'video', 'file'])
+/** `file:` URLs and absolute paths (POSIX, Windows drive, UNC / root-relative). */
+const localFile = /^(?:file:|[\\/]|[a-z]:[\\/])/i
+
 const segment = z
   .object({ type: z.string().min(1), data: z.record(z.string(), z.unknown()) })
   .superRefine((value, context) => {
@@ -17,6 +21,15 @@ const segment = z
     const field = required[value.type]
     if (field && typeof value.data[field] !== 'string') {
       context.addIssue({ code: 'custom', path: ['data', field], message: 'Expected string' })
+      return
+    }
+    // HTTP callers must not make the adapter (or the OneBot implementation's host) read local files.
+    if (mediaTypes.has(value.type) && localFile.test(value.data.file as string)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['data', 'file'],
+        message: 'Local files are not allowed; use http(s):// or base64://',
+      })
     }
   })
 
