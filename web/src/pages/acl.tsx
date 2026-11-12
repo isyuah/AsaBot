@@ -7,7 +7,14 @@ import { Button } from '../components/ui/button.tsx'
 import { Dialog } from '../components/ui/dialog.tsx'
 import { Field, Input } from '../components/ui/input.tsx'
 import { Segmented } from '../components/ui/misc.tsx'
-import { Card, CardHeader, EmptyState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
+import {
+  Card,
+  CardHeader,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  Skeleton,
+} from '../components/ui/primitives.tsx'
 import { api } from '../lib/api.ts'
 import { softSpring } from '../lib/motion.ts'
 import { isValidId, usePlatforms } from '../lib/platform.ts'
@@ -82,7 +89,14 @@ export function AclPage() {
                 }
               />
               <div className="flex-1 px-2 pb-2">
-                {acl.isPending ? (
+                {acl.error && !acl.data ? (
+                  <ErrorState
+                    error={acl.error}
+                    onRetry={() => void acl.refetch()}
+                    retrying={acl.isFetching}
+                    className="py-8"
+                  />
+                ) : acl.isPending ? (
                   <div className="space-y-2 px-3 pb-2">
                     <Skeleton className="h-11" />
                     <Skeleton className="h-11" />

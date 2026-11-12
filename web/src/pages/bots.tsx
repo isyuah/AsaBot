@@ -8,7 +8,7 @@ import { Button } from '../components/ui/button.tsx'
 import { Dialog } from '../components/ui/dialog.tsx'
 import { Field, Input, Textarea } from '../components/ui/input.tsx'
 import { Segmented } from '../components/ui/misc.tsx'
-import { Badge, Card, EmptyState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
+import { Badge, Card, EmptyState, ErrorState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
 import { api } from '../lib/api.ts'
 import { formatNumber } from '../lib/format.ts'
 import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
@@ -28,7 +28,11 @@ export function BotsPage() {
   return (
     <>
       <PageHeader title="机器人" description="已连接的账号、群列表，以及以机器人身份发送消息" />
-      {!bots.data ? (
+      {bots.error && !bots.data ? (
+        <Card>
+          <ErrorState error={bots.error} onRetry={() => void bots.refetch()} retrying={bots.isFetching} />
+        </Card>
+      ) : !bots.data ? (
         <Skeleton className="h-48 rounded-xl" />
       ) : bots.data.length === 0 ? (
         <Card>

@@ -153,6 +153,54 @@ export function EmptyState({
   )
 }
 
+/** Failed query: shows the reason and a retry button instead of leaving a skeleton on screen forever. */
+export function ErrorState({
+  error,
+  onRetry,
+  retrying = false,
+  className,
+}: {
+  error: Error
+  onRetry: () => void
+  retrying?: boolean
+  className?: string
+}) {
+  return (
+    <EmptyState
+      icon={
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+          className="text-danger"
+        >
+          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
+          <path d="M12 9v4" />
+          <path d="M12 17h.01" />
+        </svg>
+      }
+      title="加载失败"
+      description={error.message}
+      className={className}
+      action={
+        <button
+          type="button"
+          onClick={onRetry}
+          disabled={retrying}
+          className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12.5px] font-medium text-fg shadow-card transition-colors hover:bg-surface-2 disabled:cursor-wait disabled:opacity-60"
+        >
+          {retrying && <Spinner className="size-3.5" />}
+          重试
+        </button>
+      }
+    />
+  )
+}
+
 export function PageHeader({
   title,
   description,

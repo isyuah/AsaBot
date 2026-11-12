@@ -41,7 +41,15 @@ import {
   Tabs,
   Tooltip,
 } from '../components/ui/misc.tsx'
-import { Badge, Card, EmptyState, PageHeader, Skeleton, type Tone } from '../components/ui/primitives.tsx'
+import {
+  Badge,
+  Card,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  Skeleton,
+  type Tone,
+} from '../components/ui/primitives.tsx'
 import { Select } from '../components/ui/select.tsx'
 import { Switch } from '../components/ui/switch.tsx'
 import { ApiError, api } from '../lib/api.ts'
@@ -137,7 +145,8 @@ export function PluginsPage() {
   }, [plugins.data, filter, query])
 
   const counts = useMemo(() => {
-    const data = plugins.data ?? []
+    const data = plugins.data
+    if (!data) return undefined
     return {
       all: data.length,
       active: data.filter((plugin) => plugin.state === 'active').length,
@@ -153,9 +162,7 @@ export function PluginsPage() {
       <PageHeader
         title="插件"
         description={
-          plugins.data
-            ? `共 ${counts.all} 个插件，${counts.active} 个正在运行`
-            : '管理插件的启停、配置和群开关'
+          counts ? `共 ${counts.all} 个插件，${counts.active} 个正在运行` : '管理插件的启停、配置和群开关'
         }
         actions={
           <>
@@ -191,7 +198,7 @@ export function PluginsPage() {
             value: 'installed',
             label: (
               <>
-                已安装 <Count n={counts.all} />
+                已安装 <Count n={counts?.all} />
               </>
             ),
           },
@@ -234,7 +241,7 @@ export function PluginsPage() {
                     value: 'all',
                     label: (
                       <>
-                        全部 <Count n={counts.all} />
+                        全部 <Count n={counts?.all} />
                       </>
                     ),
                   },
@@ -242,7 +249,7 @@ export function PluginsPage() {
                     value: 'active',
                     label: (
                       <>
-                        运行中 <Count n={counts.active} />
+                        运行中 <Count n={counts?.active} />
                       </>
                     ),
                   },
@@ -250,7 +257,7 @@ export function PluginsPage() {
                     value: 'disabled',
                     label: (
                       <>
-                        已停用 <Count n={counts.disabled} />
+                        已停用 <Count n={counts?.disabled} />
                       </>
                     ),
                   },
@@ -258,7 +265,7 @@ export function PluginsPage() {
                     value: 'failed',
                     label: (
                       <>
-                        失败 <Count n={counts.failed} />
+                        失败 <Count n={counts?.failed} />
                       </>
                     ),
                   },
@@ -273,7 +280,15 @@ export function PluginsPage() {
               />
             </div>
 
-            {!plugins.data ? (
+            {plugins.error && !plugins.data ? (
+              <Card>
+                <ErrorState
+                  error={plugins.error}
+                  onRetry={() => void plugins.refetch()}
+                  retrying={plugins.isFetching}
+                />
+              </Card>
+            ) : !plugins.data ? (
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {skeletonKeys.map((key) => (
                   <Skeleton key={key} className="h-[150px] rounded-xl" />
@@ -331,7 +346,8 @@ export function PluginsPage() {
   )
 }
 
-function Count({ n }: { n: number }) {
+function Count({ n }: { n: number | undefined }) {
+  if (n === undefined) return null
   return <span className="ml-0.5 text-fg-3 tabular">{n}</span>
 }
 
@@ -787,7 +803,14 @@ function GroupsTab({ plugin }: { plugin: PluginView }) {
           在该群关闭
         </Button>
       </form>
-      {groups.isPending ? (
+      {groups.error && !groups.data ? (
+        <ErrorState
+          error={groups.error}
+          onRetry={() => void groups.refetch()}
+          retrying={groups.isFetching}
+          className="py-8"
+        />
+      ) : groups.isPending ? (
         <Skeleton className="h-24" />
       ) : (groups.data ?? []).length === 0 ? (
         <EmptyState

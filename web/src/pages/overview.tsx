@@ -16,7 +16,15 @@ import { type ReactNode, useEffect, useState } from 'react'
 import { Avatar } from '../components/avatar.tsx'
 import { MessageChart } from '../components/message-chart.tsx'
 import { NumberTicker, Segmented } from '../components/ui/misc.tsx'
-import { Badge, Card, CardHeader, EmptyState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
+import {
+  Badge,
+  Card,
+  CardHeader,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  Skeleton,
+} from '../components/ui/primitives.tsx'
 import { api } from '../lib/api.ts'
 import { formatBytes, formatDuration, formatRelative } from '../lib/format.ts'
 import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
@@ -47,6 +55,16 @@ export function OverviewPage() {
           weekday: 'long',
         })}
       />
+      {overview.error && !overview.data && (
+        <Card className="mb-3">
+          <ErrorState
+            error={overview.error}
+            onRetry={() => void overview.refetch()}
+            retrying={overview.isFetching}
+            className="py-8"
+          />
+        </Card>
+      )}
 
       <motion.div
         variants={stagger}
@@ -128,7 +146,14 @@ export function OverviewPage() {
                 />
               }
             />
-            {stats.data ? (
+            {stats.error && !stats.data ? (
+              <ErrorState
+                error={stats.error}
+                onRetry={() => void stats.refetch()}
+                retrying={stats.isFetching}
+                className="py-12"
+              />
+            ) : stats.data ? (
               <MessageChart points={stats.data} range={range} dimmed={stats.isPlaceholderData} />
             ) : (
               <div className="px-5 pt-8 pb-4">

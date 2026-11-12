@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useMemo, useState } from 'react'
 import { Button } from '../components/ui/button.tsx'
 import { Input } from '../components/ui/input.tsx'
-import { Badge, Card, EmptyState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
+import { Badge, Card, EmptyState, ErrorState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
 import { Switch } from '../components/ui/switch.tsx'
 import { api } from '../lib/api.ts'
 import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
@@ -52,7 +52,15 @@ export function CommandsPage() {
           </label>
         </div>
       </div>
-      {!commands.data ? (
+      {commands.error && !commands.data ? (
+        <Card>
+          <ErrorState
+            error={commands.error}
+            onRetry={() => void commands.refetch()}
+            retrying={commands.isFetching}
+          />
+        </Card>
+      ) : !commands.data ? (
         <Skeleton className="h-80 rounded-xl" />
       ) : groups.length === 0 ? (
         <Card>
