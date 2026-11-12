@@ -24,7 +24,8 @@ export function Select<V extends string>({
   'aria-label'?: string
 }) {
   return (
-    <SelectPrimitive.Root value={value} onValueChange={(next) => onValueChange(next as V)}>
+    // Radix treats "" as "nothing selected" (shows the placeholder) and stays controlled while data loads.
+    <SelectPrimitive.Root value={value ?? ''} onValueChange={(next) => onValueChange(next as V)}>
       <SelectPrimitive.Trigger
         aria-label={ariaLabel}
         className={cn(

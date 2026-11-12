@@ -114,6 +114,8 @@ export interface StatsPoint {
   sent: number
 }
 
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error'
+
 export interface LogRecord {
   time: number
   level: number

@@ -90,12 +90,15 @@ export function SchemaForm({
 
   const submit = () => {
     if (!jsonMode) return onSubmit(draft)
+    let value: Value
     try {
-      onSubmit(JSON.parse(jsonText))
-      setJsonError(null)
+      value = JSON.parse(jsonText)
     } catch {
       setJsonError('不是合法的 JSON')
+      return
     }
+    setJsonError(null)
+    onSubmit(value)
   }
 
   return (

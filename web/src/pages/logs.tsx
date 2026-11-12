@@ -1,15 +1,18 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, Eraser, Pause, Play, ScrollText, Search } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { Button } from '../components/ui/button.tsx'
 import { Input } from '../components/ui/input.tsx'
 import { Segmented } from '../components/ui/misc.tsx'
 import { Card, EmptyState, PageHeader } from '../components/ui/primitives.tsx'
 import { Select } from '../components/ui/select.tsx'
+import { api } from '../lib/api.ts'
 import { formatClock, levelName } from '../lib/format.ts'
 import { softSpring } from '../lib/motion.ts'
 import { useClearLogs, useLiveLogs } from '../lib/realtime.tsx'
-import type { LogEntry } from '../lib/types.ts'
+import type { LogEntry, LogLevel } from '../lib/types.ts'
 import { cn } from '../lib/utils.ts'
 
 type LevelFilter = '10' | '30' | '40' | '50'
@@ -22,6 +25,14 @@ const levelStyle: Record<string, string> = {
   error: 'text-danger bg-danger-soft',
   fatal: 'text-white bg-danger',
 }
+
+const recordLevels: { value: LogLevel; label: string }[] = [
+  { value: 'trace', label: 'Trace' },
+  { value: 'debug', label: 'Debug' },
+  { value: 'info', label: 'Info' },
+  { value: 'warn', label: 'Warn' },
+  { value: 'error', label: 'Error' },
+]
 
 const hiddenKeys = new Set(['time', 'level', 'msg', 'plugin', 'pid', 'hostname', 'seq'])
 const maxRendered = 600
@@ -74,6 +85,7 @@ export function LogsPage() {
         description="实时日志，保留最近 2000 条"
         actions={
           <>
+            <RecordLevel />
             <Button
               variant={paused ? 'primary' : 'secondary'}
               onClick={() => {
@@ -171,6 +183,35 @@ export function LogsPage() {
         )}
       </Card>
     </>
+  )
+}
+
+/** Server-side log level (what gets recorded at all), unlike the display filter below it. Runtime only. */
+function RecordLevel() {
+  const client = useQueryClient()
+  const level = useQuery({ queryKey: ['log-level'], queryFn: api.logLevel })
+  const change = useMutation({
+    mutationFn: api.setLogLevel,
+    onSuccess: (result) => {
+      client.setQueryData(['log-level'], result)
+      toast.success(`记录级别已调整为 ${result.level}`, {
+        description: '仅本次运行有效，重启后恢复为配置文件中的 log.level',
+      })
+    },
+  })
+  if (level.error) return null
+  return (
+    <div className="mr-1 flex items-center gap-2">
+      <span className="text-[12.5px] text-fg-3">记录级别</span>
+      <Select
+        aria-label="记录级别"
+        value={level.data?.level}
+        onValueChange={(next) => change.mutate(next)}
+        options={recordLevels}
+        placeholder="…"
+        className="min-w-24"
+      />
+    </div>
   )
 }
 

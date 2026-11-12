@@ -56,13 +56,20 @@ function applyFrame(
         overview ? { ...overview, bots: upsertBot(overview.bots, frame.bot) ?? overview.bots } : overview,
       )
       break
-    case 'plugin':
-      client.setQueryData<PluginView[]>(['plugins'], (list) =>
-        list?.map((item) => (item.name === frame.plugin.name ? frame.plugin : item)),
-      )
+    case 'plugin': {
+      // A plugin the cached list does not know yet (new install, or the list request still in flight
+      // when the frame arrived) would be lost by an in-place update, so refetch the list instead.
+      const list = client.getQueryData<PluginView[]>(['plugins'])
+      if (list?.some((item) => item.name === frame.plugin.name))
+        client.setQueryData<PluginView[]>(
+          ['plugins'],
+          list.map((item) => (item.name === frame.plugin.name ? frame.plugin : item)),
+        )
+      else void client.invalidateQueries({ queryKey: ['plugins'] })
       void client.invalidateQueries({ queryKey: ['overview'] })
       void client.invalidateQueries({ queryKey: ['commands'] })
       break
+    }
     case 'message': {
       const { type: _type, ...message } = frame
       realtime.messages.set((list) => [message, ...list].slice(0, maxMessages))
@@ -145,7 +152,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         api
           .packageOperations()
           .then((list) => realtime.operations.set(list))
-          .catch(() => {})
+          // The dock still fills from live `package` frames; the history is only a convenience.
+          .catch((error: unknown) => console.warn('Failed to load package operations', error))
         // Data fetched before the socket existed may be stale after a reconnect.
         void client.invalidateQueries()
       }

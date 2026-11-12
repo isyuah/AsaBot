@@ -4,6 +4,7 @@ import type {
   BotView,
   CommandView,
   GroupView,
+  LogLevel,
   LogRecord,
   Overview,
   PackageOperation,
@@ -120,6 +121,8 @@ export const api = {
   removeAcl: (entry: AccessEntry) => request<unknown>('DELETE', '/acl', entry),
 
   logs: (limit = 500) => request<LogRecord[]>('GET', `/logs?limit=${limit}&level=10`),
+  logLevel: () => request<{ level: LogLevel }>('GET', '/logs/level'),
+  setLogLevel: (level: LogLevel) => request<{ level: LogLevel }>('PUT', '/logs/level', { level }),
 
   playground: (input: PlaygroundRequest) =>
     request<{ replies: PlaygroundReply[] }>('POST', '/playground', input),
