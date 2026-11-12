@@ -1,5 +1,16 @@
 import { useQuery } from '@tanstack/react-query'
-import { ArrowDownLeft, ArrowUpRight, Bot, Cpu, MessagesSquare, Puzzle, Radio } from 'lucide-react'
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  Bot,
+  ChevronRight,
+  Cpu,
+  FlaskConical,
+  MessagesSquare,
+  Puzzle,
+  Radio,
+  ScrollText,
+} from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useEffect, useState } from 'react'
 import { Avatar } from '../components/avatar.tsx'
@@ -203,7 +214,7 @@ const statusLabel = { online: '在线', connecting: '连接中', offline: '离�
 
 function BotsCard({ bots }: { bots: BotView[] | undefined }) {
   return (
-    <Card className="h-full">
+    <Card className="flex h-full flex-col">
       <CardHeader
         title="机器人"
         description="账号与连接状态"
@@ -247,6 +258,24 @@ function BotsCard({ bots }: { bots: BotView[] | undefined }) {
             ))}
           </ul>
         )}
+      </div>
+      <div className="mt-auto border-t border-border px-2 py-2">
+        <div className="px-3 pt-1 pb-1.5 text-[11.5px] font-medium text-fg-3">快捷入口</div>
+        {[
+          { to: '/playground', icon: <FlaskConical />, label: '在调试台试用插件' },
+          { to: '/plugins', icon: <Puzzle />, label: '管理插件与配置' },
+          { to: '/logs', icon: <ScrollText />, label: '查看实时日志' },
+        ].map((item) => (
+          <Link
+            key={item.to}
+            to={item.to}
+            className="group flex h-9 items-center gap-2.5 rounded-lg px-3 text-[13px] text-fg-2 transition-colors hover:bg-surface-2/70 hover:text-fg [&>svg:first-child]:size-3.5 [&>svg:first-child]:text-fg-3"
+          >
+            {item.icon}
+            <span className="flex-1">{item.label}</span>
+            <ChevronRight className="size-3.5 text-fg-3 transition-transform group-hover:translate-x-0.5" />
+          </Link>
+        ))}
       </div>
     </Card>
   )

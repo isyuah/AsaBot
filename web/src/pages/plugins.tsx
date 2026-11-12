@@ -269,23 +269,29 @@ function PluginCard({
             <Switch aria-label={`启用 ${plugin.name}`} checked={plugin.enabled} onCheckedChange={onToggle} />
           </div>
         </div>
-        <p className="mt-3 line-clamp-2 min-h-[38px] text-[13px] leading-relaxed text-fg-2">
-          {plugin.description || '没有描述'}
-        </p>
-        <AnimatePresence initial={false}>
-          {plugin.state === 'failed' && plugin.error && (
+        <AnimatePresence mode="wait" initial={false}>
+          {plugin.state === 'failed' && plugin.error ? (
             <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
+              key="error"
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
               transition={softSpring}
-              className="overflow-hidden"
+              className="mt-3 flex min-h-[38px] gap-2 rounded-lg bg-danger-soft px-2.5 py-1.5 text-[12px] leading-relaxed text-danger"
             >
-              <div className="mt-3 flex gap-2 rounded-lg bg-danger-soft px-2.5 py-2 text-[12px] text-danger">
-                <AlertTriangle className="mt-px size-3.5 shrink-0" />
-                <span className="line-clamp-2">{plugin.error}</span>
-              </div>
+              <AlertTriangle className="mt-[3px] size-3.5 shrink-0" />
+              <span className="line-clamp-2 break-all">{plugin.error}</span>
             </motion.div>
+          ) : (
+            <motion.p
+              key="description"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="mt-3 line-clamp-2 min-h-[38px] text-[13px] leading-relaxed text-fg-2"
+            >
+              {plugin.description || '没有描述'}
+            </motion.p>
           )}
         </AnimatePresence>
         <div className="mt-auto flex items-center gap-2 pt-3">
