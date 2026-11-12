@@ -55,6 +55,7 @@ function interpolateValue(value: unknown, path: string, env: NodeJS.ProcessEnv):
   return value
 }
 
+/** 递归展开配置中的环境变量；缺少必需变量时抛出 ConfigError。 */
 export function interpolateConfigValues(value: unknown, env: NodeJS.ProcessEnv = process.env): unknown {
   return interpolateValue(value, '', env)
 }
@@ -87,6 +88,7 @@ export async function readRawConfig(path: string): Promise<unknown> {
   return document.toJS()
 }
 
+/** 读取 YAML 配置并展开环境变量；文件或配置无效时抛出 ConfigError。 */
 export async function loadConfig(path: string): Promise<Config> {
   const interpolated = interpolateConfigValues(await readRawConfig(path))
   const result = configSchema.safeParse(interpolated)

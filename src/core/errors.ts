@@ -1,3 +1,4 @@
+/** 配置读取、解析、校验或写入失败。 */
 export class ConfigError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options)
@@ -5,6 +6,7 @@ export class ConfigError extends Error {
   }
 }
 
+/** 平台不支持请求的操作。 */
 export class UnsupportedError extends Error {
   readonly platform: string
   readonly operation: string
@@ -17,6 +19,7 @@ export class UnsupportedError extends Error {
   }
 }
 
+/** 消息被发送前钩子拦截，plugin 标识拦截的插件。 */
 export class SendBlockedError extends Error {
   readonly plugin: string
 
@@ -27,6 +30,7 @@ export class SendBlockedError extends Error {
   }
 }
 
+/** 平台 API 调用超过 timeout 毫秒。 */
 export class ApiTimeoutError extends Error {
   readonly action: string
   readonly timeout: number
@@ -39,6 +43,7 @@ export class ApiTimeoutError extends Error {
   }
 }
 
+/** 操作所需的连接尚未上线或已断开。 */
 export class NotConnectedError extends Error {
   constructor(message = 'Connection is not online') {
     super(message)
@@ -46,6 +51,7 @@ export class NotConnectedError extends Error {
   }
 }
 
+/** 发送队列已满，无法继续排队。 */
 export class SendQueueFullError extends Error {
   constructor() {
     super('Send queue is full')
@@ -53,6 +59,7 @@ export class SendQueueFullError extends Error {
   }
 }
 
+/** 没有符合条件的在线机器人。 */
 export class NoBotOnlineError extends Error {
   constructor() {
     super('No bot is online')
@@ -60,6 +67,7 @@ export class NoBotOnlineError extends Error {
   }
 }
 
+/** 插件加载、服务或生命周期错误。 */
 export class PluginError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options)
@@ -67,6 +75,7 @@ export class PluginError extends Error {
   }
 }
 
+/** 插件配置校验失败；issues 包含字段路径和错误说明。 */
 export class PluginConfigError extends PluginError {
   readonly issues: { path: string; message: string }[]
 
@@ -77,6 +86,7 @@ export class PluginConfigError extends PluginError {
   }
 }
 
+/** 不同插件注册了冲突的命令或别名。 */
 export class CommandConflictError extends Error {
   constructor(name: string, existingOwner: string, newOwner: string) {
     super(`Command or alias "${name}" conflicts between "${existingOwner}" and "${newOwner}"`)

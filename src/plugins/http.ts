@@ -5,12 +5,14 @@ import { durationSchema } from '../core/config/schema.ts'
 import { definePlugin } from '../core/plugin/definition.ts'
 import { type Duration, parseDuration } from '../core/utils/duration.ts'
 
+/** HTTP 请求选项，可指定超时、代理和响应体字节数上限。 */
 export type HttpInit = RequestInit & {
   timeout?: Duration | string
   proxy?: boolean | string
   maxSize?: number
 }
 
+/** 提供带超时、代理和大小限制的 HTTP 请求服务。 */
 export interface HttpService {
   fetch(url: string | URL, init?: HttpInit): Promise<Response>
   json<T = unknown>(url: string | URL, init?: HttpInit): Promise<T>
@@ -24,6 +26,7 @@ declare module '@asabot/core' {
   }
 }
 
+/** HTTP 响应不是 2xx 时抛出的错误；url 不包含查询参数。 */
 export class HttpError extends Error {
   readonly status: number
   readonly url: string

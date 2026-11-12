@@ -36,6 +36,7 @@ function encodeSegment(segment: Segment): string {
   return `[CQ:${segment.type}${params ? `,${params}` : ''}]`
 }
 
+/** 将框架消息段编码为 OneBot CQ 码字符串。 */
 export function toCQ(message: Message): string {
   return message.map((segment) => encodeSegment(outgoingSegment(segment))).join('')
 }
@@ -44,6 +45,7 @@ function splitParameters(source: string): string[] {
   return source.split(',')
 }
 
+/** 将 OneBot CQ 码字符串解析为框架消息段；普通文本保持为文本段。 */
 export function parseCQ(source: string): Message {
   const message: Message = []
   const pattern = /\[CQ:([\w.-]+)((?:,[^\]]*)?)\]/g

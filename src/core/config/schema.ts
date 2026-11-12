@@ -61,6 +61,7 @@ const logSchema = z
   })
   .strict()
 
+/** 校验并规范化命令覆盖配置的 zod schema。 */
 export const commandOverrideSchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -78,6 +79,7 @@ export const commandOverrideSchema = z
   })
   .strict()
 
+/** 命令启停、别名、权限、冷却及可见性的覆盖配置。 */
 export type CommandOverride = z.output<typeof commandOverrideSchema>
 
 const commandSchema = z
@@ -137,6 +139,7 @@ const serverSchema = z
   })
   .strict()
 
+/** 校验并规范化框架配置的 zod schema。 */
 export const configSchema = z
   .object({
     log: logSchema.default(() => logSchema.parse({})),
@@ -163,4 +166,5 @@ export const configSchema = z
     packages: { ...config.packages, dir: config.packages.dir ?? join(config.dataDir, 'packages') },
   }))
 
+/** 框架配置经 schema 校验和默认值处理后的类型。 */
 export type Config = z.output<typeof configSchema>

@@ -37,7 +37,9 @@ type ArgumentPart<S extends string> = S extends `<${infer Inner}>`
 type ParseParts<S extends string> = S extends `${infer Head} ${infer Tail}`
   ? ArgumentPart<Head> & ParseParts<Tail>
   : ArgumentPart<S>
+/** 从命令声明推导出的参数名称和值类型。 */
 export type CommandArgs<S extends string> = string extends S ? Record<string, unknown> : ParseParts<S>
+/** 从选项声明推导出的值类型。 */
 export type OptionValue<S extends string> = string extends S
   ? unknown
   : S extends `${string}<${infer Inner}>${string}`
@@ -50,6 +52,7 @@ export type OptionValue<S extends string> = string extends S
         : unknown
       : boolean
 
+/** 命令处理函数接收的 Session、参数、选项和取消信号。 */
 export interface CommandContext<Args = Record<string, unknown>, Options = Record<string, unknown>> {
   session: Session
   args: Args
@@ -57,6 +60,7 @@ export interface CommandContext<Args = Record<string, unknown>, Options = Record
   signal: AbortSignal
 }
 
+/** 处理命令的回调；返回消息时由框架自动发送。 */
 export type CommandAction<Args = Record<string, unknown>, Options = Record<string, unknown>> = (
   context: CommandContext<Args, Options>,
 ) => Sendable | void | Promise<Sendable | undefined> | Promise<void>

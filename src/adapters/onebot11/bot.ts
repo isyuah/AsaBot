@@ -1,6 +1,7 @@
 import type { Bot, ForwardMessage, GroupInfo, GroupMemberInfo, SendResult, UserInfo } from '../../core/bot.ts'
 import type { Message, Sendable } from '../../core/message/index.ts'
 
+/** OneBot 消息查询返回的消息及发送者信息。 */
 export interface OneBotMessageInfo {
   messageId: string
   messageType: 'private' | 'group'
@@ -12,16 +13,19 @@ export interface OneBotMessageInfo {
   groupId?: string
 }
 
+/** OneBot 实现及协议的版本信息。 */
 export interface OneBotVersionInfo {
   appName: string
   appVersion: string
   protocolVersion: string
 }
 
+/** OneBot 合并转发中的消息引用或自定义节点。 */
 export type OneBotForwardNode =
   | { type: 'node'; data: { id: string } }
   | { type: 'node'; data: { userId: string; nickname: string; content: Sendable } }
 
+/** OneBot 11 平台专属 API；请求失败时 Promise 拒绝。 */
 export interface OneBotApi {
   sendPrivateMsg(userId: string, content: Sendable): Promise<SendResult>
   sendGroupMsg(groupId: string, content: Sendable): Promise<SendResult>
@@ -60,10 +64,12 @@ export interface OneBotApi {
   friendPoke(userId: string): Promise<void>
 }
 
+/** 附带 OneBot 专属 API 的机器人。 */
 export interface OneBotBot extends Bot {
   readonly onebot: OneBotApi
 }
 
+/** 判断机器人是否提供 OneBot 专属 API，并收窄其类型。 */
 export function isOneBot(bot: Bot): bot is OneBotBot {
   const api = (bot as Partial<OneBotBot>).onebot
   return bot.platform === 'onebot11' && api !== null && typeof api === 'object'

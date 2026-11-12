@@ -6,8 +6,10 @@ const unitMilliseconds: Record<string, number> = {
   d: 86_400_000,
 }
 
+/** 以毫秒表示的时长。 */
 export type Duration = number
 
+/** 将非负毫秒数或 1h30m 等时长字符串转换为毫秒；格式无效时抛错。 */
 export function parseDuration(value: string | number): Duration {
   if (typeof value === 'number') {
     if (!Number.isFinite(value) || value < 0) {

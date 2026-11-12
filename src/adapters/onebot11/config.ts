@@ -13,6 +13,7 @@ const connectionSchema = z
   .strict()
   .meta({ title: '正向连接', description: '配置一个 OneBot 正向连接。' })
 
+/** 校验并规范化 OneBot 11 适配器配置的 zod schema。 */
 export const onebot11Schema = z
   .object({
     apiTimeout: durationSchema

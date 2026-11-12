@@ -40,8 +40,10 @@ import type { PanelPageOptions, PluginStateEvent } from './types.ts'
 type Listener = (event: AnyEvent | PluginStateEvent, signal: AbortSignal) => unknown | Promise<unknown>
 type PublicListener = Listener | ((event: never, signal: AbortSignal) => unknown | Promise<unknown>)
 type Cleanup = () => void | Promise<void>
+/** 按事件过滤的上下文，可继续注册处理器或叠加过滤条件。 */
 export type FilteredContext = Pick<Context, 'on' | 'middleware' | 'command' | 'match' | 'filter' | 'platform'>
 
+/** 插件的配置、服务和资源入口；卸载后访问其 API 会抛出 PluginError。 */
 export class Context<Config = undefined> {
   private readonly app: App
   private readonly owner: string
@@ -58,7 +60,9 @@ export class Context<Config = undefined> {
   private panelRouteApp?: Hono
   private disposed = false
 
+  /** 注册插件面板页面、认证接口和实时事件；资源随插件卸载回收。 */
   readonly panel = {
+    /** 注册一个静态面板页面，返回移除函数；同一插件重复注册页面时抛错。页面文件可以公开访问。 */
     page: (options: PanelPageOptions): Disposer => {
       this.assertActive()
       const remove = this.app.setPanelPage(this.owner, {
@@ -73,6 +77,7 @@ export class Context<Config = undefined> {
         remove()
       }
     },
+    /** 注册需要面板登录的 Hono 路由，挂载在 /api/panel/ext/<插件名>/。 */
     route: (register: (app: Hono) => void): void => {
       this.assertActive()
       if (!this.panelRouteApp) {
@@ -82,12 +87,14 @@ export class Context<Config = undefined> {
       }
       register(this.panelRouteApp)
     },
+    /** 向已连接的面板推送指定主题和数据。 */
     push: (topic: string, data: unknown): void => {
       this.assertActive()
       this.app.pushPanelEvent(this.owner, topic, data)
     },
   }
 
+  /** 由框架为插件创建上下文；dependencies 声明允许注入的服务。 */
   constructor(app: App, name: string, config: Config, dependencies?: PluginDefinition['inject']) {
     this.app = app
     this.owner = name
@@ -107,39 +114,48 @@ export class Context<Config = undefined> {
     )
   }
 
+  /** 当前插件的唯一名称。 */
   get name(): string {
     this.assertActive()
     return this.owner
   }
+  /** 经过插件 schema 校验的全局配置。 */
   get config(): Readonly<Config> {
     this.assertActive()
     return this.value
   }
+  /** 获取目标群合并覆盖项后的配置；没有群 ID 时返回全局配置。 */
   configFor(target: string | { platform: string; groupId?: string }): Readonly<Config> {
     this.assertActive()
     const key = typeof target === 'string' ? target : groupKeyOf(target)
     return key === undefined ? this.value : (this.app.plugins.configFor(this.owner, key) as Readonly<Config>)
   }
+  /** 自动附带插件名的日志记录器。 */
   get logger(): Logger {
     this.assertActive()
     return this.childLogger
   }
+  /** 插件卸载时中止的信号，可传给异步任务。 */
   get signal(): AbortSignal {
     this.assertActive()
     return this.controller.signal
   }
+  /** 当前插件独立命名空间的键值存储。 */
   get store(): KVStore {
     this.assertActive()
     return this.kv
   }
+  /** 共享 SQLite 连接；表结构应通过 migrate 管理。 */
   get db(): DatabaseSync {
     this.assertActive()
     return this.app.storage.db
   }
+  /** 当前注册的机器人列表，包括离线实例。 */
   get bots(): Bot[] {
     this.assertActive()
     return this.app.bots.list()
   }
+  /** 创建并返回当前插件的数据目录；文件系统操作失败时抛错。 */
   get dataDir(): string {
     this.assertActive()
     const path = join(this.app.config.dataDir, 'plugins', this.owner)
@@ -147,6 +163,7 @@ export class Context<Config = undefined> {
     return path
   }
 
+  /** 按账号 ID 查找在线机器人，省略时取第一个；找不到时抛出 NoBotOnlineError。 */
   bot(selfId?: string): Bot {
     this.assertActive()
     const bot = this.app.bots
@@ -156,11 +173,13 @@ export class Context<Config = undefined> {
     return bot
   }
 
+  /** 向指定目标发送内容；目标无效、无在线机器人或发送失败时拒绝。 */
   send(target: Target | string, content: Sendable): Promise<SendResult> {
     this.assertActive()
     return this.app.send(target, content)
   }
 
+  /** 顺序向多个目标发送，interval 是发送间隔；单个发送失败写入对应结果的 error。 */
   async broadcast(
     targets: (Target | string)[],
     content: Sendable,
@@ -181,11 +200,13 @@ export class Context<Config = undefined> {
     return results
   }
 
+  /** 按顺序执行尚未执行的 SQL 迁移；迁移失败时回滚并抛错。 */
   migrate(steps: string[]): void {
     this.assertActive()
     this.app.storage.migrate(this.owner, steps)
   }
 
+  /** 按名称提供插件服务并返回撤销函数；同名服务已存在时抛错。 */
   provide<K extends string>(name: K, service: K extends keyof Services ? Services[K] : unknown): Disposer {
     this.assertActive()
     const dispose = this.app.plugins.provide(this.owner, name, service)
@@ -196,6 +217,7 @@ export class Context<Config = undefined> {
     }
   }
 
+  /** 获取已声明的必需服务；未声明或服务不可用时抛出 PluginError。 */
   inject<K extends string>(name: K): K extends keyof Services ? Services[K] : unknown {
     this.assertActive()
     if (!this.dependencies.required.includes(name))
@@ -203,6 +225,7 @@ export class Context<Config = undefined> {
     return this.app.plugins.inject(name) as K extends keyof Services ? Services[K] : unknown
   }
 
+  /** 获取已声明的可选服务；服务缺失返回 undefined，未声明时抛出 PluginError。 */
   injectOptional<K extends string>(name: K): (K extends keyof Services ? Services[K] : unknown) | undefined {
     this.assertActive()
     if (!this.dependencies.optional.includes(name))
@@ -212,36 +235,44 @@ export class Context<Config = undefined> {
       | undefined
   }
 
+  /** 监听分层事件并返回移除函数；事件名可订阅其子事件。 */
   on<K extends keyof KnownEventMap>(
     name: K,
     listener: (event: EventMap[K], signal: AbortSignal) => unknown | Promise<unknown>,
   ): Disposer
+  /** 监听插件状态变化并返回移除函数。 */
   on(
     name: 'plugin.state',
     listener: (event: PluginStateEvent, signal: AbortSignal) => unknown | Promise<unknown>,
   ): Disposer
+  /** 监听平台通知并返回移除函数。 */
   on(
     name: `notice.${string}`,
     listener: (event: PlatformNoticeEvent, signal: AbortSignal) => unknown | Promise<unknown>,
   ): Disposer
+  /** 监听请求事件并返回移除函数。 */
   on(
     name: `request.${string}`,
     listener: (event: RequestEvent, signal: AbortSignal) => unknown | Promise<unknown>,
   ): Disposer
+  /** 监听元事件并返回移除函数。 */
   on(
     name: `meta.${string}`,
     listener: (event: MetaEvent, signal: AbortSignal) => unknown | Promise<unknown>,
   ): Disposer
+  /** 监听指定名称的事件并返回移除函数。 */
   on(name: string, listener: Listener): Disposer
   on(name: string, listener: PublicListener): Disposer {
     this.assertActive()
     return this.app.dispatcher.on(this.scope, name, listener as Listener)
   }
 
+  /** 注册消息中间件并返回移除函数；优先级越高越先执行。 */
   middleware(fn: Middleware, options?: { priority?: number }): Disposer {
     this.assertActive()
     return this.app.dispatcher.middleware(this.scope, fn, options)
   }
+  /** 注册发送前钩子；可修改、拦截或接管发送，返回移除函数。 */
   beforeSend(fn: BeforeSend, options: { priority?: number } = {}): Disposer {
     this.assertActive()
     const dispose = this.app.outgoing.add(this.owner, fn, options.priority ?? 0)
@@ -251,6 +282,7 @@ export class Context<Config = undefined> {
       dispose()
     }
   }
+  /** 注册 Bot API 拦截器并返回移除函数；优先级越高越先执行。 */
   interceptApi(fn: ApiInterceptor, options: { priority?: number } = {}): Disposer {
     this.assertActive()
     const dispose = this.app.apiInterceptors.add(fn, options.priority ?? 0)
@@ -260,10 +292,12 @@ export class Context<Config = undefined> {
       dispose()
     }
   }
+  /** 根据声明注册命令并返回链式构建器；声明无效或命令冲突时抛错。 */
   command<const Decl extends string>(declaration: Decl): CommandBuilder<Decl> {
     this.assertActive()
     return this.app.dispatcher.command(this.scope, declaration)
   }
+  /** 注册消息匹配器，支持字符串、正则和函数；返回移除函数。 */
   match(
     pattern: MatchPattern,
     handler: MatchHandler,
@@ -272,10 +306,12 @@ export class Context<Config = undefined> {
     this.assertActive()
     return this.app.dispatcher.match(this.scope, pattern, handler, options)
   }
+  /** 创建过滤上下文，之后注册的处理器只接收符合条件的事件。 */
   filter(predicate: (event: DispatchEvent) => boolean): FilteredContext {
     this.assertActive()
     return this.filtered({ ...this.scope, filter: predicate })
   }
+  /** 创建只处理指定平台事件的过滤上下文。 */
   platform(...names: string[]): FilteredContext {
     return this.filter((event) => names.includes(event.platform))
   }
@@ -313,6 +349,7 @@ export class Context<Config = undefined> {
       },
     }
   }
+  /** 注册挂载在 /plugins/<插件名>/ 的 Hono 路由；插件卸载时移除。 */
   route(register: (app: Hono) => void): void {
     this.assertActive()
     if (!this.routeApp) {
@@ -322,6 +359,7 @@ export class Context<Config = undefined> {
     }
     register(this.routeApp)
   }
+  /** 注册 cron 定时任务并返回停止函数；表达式或时区无效时抛错。 */
   cron(
     expression: string,
     fn: (signal: AbortSignal) => unknown | Promise<unknown>,
@@ -330,22 +368,27 @@ export class Context<Config = undefined> {
     this.assertActive()
     return this.scheduler.cron(expression, fn, options)
   }
+  /** 注册固定间隔任务并返回停止函数；duration 是毫秒数或时长字符串。 */
   interval(duration: string | number, fn: (signal: AbortSignal) => unknown | Promise<unknown>): Disposer {
     this.assertActive()
     return this.scheduler.interval(duration, fn)
   }
+  /** 注册一次性延迟任务并返回停止函数；duration 是毫秒数或时长字符串。 */
   timeout(duration: string | number, fn: (signal: AbortSignal) => unknown | Promise<unknown>): Disposer {
     this.assertActive()
     return this.scheduler.timeout(duration, fn)
   }
+  /** 注册可持久化任务并恢复待执行项；同名任务重复注册时抛错。 */
   task<T>(name: string, handler: TaskHandler<T>): TaskHandle<T> {
     this.assertActive()
     return this.tasks.register(name, handler)
   }
 
+  /** 记录已有持久化任务中未注册处理器的名称。 */
   warnUnregisteredTasks(): void {
     this.tasks.warnUnregistered()
   }
+  /** 注册插件卸载时的清理函数，并返回取消注册函数。 */
   onDispose(fn: Cleanup): Disposer {
     this.assertActive()
     this.cleanups.push(fn)
@@ -355,6 +398,7 @@ export class Context<Config = undefined> {
     }
   }
 
+  /** 中止插件资源并逆序执行清理函数；重复调用无影响。 */
   async dispose(): Promise<void> {
     if (this.controller.signal.aborted) return
     this.controller.abort(new DOMException(`Plugin ${this.owner} unloaded`, 'AbortError'))

@@ -4,18 +4,24 @@ import { scheduleTimeout } from '../dispatch/timer.ts'
 import type { Storage } from '../storage/index.ts'
 import { parseDuration } from '../utils/duration.ts'
 
+/** 持久化任务的时间与可选键；at 和 delay 必须且只能提供一个。 */
 export interface TaskOptions {
   at?: Date | number
   delay?: string | number
   key?: string
 }
 
+/** 持久化任务的调度、取消和查询入口。 */
 export interface TaskHandle<T> {
+  /** 按 at 或 delay 调度任务并返回任务键；两者同时指定或都未指定时抛错，相同键会覆盖旧任务。 */
   schedule(payload: T, options: TaskOptions): string
+  /** 按任务键取消待执行任务；找到并取消时返回 true。 */
   cancel(key: string): boolean
+  /** 按执行时间列出当前插件此类任务的待执行项。 */
   list(): { key: string; runAt: number; payload: T }[]
 }
 
+/** 持久化任务的处理函数，接收载荷、任务键、计划时间及取消信号。 */
 export type TaskHandler<T> = (
   payload: T,
   context: { signal: AbortSignal; key: string; runAt: number },

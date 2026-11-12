@@ -1,4 +1,5 @@
 /** A small insertion-ordered LRU set used for recently sent message IDs. */
+/** 有容量上限的最近使用集合，超出容量时淘汰最久未使用的值。 */
 export class LruSet<T> {
   private readonly values = new Map<T, true>()
   readonly capacity: number

@@ -2,12 +2,14 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { type Bot, botActions } from '../bot.ts'
 import { UnsupportedError } from '../errors.ts'
 
+/** Bot API 拦截器接收的机器人、方法名和可修改参数。 */
 export interface ApiCall {
   bot: Bot
   method: string
   args: unknown[]
 }
 
+/** 拦截 Bot API 调用；可修改参数、调用 next 或直接返回结果。 */
 export type ApiInterceptor = (call: ApiCall, next: () => Promise<unknown>) => Promise<unknown>
 
 interface Interceptor {

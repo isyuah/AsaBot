@@ -22,8 +22,11 @@ const subscriberErrorLogger = pino(
   process.stderr,
 )
 
+/** 包含可选事件 ID 的只读结构化日志记录。 */
 export type LogRecord = Readonly<Record<string, unknown> & { eventId?: string }>
+/** 接收每条新日志记录的回调。 */
 export type LogSubscriber = (record: LogRecord) => void
+/** 框架支持的日志级别。 */
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error'
 
 class LogRingBuffer {
@@ -143,6 +146,7 @@ class RotatingFile {
   }
 }
 
+/** 按选项创建带敏感字段脱敏、内存缓冲和可选文件输出的日志器。 */
 export function createLogger(options: CreateLoggerOptions = {}): Logger {
   const destination = options.destination ?? process.stdout
   const pretty = options.pretty ?? process.stdout.isTTY === true
@@ -178,12 +182,15 @@ export function createLogger(options: CreateLoggerOptions = {}): Logger {
   return result
 }
 
+/** 按时间顺序获取最近的内存日志。 */
 export function getRecentLogs(): LogRecord[] {
   return logBuffer.recent()
 }
 
+/** 订阅新日志并返回取消订阅函数。 */
 export function subscribeLogs(subscriber: LogSubscriber): () => void {
   return logBuffer.subscribe(subscriber)
 }
 
+/** 使用默认选项创建的日志器。 */
 export const logger = createLogger()

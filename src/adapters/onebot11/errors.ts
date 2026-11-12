@@ -1,3 +1,4 @@
+/** OneBot API 返回失败状态时的错误，包含 action、retcode 和原因。 */
 export class ApiError extends Error {
   readonly action: string
   readonly retcode: number

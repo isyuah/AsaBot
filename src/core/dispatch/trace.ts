@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 
+/** 一次事件分发中单个阶段的处理结果及耗时。 */
 export interface TraceStep {
   stage: 'filter' | 'observer' | 'middleware' | 'prompt' | 'command' | 'matcher' | 'suggest'
   plugin?: string
@@ -9,6 +10,7 @@ export interface TraceStep {
   error?: string
 }
 
+/** 事件的完整分发阶段、耗时和发送消息 ID。 */
 export interface DispatchTrace {
   eventId: string
   name: string

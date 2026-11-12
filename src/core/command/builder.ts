@@ -11,10 +11,12 @@ import {
 } from './declaration.ts'
 import type { CommandAction, CommandArgs, OptionValue } from './types.ts'
 
+/** 命令选项的默认值、说明和输入约束。 */
 export interface OptionSettings<T = unknown> extends ArgumentSettings<T> {
   default?: T
 }
 
+/** 已解析的命令选项定义。 */
 export interface OptionDefinition {
   name: string
   flags: string[]
@@ -24,6 +26,7 @@ export interface OptionDefinition {
   settings?: ArgumentSettings
 }
 
+/** 命令路径、参数、选项、权限和处理函数的完整定义。 */
 export interface CommandDefinition extends Declaration {
   owner: string
   scope: Scope
@@ -100,6 +103,7 @@ function parseOption<T>(name: string, source: string, settings: OptionSettings<T
   }
 }
 
+/** 链式设置命令参数、选项、权限和处理函数；声明或注册冲突时抛错。 */
 export class CommandBuilder<Decl extends string = string, Options = object> {
   readonly definition: CommandDefinition
   private readonly registration: CommandRegistration

@@ -8,6 +8,7 @@ import { plainText } from '../core/message/index.ts'
 import { definePlugin } from '../core/plugin/definition.ts'
 import { formatTarget, parseTarget } from '../core/target.ts'
 
+/** 历史记录中的收发消息、会话及可选关联事件。 */
 export interface HistoryMessage {
   id: number
   eventId?: string
@@ -23,6 +24,7 @@ export interface HistoryMessage {
   time: number
 }
 
+/** 历史会话及其消息数和最近一条消息。 */
 export interface HistoryChannel {
   channel: string
   platform: string
@@ -33,6 +35,7 @@ export interface HistoryChannel {
   last: HistoryMessage
 }
 
+/** 按会话、用户、游标或文本筛选历史消息的条件。 */
 export interface HistoryQuery {
   channel?: string
   userId?: string
@@ -41,6 +44,7 @@ export interface HistoryQuery {
   q?: string
 }
 
+/** 查询历史消息和事件分发追踪的插件服务。 */
 export interface HistoryService {
   query(options?: HistoryQuery): HistoryMessage[]
   trace(eventId: string): DispatchTrace | undefined

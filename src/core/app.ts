@@ -82,6 +82,7 @@ class CoreEvents {
   }
 }
 
+/** 组装适配器、插件、分发器和存储的应用实例；通过 start 和 stop 管理生命周期。 */
 export class App implements AdapterHost {
   readonly config: Config
   readonly logger: Logger

@@ -22,6 +22,7 @@ import { normalizeSendable, seg } from '../../core/message/index.ts'
 import { neutralSegments } from '../../core/message/lower.ts'
 import { LruSet } from '../../core/utils/lru.ts'
 
+/** 虚拟机器人记录的目标、消息和关联事件。 */
 export interface VirtualSend {
   type: 'private' | 'group'
   target: string
@@ -30,6 +31,7 @@ export interface VirtualSend {
   eventId?: string
 }
 
+/** 虚拟消息的用户、群、昵称、角色及超管选项。 */
 export interface VirtualMessageOptions {
   user: string
   nickname?: string
@@ -54,6 +56,7 @@ type VirtualNoticeInput<T extends NoticeEvent = NoticeEvent> = T extends NoticeE
   ? Omit<T, keyof BaseEvent> & Pick<T, 'name'>
   : never
 
+/** 模拟平台操作并记录发送和管理动作的虚拟机器人。 */
 export class VirtualBot implements Bot {
   readonly platform = 'virtual'
   readonly selfId: string
@@ -245,6 +248,7 @@ export class VirtualBot implements Bot {
   }
 }
 
+/** 用于测试和调试的进程内虚拟平台适配器。 */
 export class VirtualAdapter implements Adapter {
   readonly platform = 'virtual'
   readonly bot: VirtualBot

@@ -5,8 +5,11 @@ import type { Logger } from 'pino'
 import type { DispatchEvent } from '../dispatch/types.ts'
 import { parseDuration } from '../utils/duration.ts'
 
+/** 访问控制列表类型：黑名单或白名单。 */
 export type AccessList = 'block' | 'allow'
+/** 访问控制对象类型：用户或群。 */
 export type AccessSubject = 'user' | 'group'
+/** 一条用户或群访问控制记录。 */
 export interface AccessEntry {
   list: AccessList
   subject: AccessSubject
@@ -36,6 +39,7 @@ const coreMigrations = [
     PRIMARY KEY (command, group_key));`,
 ]
 
+/** SQLite 存储及插件状态、迁移和访问控制管理器。 */
 export class Storage {
   private database?: DatabaseSync
   private cleanup?: NodeJS.Timeout
@@ -325,6 +329,7 @@ export class Storage {
   }
 }
 
+/** 按插件隔离、支持可选过期时间的 JSON 键值存储。 */
 export class KVStore {
   private readonly storage: Storage
   private readonly owner: string

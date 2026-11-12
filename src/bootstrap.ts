@@ -21,6 +21,7 @@ export interface CreateAppOptions {
   setupCode?: string
 }
 
+/** 根据已校验配置创建应用，注册内置插件和适配器；配置无效或适配器未知时抛出 ConfigError。 */
 export function createApp(config: Config, options: CreateAppOptions = {}): App {
   const app = new App(config, options.logger ?? createLogger(config.log), {
     configPath: options.configPath,

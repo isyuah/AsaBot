@@ -4,12 +4,14 @@ import WebSocket, { WebSocketServer } from 'ws'
 import type { Message, Sendable } from '../../core/message/index.ts'
 import { outgoingSegment } from './conversion.ts'
 
+/** 模拟 OneBot 服务收到的一次 API 调用。 */
 export interface MockCall {
   action: string
   params: Record<string, unknown>
   echo?: string
 }
 
+/** 模拟 OneBot 服务的地址、认证、账号和 API 行为选项。 */
 export interface MockOneBotOptions {
   token?: string
   accessToken?: string
@@ -26,6 +28,7 @@ export interface MockReverseOptions {
   role?: string | null
 }
 
+/** 处理模拟 OneBot API 调用并返回响应数据的函数。 */
 export type MockCallHandler = (params: Record<string, unknown>, call: MockCall) => unknown | Promise<unknown>
 
 interface Waiter {
@@ -36,6 +39,7 @@ interface Waiter {
   timer: NodeJS.Timeout
 }
 
+/** 用于协议集成测试的模拟 OneBot WebSocket 服务。 */
 export class MockOneBot {
   readonly calls: MockCall[] = []
   readonly ready: Promise<void>

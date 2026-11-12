@@ -34,6 +34,7 @@ import { incomingMessage } from './message.ts'
 import { SendQueue } from './send-queue.ts'
 import type { OneBot11Config, OneBotConnectionConfig, OneBotFrame, OneBotMessageEvent } from './types.ts'
 
+/** OneBot 适配器可注入的连接、定时和测试选项。 */
 export interface OneBotAdapterOptions {
   logger?: Logger
   apiTimeout?: number
@@ -1049,6 +1050,7 @@ function normalizeMessageForEvent(content: Sendable): Message {
   return Array.isArray(content) ? [...content] : [content]
 }
 
+/** 连接 OneBot 11 正向或反向 WebSocket 并管理机器人实例的适配器。 */
 export class OneBotAdapter implements Adapter {
   readonly platform = 'onebot11'
   private connections: OneBotConnection[] = []

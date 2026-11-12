@@ -110,6 +110,7 @@ function editDistance(first: string, second: string): number {
   return previous[second.length] as number
 }
 
+/** 管理事件观察者、消息管线、命令、匹配器和对话等待。 */
 export class Dispatcher implements SessionServices, CommandRegistration {
   accessFilter: AccessFilter = () => true
   isEnabledFor: EnabledFilter = () => true

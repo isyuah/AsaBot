@@ -14,12 +14,14 @@ import { UnsupportedError } from '../core/errors.ts'
 import type { Message, Sendable } from '../core/message/index.ts'
 import { normalizeSendable } from '../core/message/index.ts'
 
+/** FakeBot 记录的一次发送目标及消息。 */
 export interface FakeSend {
   type: 'group' | 'private'
   target: string
   message: Message
 }
 
+/** 用于轻量测试的机器人，记录发送内容并模拟部分 API。 */
 export class FakeBot implements Bot {
   readonly platform = 'fake'
   readonly selfId = '10000'

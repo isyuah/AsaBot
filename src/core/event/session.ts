@@ -76,6 +76,7 @@ export function dialogueMethods(run: RunDialogue): Pick<Session, 'prompt' | 'con
   return { prompt, confirm, choose }
 }
 
+/** 移除消息开头的引用、空白和对当前机器人的提及，返回新消息数组。 */
 export function stripLeadingMention(message: Message, selfId: string): Message {
   const result = [...message]
   if (result[0]?.type === 'reply') {
@@ -122,6 +123,7 @@ interface SessionFields {
 export type SessionInit = SessionFields &
   ({ messageType: 'private'; groupId?: undefined } | { messageType: 'group'; groupId: string })
 
+/** 根据适配器提供的消息字段和对话服务构建 Session。 */
 export function createSession(init: SessionInit, services: SessionServices): Session {
   const isReplyToSelf = init.message.some(
     (segment) => isSegment(segment, 'reply') && init.sentMessageIds?.has(segment.data.id) === true,

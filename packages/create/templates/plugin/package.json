@@ -1,0 +1,30 @@
+{
+  "name": "asabot-plugin-{{name}}",
+  "version": "0.1.0",
+  "type": "module",
+  "keywords": [
+    "asabot-plugin"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "@asabot/core": "{{coreVersion}}"
+  },
+  "devDependencies": {
+    "@asabot/core": "{{coreVersion}}",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}

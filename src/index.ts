@@ -1,4 +1,6 @@
+/** 框架共用的 zod schema 构造器。 */
 export { z } from 'zod'
+/** 可通过声明合并扩展的插件服务类型表。 */
 export interface Services extends Record<never, never> {}
 export { createApp } from './bootstrap.ts'
 export type {

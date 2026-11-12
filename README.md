@@ -1,80 +1,30 @@
 # AsaBot
 
-AsaBot 是一个使用 TypeScript 编写的协议无关机器人框架，提供命令、多轮对话、权限、插件热重载和 SQLite 存储。支持 OneBot 11 协议，NapCat、Lagrange.OneBot、LLOneBot 等实现都能接入。
+AsaBot 是一个协议无关的 TypeScript 聊天机器人框架，支持 OneBot 11 等聊天平台。
 
-部署、Docker、备份和反向代理配置见 [部署文档](docs/DEPLOY.md)。
+## 特性
+
+- 协议无关：通过适配器接入聊天平台，支持 OneBot 11 和多账号。
+- 插件热重载：修改插件后自动加载，开发无需反复重启。
+- 命令系统：支持参数、选项、权限、冷却和多轮对话。
+- Web 面板：首次设置、管理机器人与插件、查看日志和调试消息。
+- 插件市场：搜索、安装和管理 npm 插件包。
+- 消息与存储：统一消息段、能力降级、SQLite 存储和定时任务。
 
 ## 快速开始
 
-需要 Node.js **24 或更高版本**、pnpm，以及已经配置好账号的 OneBot 11 实现。项目直接运行 TypeScript，不需要构建。
+需要 Node.js **24 或更高版本**和 npm：
 
-首次启动也可以使用面板向导：安装依赖并构建面板后直接运行 `pnpm start`，未找到配置文件时会自动生成最小配置。打开 `http://127.0.0.1:5140`，输入启动控制台 stderr 显示的一次性设置码，依次设置面板密码、超管和可选的首个连接。密码至少 8 个字符；向导会将密码明文写入配置文件，之后可改为 `${ASABOT_PANEL_PASSWORD}` 并通过环境变量提供。生成配置时可用 `ASABOT_HOST`、`ASABOT_PORT` 指定监听地址和端口，默认分别为 `127.0.0.1`、`5140`。密码和适配器均为空的已有配置也会进入向导。
-
-也可以按以下步骤手写配置：
-
-1. 在仓库根目录安装依赖并复制配置：
-
-   ```powershell
-   pnpm install
-   Copy-Item asabot.config.example.yaml asabot.config.yaml
-   ```
-
-   macOS/Linux 可用 `cp asabot.config.example.yaml asabot.config.yaml`。
-
-2. 使用正向 WebSocket：在 OneBot 实现中开启 **OneBot 11 WebSocket 服务端**，例如监听端口 `3001`，并设置 token。编辑 `asabot.config.yaml`，把 `superusers` 里的 `10001` 改成自己的用户 ID，并按需修改 `adapters.onebot11.connections[0].url`。
-
-   示例配置连接 `ws://127.0.0.1:3001`，从 `ONEBOT_TOKEN` 环境变量读取 token。可以在仓库根目录创建 `.env`，内容为：
-
-   ```dotenv
-   ONEBOT_TOKEN=填写与OneBot实现一致的token
-   ```
-
-   `.env` 和实际配置文件已被 Git 忽略；也可以在启动前设置同名环境变量。如果 OneBot 实现没有设置 token，可不设置该变量。服务运行在 Docker 中时，需要映射服务端口并确保服务监听容器网络地址；如果 AsaBot 也在容器中，可以让两者处于同一个网络，并把 URL 换成服务的容器名和端口。容器里的 `127.0.0.1` 指向容器自身。
-
-3. 在仓库根目录启动：
-
-   ```powershell
-   pnpm start
-   # 开发时强制开启插件热重载：pnpm dev
-   ```
-
-   在机器人所在的群或私聊中发送 `/help`、`/ping`、`/echo 你好` 或 `/猜数`。默认示例中 `/echo` 有两秒用户冷却；`-n` 选项需写在文本之前，例如 `/echo -n 2 你好`。
-
-默认数据目录是 `./data`：数据库为 `data/asabot.db`，插件可使用 `data/plugins/<插件名>/`。相对路径以启动进程的当前工作目录为基准。备份数据时应同时考虑 SQLite WAL 文件，建议先停止 AsaBot 再备份整个数据目录。
-
-### 使用反向 WebSocket
-
-反向模式由 OneBot 实现主动连接 AsaBot。只使用反向模式时，可将配置中的 `connections` 设为空，并启用 `reverse`：
-
-```yaml
-adapters:
-  onebot11:
-    connections: []
-    reverse:
-      enabled: true
-      accessToken: ${ONEBOT_REVERSE_TOKEN:-}
-    sendQueue:
-      interval: 500ms
-      jitter: 300ms
-      maxPending: 100
-server:
-  host: 127.0.0.1
-  port: 5140
+```sh
+npm create @asabot@latest
+cd asabot-bot
+npm install
+npm run dev
 ```
 
-在 `.env` 中设置 `ONEBOT_REVERSE_TOKEN`，然后在 OneBot 实现的网络配置中添加 **OneBot 11 WebSocket 客户端**：URL 填 `ws://<AsaBot地址>:5140/onebot/v11/ws`，token 填相同的值，连接类型选择 Universal。对端通过 `X-Self-ID` 标识当前登录的账号；多个账号可以连接同一个地址。若两者不在同一网络命名空间，需将 `server.host` 改为对端可访问的监听地址，并配置相应的网络和端口映射。
+按提示选择 bot 模板和目录；使用自定义目录时，将上面的 `cd` 改为对应路径。首次启动后打开 <http://127.0.0.1:5140>，输入终端显示的一次性设置码，按向导设置面板密码、超管和聊天平台连接。`npm run dev` 会开启插件热重载，正式运行使用 `npm start`。
 
-反向 token 为空时不校验连接，启动时会记录警告；也支持 OneBot 11 的 `access_token` 查询参数。反向连接、面板和对外 API 共用 `server` 的监听地址与端口，`reverse.enabled` 为 `true` 时会启动 HTTP 服务。正向与反向连接可以同时使用，同账号的反向新连接通过登录校验后会替换旧反向连接。
-
-发送消息默认按账号限速，相邻发送间隔为 500ms 加 0–300ms 随机抖动；`sendQueue.interval` 设为 `0` 可关闭限速。队列达到 `maxPending` 时新发送会报 `SendQueueFullError`，断线时尚未发出的消息会被拒绝。
-
-
-### 常见问题
-
-- **连接不上服务**：查看 `OneBot WebSocket error` 日志中的 `reason`、`code` 和 URL，例如 `ECONNREFUSED` 通常表示地址、端口、服务监听或容器端口映射需要检查。将 `log.level` 改为 `debug` 可看到 `Connecting OneBot forward WebSocket`。连接失败后框架会自动重试。
-- **token 不一致**：对端会拒绝 WebSocket 握手，日志通常包含 `401` 等服务端返回的错误，机器人不会上线并会继续重连。核对对端的 token 和 `ONEBOT_TOKEN`；不要把 token 写进 URL 或提交到仓库。
-- **启动后没有命令回复**：先查看 `/ping` 和 `/status`，再检查插件状态、访问控制、群插件开关和命令前缀。`AsaBot started` 表示框架已启动，适配器仍可能处于重连中。
-- **插件加载失败**：超管使用 `/plugin list` 查看失败原因，详细信息见日志；修复插件文件后会自动尝试重载。
+默认数据保存在 `data/`，配置保存在 `asabot.config.yaml`。向导将面板密码写入配置文件，之后可以改成环境变量引用。更多连接和备份说明见 [部署文档](docs/DEPLOY.md)。
 
 ## 配置参考
 
@@ -89,7 +39,7 @@ server:
 | `pluginLoader` | 插件目录和热重载开关；`auto` 在 `NODE_ENV` 不是 `production` 时开启 |
 | `packages` | 插件包目录、npm registry、npm 可执行文件和安装超时时间 |
 | `plugins.<name>.enabled` | 插件全局开关，缺省为 `true` |
-| `plugins.<name>.config` | 对应插件的配置；示例 `echo` 支持 `maxLen` 和 `welcome` |
+| `plugins.<name>.config` | 对应插件的配置，字段由插件的 schema 定义 |
 | `server` | HTTP 监听地址和端口、面板密码、对外 API token；密码或 token 为空时分别关闭对应功能 |
 
 时长可以写毫秒数或 `10s`、`5m`、`1h30m` 等字符串。内置插件也使用 `plugins` 配置。通过管理命令修改全局插件开关时会写回配置文件；按群开关和访问控制保存在 SQLite 中。
@@ -114,11 +64,11 @@ const image = await render.markdown('# 你好\n\n- AsaBot\n- Markdown')
 await session.send(seg.image(image))
 ```
 
-字体、emoji、浏览器配置及完整服务 API 见 [render 插件 README](packages/plugin-render/README.md)。
+字体、emoji、浏览器配置及完整服务 API 见 [render 插件 npm 页面](https://www.npmjs.com/package/@asabot/plugin-render)。
 
 ## 管理面板与对外 API
 
-通过环境变量或 `.env` 设置 `ASABOT_PANEL_PASSWORD` 以启用面板，设置 `ASABOT_API_TOKEN` 以启用对外 API。两者相互独立；都为空且未配置反向 WebSocket 时不监听 HTTP 端口。默认地址为 `http://127.0.0.1:5140`。面板前端构建后访问该地址；在仓库根目录执行 `pnpm --filter web build` 可生成 `web/dist`。面板登录会创建 7 天有效的会话 cookie，进程重启后需要重新登录。
+配置非空的 `server.panelPassword` 可启用面板，配置 `server.apiToken` 可启用对外 API；配置值可以用 `${ASABOT_PANEL_PASSWORD}` 等语法引用环境变量或 `.env`。两者相互独立；都为空且未配置反向 WebSocket 时不监听 HTTP 端口。默认地址为 `http://127.0.0.1:5140`。安装的框架包已包含面板，访问该地址即可。面板登录会创建 7 天有效的会话 cookie，进程重启后需要重新登录。
 
 对外 API 使用 `Authorization: Bearer <token>`。例如，在设置 `ASABOT_API_TOKEN` 的 shell 中：
 
@@ -170,7 +120,7 @@ curl -X POST http://127.0.0.1:5140/api/v1/send \
 }
 ```
 
-发布前将 TypeScript 编译成 JS 并附带 `.d.ts`，因为 Node 不会剥离 `node_modules` 中的 TypeScript。插件入口使用 `import { definePlugin } from '@asabot/core'`；运行时会连接当前框架实例。`@asabot/core` 尚未发布到 npm 时，可在插件项目的开发依赖中通过包管理器引用本地框架仓库（例如 `pnpm add -D @asabot/core@file:../AsaBot`）获取类型，同时保留 `peerDependencies['@asabot/core']` 的版本范围；发布前移除本地路径开发依赖或改用发布后的版本。
+发布前将 TypeScript 编译成 JS 并附带 `.d.ts`，因为 Node 不会剥离 `node_modules` 中的 TypeScript。插件入口使用 `import { definePlugin } from '@asabot/core'`；运行时会连接当前框架实例。也可以运行 `npm create @asabot@latest -- --template plugin` 创建带构建和测试配置的插件项目。
 
 ## 开发插件
 
@@ -192,7 +142,7 @@ export default definePlugin({
 })
 ```
 
-默认发现 `plugins/<name>.ts` 和 `plugins/<name>/index.ts`；文件默认导出 `definePlugin(...)` 的结果。顶层以 `_` 或 `.` 开头的文件和目录，以及 `*.test.*`、`*.spec.*`、`*.d.ts` 均被忽略。`name` 由小写英文字母、数字、`-` 和 `_` 组成且必须全局唯一，`core` 是保留名。插件可声明 `version`、`description`、`depends: ['其他插件名']` 和 zod 配置 schema；从 `@asabot/core` 导入 `z`。例如 `plugins/echo.ts` 和 `plugins/guess.ts` 分别演示配置、观察者、命令和多轮游戏。
+默认发现 `plugins/<name>.ts` 和 `plugins/<name>/index.ts`；文件默认导出 `definePlugin(...)` 的结果。顶层以 `_` 或 `.` 开头的文件和目录，以及 `*.test.*`、`*.spec.*`、`*.d.ts` 均被忽略。`name` 由小写英文字母、数字、`-` 和 `_` 组成且必须全局唯一，`core` 是保留名。插件可声明 `version`、`description`、`depends: ['其他插件名']` 和 zod 配置 schema；从 `@asabot/core` 导入 `z`。脚手架生成的 `plugins/hello.ts` 包含配置和命令示例。
 
 ### Context 一览
 
@@ -426,4 +376,16 @@ it('打招呼', async () => {
 
 消息段通过 `seg.at(id)`、`seg.audio(file)` 等构造，平台专属消息段使用平台命名空间。需要 OneBot 专属能力时，从 `@asabot/core/onebot11` 导入 `isOneBot`、`parseCQ`、`toCQ`、`ApiError` 和相关类型；字符串始终作为纯文本发送。`createTestApp` 不接受外部适配器配置，可通过 `capabilities` 模拟能力较弱的平台。
 
-项目检查命令：`pnpm typecheck`、`pnpm lint`、`pnpm test`。
+## 部署
+
+Docker、Compose、反向代理、备份与升级步骤见 [部署文档](docs/DEPLOY.md)。
+
+## 仓库开发
+
+```sh
+pnpm install
+pnpm dev
+pnpm test
+```
+
+其他检查命令：`pnpm typecheck`、`pnpm lint`；构建发布用框架代码使用 `pnpm build:lib`。

@@ -1,0 +1,4 @@
+data/
+asabot.config.yaml
+.env
+node_modules/

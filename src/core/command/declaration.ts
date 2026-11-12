@@ -3,6 +3,7 @@ import type { Message, Segment } from '../message/index.ts'
 import { isSegment } from '../message/index.ts'
 import { parseDuration } from '../utils/duration.ts'
 
+/** 命令参数支持的类型名称或以竖线分隔的枚举值。 */
 export type ArgumentType =
   | 'string'
   | 'number'
@@ -17,6 +18,7 @@ export type ArgumentType =
   | 'rest'
   | `${string}|${string}`
 
+/** 命令参数或选项的说明、范围、正则和自定义校验。 */
 export interface ArgumentSettings<T = unknown> {
   description?: string
   min?: number

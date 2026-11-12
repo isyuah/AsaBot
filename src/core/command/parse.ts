@@ -27,6 +27,7 @@ function defaultValue(argument: ArgumentDefinition, timezone: string): unknown {
     : parseValue(argument.type, argument.defaultSource, timezone)
 }
 
+/** 根据命令定义及可选前缀生成用法文本。 */
 export function formatUsage(
   command: CommandDefinition | { definition: CommandDefinition },
   prefix = '/',

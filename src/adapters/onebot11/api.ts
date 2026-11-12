@@ -17,8 +17,10 @@ import { incomingMessage } from './message.ts'
 import type { OneBotMessage } from './types.ts'
 
 type Request = (action: string, params?: Record<string, unknown>) => Promise<unknown>
+/** 向 OneBot 实现发送 action 和参数的异步函数。 */
 export type OneBotOutgoingRequest = (action: string, params: Record<string, unknown>) => Promise<unknown>
 
+/** OneBot API 调用和发送过程使用的宿主钩子。 */
 export interface OneBotApiHooks {
   assertOnline?: () => void
   prepareOutgoing?: (target: MessageTarget, message: Message) => Promise<PreparedOutgoing>
@@ -66,6 +68,7 @@ async function normalizeSegment(segment: Segment): Promise<Segment> {
   return result
 }
 
+/** 将可发送内容转换为 OneBot 消息，并读取本地媒体；文件读取失败时拒绝。 */
 export async function normalizeOutbound(content: Sendable): Promise<OneBotMessage> {
   const message: Message = normalizeSendable(content)
   return Promise.all(message.map((segment) => normalizeSegment(segment)))
@@ -173,6 +176,7 @@ function memberInfo(value: unknown): GroupMemberInfo {
   }
 }
 
+/** 基于 OneBot 请求函数实现的平台专属 API。 */
 export class OneBotApiImpl implements OneBotApi {
   private readonly request: Request
   private readonly hooks: OneBotApiHooks

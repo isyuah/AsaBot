@@ -26,6 +26,7 @@ function update(document: Document, path: (string | number)[], value: unknown, p
   } else document.setIn(path, value)
 }
 
+/** 将指定配置路径写回 YAML，保留其他内容的注释；读写失败时抛出 ConfigError。 */
 export async function writeConfigValue(
   path: string,
   keyPath: string[],

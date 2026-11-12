@@ -1,6 +1,7 @@
 import { scheduleTimeout } from './dispatch/timer.ts'
 import type { Session } from './event/index.ts'
 
+/** 命令冷却按用户、群或全局计算的范围。 */
 export type CooldownScope = 'user' | 'group' | 'global'
 
 interface Entry {

@@ -74,6 +74,7 @@ function validateDefinition(value: unknown): PluginDefinition {
   return value as PluginDefinition
 }
 
+/** 管理插件注册、依赖协调、启停、重载和服务。 */
 export class PluginManager {
   private readonly app: App
   private readonly configPath?: string
