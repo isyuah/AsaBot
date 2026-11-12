@@ -60,6 +60,8 @@ docker run -d --name asabot --restart unless-stopped \
 
 镜像内置仓库的示例插件；挂载宿主机插件目录后，目录中的文件会覆盖镜像中该路径的内容。首次使用可直接挂载仓库自带的 `plugins` 目录。容器以 `node` 用户运行；在 Linux 上应确保挂载的 `data` 和 `config` 目录对容器 UID 1000 可写，插件目录可读。例如可执行 `sudo chown -R 1000:1000 ./data ./config`，其他平台按宿主机的文件权限机制设置。
 
+插件包默认安装在数据目录的 `packages` 子目录，包含 npm 缓存和已安装包；持久化整个 `/app/data` 即可在重建容器后保留它们。如果配置了其他 `packages.dir`，需要单独持久化该目录。面板上传文件插件时，`pluginLoader.uploadDir` 对容器用户也必须可写。可将 `packages.registry` 改为可访问的 registry 镜像，例如 `https://registry.npmmirror.com`；框架查询和 npm 安装都会使用该地址。
+
 ### 配置文件写回
 
 镜像通过 `ASABOT_CONFIG=/app/config/asabot.config.yaml` 读取配置，Compose 挂载的是整个 `config` 目录。框架在面板或聊天命令中修改插件全局开关、插件配置时，会先在同一目录写临时文件再原子替换，结果直接保存到宿主机的 `config/asabot.config.yaml`，注释和 `${VAR}` 原文都会保留。请不要改成只挂载单个配置文件：Linux 上单文件挂载不能被原子替换，写回会失败。按群开关和访问控制保存在数据目录的 SQLite 中。

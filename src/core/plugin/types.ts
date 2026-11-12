@@ -5,7 +5,7 @@ export interface PluginState {
   name: string
   version?: string
   description?: string
-  source: 'builtin' | 'file'
+  source: 'builtin' | 'file' | 'package'
   path?: string
   state: 'loading' | 'active' | 'failed' | 'disabled'
   error?: string

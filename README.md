@@ -82,6 +82,7 @@ server:
 | `dispatch` | 处理器超时、忽略自身消息、prompt 默认和最大超时 |
 | `adapters.onebot11` | 正向 WS 地址、反向 WS token、API 超时、重连和发送队列；支持多个账号 |
 | `pluginLoader` | 插件目录和热重载开关；`auto` 在 `NODE_ENV` 不是 `production` 时开启 |
+| `packages` | 插件包目录、npm registry、npm 可执行文件和安装超时时间 |
 | `plugins.<name>.enabled` | 插件全局开关，缺省为 `true` |
 | `plugins.<name>.config` | 对应插件的配置；示例 `echo` 支持 `maxLen` 和 `welcome` |
 | `server` | HTTP 监听地址和端口、面板密码、对外 API token；密码或 token 为空时分别关闭对应功能 |
@@ -118,6 +119,31 @@ curl -X POST http://127.0.0.1:5140/api/v1/send \
 | `/acl remove <block\|allow> <user\|group> [目标]` | 超管 | 移除条目；对象为群且省略目标时使用当前群 |
 
 黑名单优先；用户和群的白名单分别生效，某一维度为空时不限制该维度。超管始终通过访问控制，不能被命令加入用户黑名单。为避免把自己锁在外面，聊天中不能停用 `admin`（全局或按群都不行）；确需停用时修改配置文件中的 `plugins.admin.enabled`。
+
+## 安装与管理插件
+
+文件插件可以放入 `pluginLoader.dirs`，也可以在面板上传 `.ts`、`.js` 或包含 `index.ts` / `index.js` 的 zip。上传目录由 `pluginLoader.uploadDir` 指定，默认是第一个插件目录；压缩包里的文件会解压到以压缩包文件名命名的目录。上传请求最大 2 MB，解压后最大 5 MB。面板可重新扫描目录，超管也可发送 `/plugin scan`；扫描会发现新增和删除的插件，已修改的插件使用热重载或 `/plugin reload <name>`。
+
+面板可以搜索、安装、升级和卸载 npm 插件包。超管可以使用 `/plugin install <包名>`、`/plugin update <包名>` 和 `/plugin uninstall <插件名>`；安装时加 `-f` 可跳过框架版本检查。面板的包操作使用 npm 包名，插件卸载和聊天命令使用插件的 `name`。包代码与框架运行在同一进程，拥有进程的完整权限，只安装信任的插件。
+
+文件和包插件默认保存在对应插件目录及 `data/packages`。卸载默认保留配置和数据；选择清除数据或在聊天命令后加 `--purge` 会一并删除插件的配置、KV、迁移记录、群开关、约定表及数据目录。内置插件不能卸载。
+
+### 开发并发布插件包
+
+插件包是普通 ESM npm 包，入口默认导出插件定义。示例 `package.json`：
+
+```json
+{
+  "name": "asabot-plugin-example",
+  "version": "1.0.0",
+  "type": "module",
+  "keywords": ["asabot-plugin"],
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "peerDependencies": { "asabot": "^0.1.0" }
+}
+```
+
+发布前将 TypeScript 编译成 JS 并附带 `.d.ts`，因为 Node 不会剥离 `node_modules` 中的 TypeScript。插件入口使用 `import { definePlugin } from 'asabot'`；运行时会连接当前框架实例。`asabot` 尚未发布到 npm 时，可在插件项目的开发依赖中通过包管理器引用本地框架仓库（例如 `pnpm add -D asabot@file:../AsaBot`）获取类型，同时保留 `peerDependencies.asabot` 的版本范围；发布前移除本地路径开发依赖或改用发布后的版本。
 
 ## 开发插件
 

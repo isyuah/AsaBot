@@ -16,10 +16,21 @@ import { PluginConfigError } from '../core/errors.ts'
 import type { MessageSentEvent } from '../core/event/index.ts'
 import { getRecentLogs, subscribeLogs } from '../core/logger.ts'
 import { plainText } from '../core/message/index.ts'
+import type { PackageOperation } from '../core/plugin/packages.ts'
+import { ManagementError } from '../core/plugin/upload.ts'
 import { constantTimeEqual } from '../core/utils/security.ts'
 import { PanelAuth } from './auth.ts'
 import { Playground } from './playground.ts'
-import { accessSchema, playgroundSchema, sendSchema } from './schemas.ts'
+import {
+  accessSchema,
+  packageInstallSchema,
+  packageNameSchema,
+  packageUninstallSchema,
+  playgroundSchema,
+  purgeSchema,
+  sendSchema,
+  uploadSchema,
+} from './schemas.ts'
 import { botView, commandView, overview, pluginView } from './views.ts'
 
 type Env = { Bindings: HttpBindings }
@@ -101,6 +112,35 @@ async function body<T extends z.ZodType>(c: ServerContext, schema: T): Promise<z
       result.error.issues.map((issue) => ({ path: issuePath(issue.path), message: issue.message })),
     )
   return result.data
+}
+
+async function uploadBody(c: ServerContext): Promise<z.output<typeof uploadSchema>> {
+  const max = 2 * 1024 * 1024
+  const length = Number(c.req.header('content-length') ?? 0)
+  if (length > max) throw new HttpError(400, 'BAD_REQUEST', 'Upload request exceeds 2 MB')
+  const reader = c.req.raw.body?.getReader()
+  if (!reader) throw new HttpError(400, 'BAD_REQUEST', 'Invalid JSON')
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    size += value.length
+    if (size > max) {
+      await reader.cancel()
+      throw new HttpError(400, 'BAD_REQUEST', 'Upload request exceeds 2 MB')
+    }
+    chunks.push(value)
+  }
+  let value: unknown
+  try {
+    value = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+  } catch {
+    throw new HttpError(400, 'BAD_REQUEST', 'Invalid JSON')
+  }
+  const parsed = uploadSchema.safeParse(value)
+  if (!parsed.success) throw new HttpError(400, 'BAD_REQUEST', 'Invalid upload request')
+  return parsed.data
 }
 
 function verifyOrigin(c: ServerContext): void {
@@ -221,6 +261,15 @@ export class HttpServer implements ServerService {
       if (error instanceof HttpError) return failure(c, error)
       if (error instanceof PluginConfigError)
         return failure(c, new HttpError(400, 'BAD_REQUEST', 'Plugin configuration is invalid', error.issues))
+      if (error instanceof ManagementError)
+        return failure(
+          c,
+          new HttpError(
+            error.status,
+            error.status === 409 ? 'CONFLICT' : error.status === 404 ? 'NOT_FOUND' : 'BAD_REQUEST',
+            error.message,
+          ),
+        )
       this.app.logger.error('HTTP request failed')
       return failure(c, new HttpError(500, 'INTERNAL_ERROR', 'Internal server error'))
     })
@@ -323,8 +372,54 @@ export class HttpServer implements ServerService {
       )
     })
     panel.post('/send', async (c) => c.json(await this.send(await body(c, sendSchema))))
-    panel.get('/plugins', (c) =>
-      c.json(this.app.plugins.list().map((plugin) => pluginView(this.app, plugin))),
+    panel.get('/plugins', async (c) => {
+      await this.app.plugins.packages.ensureLatest()
+      return c.json(this.app.plugins.list().map((plugin) => pluginView(this.app, plugin)))
+    })
+    panel.post('/plugins/rescan', async (c) => {
+      const result = await this.app.plugins.rescan()
+      return c.json({
+        ...result,
+        plugins: this.app.plugins.list().map((plugin) => pluginView(this.app, plugin)),
+      })
+    })
+    panel.post('/plugins/upload', async (c) => {
+      const input = await uploadBody(c)
+      const state = await this.app.plugins.upload(input.filename, input.content, input.overwrite)
+      return c.json(pluginView(this.app, state), 201)
+    })
+    panel.post('/plugins/:name/uninstall', async (c) => {
+      const name = c.req.param('name')
+      this.requirePlugin(name)
+      const input = await body(c, purgeSchema)
+      await this.app.plugins.uninstall(name, input.purge)
+      return c.json({ ok: true })
+    })
+    panel.get('/packages/search', async (c) => {
+      const from = Number(c.req.query('from') ?? 0)
+      if (!Number.isSafeInteger(from) || from < 0)
+        throw new HttpError(400, 'BAD_REQUEST', 'Invalid search offset')
+      return c.json(await this.app.plugins.packages.search(c.req.query('q') ?? '', from))
+    })
+    panel.post('/packages/install', async (c) => {
+      const input = await body(c, packageInstallSchema)
+      return c.json(
+        this.packageOperation(
+          await this.app.plugins.packages.install(input.name, input.version, input.force),
+        ),
+        202,
+      )
+    })
+    panel.post('/packages/update', async (c) => {
+      const input = await body(c, packageNameSchema)
+      return c.json(this.packageOperation(await this.app.plugins.packages.update(input.name)), 202)
+    })
+    panel.post('/packages/uninstall', async (c) => {
+      const input = await body(c, packageUninstallSchema)
+      return c.json(this.packageOperation(this.app.plugins.packages.uninstall(input.name, input.purge)), 202)
+    })
+    panel.get('/packages/operations', (c) =>
+      c.json(this.app.plugins.packages.list().map((op) => this.packageOperation(op))),
     )
     panel.post('/plugins/:name/:operation', async (c) => {
       const name = c.req.param('name')
@@ -434,6 +529,10 @@ export class HttpServer implements ServerService {
     return plugin
   }
 
+  private packageOperation(operation: PackageOperation) {
+    return { ...operation, ...(operation.plugin ? { plugin: pluginView(this.app, operation.plugin) } : {}) }
+  }
+
   private async send(input: z.output<typeof sendSchema>) {
     const bot = this.app.bots
       .list()
@@ -465,6 +564,9 @@ export class HttpServer implements ServerService {
     }
     push({ type: 'hello', overview: overview(this.app) })
     const unsubscribeLogs = subscribeLogs((record) => push({ type: 'log', record }))
+    const unsubscribePackages = this.app.plugins.packages.subscribe((operation) =>
+      push({ type: 'package', operation: this.packageOperation(operation) }),
+    )
     const unsubscribeEvents = this.app.subscribeDispatch((event) => {
       const frame = this.eventFrame(event)
       if (frame) push(frame)
@@ -493,6 +595,7 @@ export class HttpServer implements ServerService {
       clearInterval(ping)
       clearTimeout(stats)
       unsubscribeLogs()
+      unsubscribePackages()
       unsubscribeEvents()
     })
   }

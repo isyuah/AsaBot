@@ -5,7 +5,14 @@ superusers: []
 
 pluginLoader:
   dirs: [/app/plugins]
+  uploadDir: /app/plugins
   hotReload: auto
+
+packages:
+  dir: /app/data/packages
+  registry: https://registry.npmjs.org
+  npm: npm
+  installTimeout: 5m
 
 adapters:
   onebot11:

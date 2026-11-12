@@ -33,18 +33,20 @@ export function registerPluginRoots(dirs: string[]): () => void {
         return nextLoad(url, context)
       },
       resolve(specifier, context, nextResolve) {
-        if (specifier === 'asabot' && context.parentURL?.startsWith('file:')) {
+        if (
+          (specifier === 'asabot' || specifier.startsWith('asabot/')) &&
+          context.parentURL?.startsWith('file:')
+        ) {
           const parent = new URL(context.parentURL)
-          if (
-            parent.searchParams.has('v') &&
-            [...roots.keys()].some((root) => inside(root, fileURLToPath(parent)))
-          ) {
-            return { url: frameworkUrl, shortCircuit: true }
+          if ([...roots.keys()].some((root) => inside(root, fileURLToPath(parent)))) {
+            return {
+              url: specifier === 'asabot' ? frameworkUrl : import.meta.resolve(specifier),
+              shortCircuit: true,
+            }
           }
         }
         const result = nextResolve(specifier, context)
-        if (!result.url.startsWith('file:') || !(specifier.startsWith('.') || specifier.startsWith('file:')))
-          return result
+        if (!result.url.startsWith('file:')) return result
         const parent = context.parentURL ? new URL(context.parentURL) : undefined
         const version = parent?.searchParams.get('v')
         if (!version) return result

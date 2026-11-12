@@ -57,6 +57,8 @@ export function pluginView(app: App, state: PluginState) {
   }
   return {
     ...state,
+    removable: state.source !== 'builtin',
+    ...(state.source === 'package' ? { package: app.plugins.packageInfo(state.name) } : {}),
     commands: app.dispatcher.registeredCommands(state.name).map((item) => commandView(app, item)),
     ...(config === undefined ? {} : { config }),
   }

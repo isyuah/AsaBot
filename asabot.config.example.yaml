@@ -57,8 +57,18 @@ adapters:
 pluginLoader:
   # 从这些目录加载插件入口文件
   dirs: [./plugins]
+  # 上传目录，默认使用 dirs 的第一个目录
+  uploadDir: ./plugins
   # auto 表示非 production 环境启用热重载，也可设为 true 或 false
   hotReload: auto
+
+packages:
+  # 插件包和 npm 缓存目录，默认位于 dataDir/packages
+  dir: ./data/packages
+  # 可替换为可访问的 npm registry 镜像
+  registry: https://registry.npmjs.org
+  npm: npm
+  installTimeout: 5m
 
 server:
   # 默认只允许本机访问；如需远程访问，请明确配置监听地址

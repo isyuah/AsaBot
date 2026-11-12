@@ -3,6 +3,7 @@ import type { Session } from '../core/event/index.ts'
 import type { Message } from '../core/message/index.ts'
 import { plainText } from '../core/message/index.ts'
 import { definePlugin } from '../core/plugin/definition.ts'
+import type { PackageOperation } from '../core/plugin/packages.ts'
 import type { AccessList, AccessSubject } from '../core/storage/index.ts'
 
 function reason(error: unknown): string {
@@ -47,6 +48,20 @@ function targetFromRest(subject: AccessSubject, target: Message | undefined, ses
 }
 
 export function createAdminPlugin(app: App) {
+  async function waitForOperation(operation: PackageOperation): Promise<PackageOperation> {
+    return new Promise((resolve) => {
+      const check = (current: PackageOperation): void => {
+        if (current.id !== operation.id || (current.status !== 'succeeded' && current.status !== 'failed'))
+          return
+        unsubscribe()
+        resolve(current)
+      }
+      const unsubscribe = app.plugins.packages.subscribe(check)
+      const current = app.plugins.packages.list().find((item) => item.id === operation.id)
+      if (current) check(current)
+    })
+  }
+
   function changeAccess(list: AccessList, subject: AccessSubject, id: string, session: Session): string {
     if (list === 'block' && subject === 'user' && app.isSuperuser(id)) return '不能屏蔽超管'
     const key = `${session.platform}:${id}`
@@ -62,6 +77,80 @@ export function createAdminPlugin(app: App) {
     name: 'admin',
     description: '管理插件与访问控制',
     setup(ctx) {
+      ctx
+        .command('plugin scan')
+        .description('重新扫描插件目录')
+        .permission('superuser')
+        .action(async () => {
+          try {
+            const result = await app.plugins.rescan()
+            return `扫描完成：新增 ${result.added.join('、') || '无'}；移除 ${result.removed.join('、') || '无'}`
+          } catch (error) {
+            return `扫描失败：${reason(error)}`
+          }
+        })
+
+      ctx
+        .command('plugin install <package>')
+        .description('安装插件包')
+        .option('force', '-f, --force')
+        .permission('superuser')
+        .action(async ({ session, args, options }) => {
+          await session.send(`开始安装插件包 ${args.package}`)
+          void (async () => {
+            try {
+              const operation = await app.plugins.packages.install(args.package, undefined, options.force)
+              const result = await waitForOperation(operation)
+              await session.send(
+                result.status === 'succeeded'
+                  ? `已安装插件包 ${args.package}`
+                  : `安装 ${args.package} 失败：${result.error}`,
+              )
+            } catch (error) {
+              await session.send(`安装 ${args.package} 失败：${reason(error)}`)
+            }
+          })().catch((error: unknown) =>
+            app.logger.error({ err: error }, 'Failed to send package operation result'),
+          )
+        })
+
+      ctx
+        .command('plugin update <package>')
+        .description('升级插件包')
+        .permission('superuser')
+        .action(async ({ session, args }) => {
+          await session.send(`开始升级插件包 ${args.package}`)
+          void (async () => {
+            try {
+              const operation = await app.plugins.packages.update(args.package)
+              const result = await waitForOperation(operation)
+              await session.send(
+                result.status === 'succeeded'
+                  ? `已升级插件包 ${args.package}`
+                  : `升级 ${args.package} 失败：${result.error}`,
+              )
+            } catch (error) {
+              await session.send(`升级 ${args.package} 失败：${reason(error)}`)
+            }
+          })().catch((error: unknown) =>
+            app.logger.error({ err: error }, 'Failed to send package operation result'),
+          )
+        })
+
+      ctx
+        .command('plugin uninstall <name>')
+        .description('卸载插件')
+        .option('purge', '--purge')
+        .permission('superuser')
+        .action(async ({ args, options }) => {
+          try {
+            await app.plugins.uninstall(args.name, options.purge)
+            return `已卸载插件 ${args.name}`
+          } catch (error) {
+            return `卸载 ${args.name} 失败：${reason(error)}`
+          }
+        })
+
       ctx
         .command('plugin list')
         .description('查看插件状态')

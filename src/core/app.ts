@@ -20,6 +20,7 @@ import type {
 } from './event/index.ts'
 import { logger as defaultLogger } from './logger.ts'
 import { PluginManager } from './plugin/manager.ts'
+import type { PackageOptions } from './plugin/packages.ts'
 import type { PluginStateEvent } from './plugin/types.ts'
 import { Storage } from './storage/index.ts'
 
@@ -89,14 +90,18 @@ export class App implements AdapterHost {
   private readonly shutdown = new AbortController()
   private state: AppState = 'created'
 
-  constructor(config: Config, logger: Logger = defaultLogger, options: { configPath?: string } = {}) {
+  constructor(
+    config: Config,
+    logger: Logger = defaultLogger,
+    options: { configPath?: string; packages?: PackageOptions } = {},
+  ) {
     this.config = config
     this.logger = logger
     this.dispatcher = new Dispatcher(config, logger, this.shutdown.signal)
     this.sessionServices = this.dispatcher
     this.events = new CoreEvents(this.dispatcher)
     this.storage = new Storage(config.dataDir, logger)
-    this.plugins = new PluginManager(this, options.configPath)
+    this.plugins = new PluginManager(this, options.configPath, options.packages)
     this.dispatcher.accessFilter = (event) => this.storage.allows(event)
     this.dispatcher.isEnabledFor = (owner, event) => this.plugins.isEnabledFor(owner, event)
     this.dispatcher.onDispatch = (event) => {

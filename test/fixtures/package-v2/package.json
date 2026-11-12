@@ -1,0 +1,9 @@
+{
+  "name": "asabot-m8-e2e",
+  "version": "2.0.0",
+  "type": "module",
+  "exports": "./index.js",
+  "imports": { "#shared": "./shared.js" },
+  "keywords": ["asabot-plugin"],
+  "peerDependencies": { "asabot": "^0.1.0" }
+}

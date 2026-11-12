@@ -1,16 +1,18 @@
 import { randomUUID } from 'node:crypto'
 import { type Dirent, type FSWatcher, watch } from 'node:fs'
-import { mkdir, readdir, stat } from 'node:fs/promises'
-import { basename, join, resolve } from 'node:path'
+import { lstat, mkdir, mkdtemp, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { z } from 'zod'
 import type { App } from '../app.ts'
-import { writeConfigValue } from '../config/write.ts'
+import { deleteConfigValue, writeConfigValue } from '../config/write.ts'
 import type { DispatchEvent } from '../dispatch/types.ts'
 import { PluginConfigError, PluginError } from '../errors.ts'
 import { Context } from './context.ts'
 import type { PluginDefinition } from './definition.ts'
 import { importPlugin, registerPluginRoots } from './loader.ts'
+import { type PackageManifest, type PackageOptions, PackageService } from './packages.ts'
 import type { PluginState } from './types.ts'
+import { ManagementError, uploadContents } from './upload.ts'
 
 interface Entry {
   state: PluginState
@@ -19,6 +21,7 @@ interface Entry {
   files: Set<string>
   release?: () => void
   failure?: 'dependency' | 'setup' | 'import' | 'duplicate'
+  manifest?: PackageManifest
 }
 
 function errorMessage(error: unknown): string {
@@ -52,6 +55,7 @@ export class PluginManager {
   private readonly app: App
   private readonly configPath?: string
   private readonly dirs: string[]
+  readonly packages: PackageService
   private readonly entries = new Map<string, Entry>()
   private readonly files = new Map<string, Entry>()
   private readonly duplicates: Entry[] = []
@@ -61,10 +65,27 @@ export class PluginManager {
   private queue: Promise<void> = Promise.resolve()
   private started = false
 
-  constructor(app: App, configPath?: string) {
+  constructor(app: App, configPath?: string, packageOptions?: PackageOptions) {
     this.app = app
     this.configPath = configPath
-    this.dirs = app.config.pluginLoader.dirs.map((dir) => resolve(dir))
+    this.dirs = [
+      ...new Set(
+        [
+          ...app.config.pluginLoader.dirs,
+          ...(app.config.pluginLoader.uploadDir ? [app.config.pluginLoader.uploadDir] : []),
+        ].map((dir) => resolve(dir)),
+      ),
+    ]
+    this.packages = new PackageService(
+      app.config.packages,
+      {
+        serial: (work) => this.serial(work),
+        installedPackages: () => this.installedPackages(),
+        installPackage: (manifest, kind, log) => this.installPackage(manifest, kind, log),
+        uninstallPackage: (name, purge, log) => this.uninstallPackage(name, purge, log),
+      },
+      packageOptions,
+    )
   }
 
   register(definition: PluginDefinition): void {
@@ -93,8 +114,36 @@ export class PluginManager {
 
   async start(): Promise<void> {
     this.started = true
-    this.releaseRoots = registerPluginRoots(this.dirs)
+    await this.packages.init()
+    this.releaseRoots = registerPluginRoots([...this.dirs, this.packages.dir])
     for (const dir of this.dirs) await this.discover(dir)
+    for (const name of Object.keys(await this.packages.dependencies())) {
+      let manifest: PackageManifest | undefined
+      try {
+        manifest = await this.packages.manifest(name)
+        if (manifest.keywords?.includes('asabot-plugin')) await this.addPackage(manifest)
+      } catch (error) {
+        this.app.logger.error({ err: error, package: name }, 'Failed to load plugin package')
+        if (manifest?.keywords?.includes('asabot-plugin')) {
+          const base =
+            name
+              .replace(/^@/, '')
+              .replace(/[^a-z0-9_-]+/g, '-')
+              .replace(/^[^a-z0-9]+/, '') || 'package'
+          let pluginName = base
+          let suffix = 1
+          while (this.entries.has(pluginName) || pluginName === 'core') pluginName = `${base}-${suffix++}`
+          const state: PluginState = {
+            name: pluginName,
+            source: 'package',
+            state: 'failed',
+            enabled: this.app.config.plugins[pluginName]?.enabled ?? true,
+            error: errorMessage(error),
+          }
+          this.entries.set(pluginName, { state, manifest, files: new Set(), failure: 'import' })
+        }
+      }
+    }
     await this.reconcile()
   }
 
@@ -162,7 +211,134 @@ export class PluginManager {
   }
 
   reload(name: string): Promise<void> {
-    return this.serial(async () => this.reloadEntry(this.require(name)))
+    return this.serial(async () => {
+      const entry = this.require(name)
+      if (entry.manifest && !entry.definition && !entry.state.path) {
+        const path = await this.packageEntry(entry.manifest)
+        entry.state.path = path
+        this.files.set(path, entry)
+      }
+      await this.reloadEntry(entry)
+    })
+  }
+
+  rescan(): Promise<{ added: string[]; removed: string[] }> {
+    return this.serial(async () => this.rescanFiles())
+  }
+
+  upload(filename: string, content: string, overwrite = false): Promise<PluginState> {
+    return this.serial(async () => {
+      const upload = uploadContents(filename, content)
+      const configured = this.app.config.pluginLoader.uploadDir
+      if (!configured) throw new ManagementError(400, 'No upload directory is configured')
+      const root = resolve(configured)
+      await mkdir(root, { recursive: true })
+      const target = join(root, upload.directory ? upload.name : filename)
+      let existing = false
+      try {
+        const info = await lstat(target)
+        if (info.isSymbolicLink()) throw new ManagementError(409, 'Plugin destination is a symbolic link')
+        existing = true
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+      if (existing && !overwrite) throw new ManagementError(409, 'Plugin destination already exists')
+      const old = [...this.files.values()].find(
+        (entry) =>
+          entry.state.source === 'file' &&
+          entry.state.path &&
+          (entry.state.path === target || dirname(entry.state.path) === target),
+      )
+      const staging = await mkdtemp(join(root, '.upload-'))
+      try {
+        if (upload.directory) {
+          for (const [path, bytes] of upload.files) {
+            const destination = resolve(staging, ...path.split('/'))
+            this.ensureInside(staging, destination)
+            await mkdir(dirname(destination), { recursive: true })
+            await writeFile(destination, bytes, { flag: 'wx' })
+          }
+          if (existing) {
+            await this.ensureRealInside(root, target)
+            await rm(target, { recursive: true, force: true })
+          }
+          await rename(staging, target)
+        } else {
+          const temporary = join(staging, filename)
+          await writeFile(temporary, upload.files.get(filename) as Uint8Array, { flag: 'wx' })
+          if (existing) {
+            await this.ensureRealInside(root, target)
+            await rm(target, { recursive: true, force: true })
+          }
+          await rename(temporary, target)
+        }
+      } finally {
+        await rm(staging, { recursive: true, force: true })
+      }
+      if (old) {
+        const newPath = upload.directory
+          ? join(target, upload.files.has('index.ts') ? 'index.ts' : 'index.js')
+          : target
+        if (old.state.path !== newPath) {
+          if (old.state.path) this.files.delete(old.state.path)
+          old.state.path = newPath
+          this.files.set(newPath, old)
+        }
+        try {
+          await this.reloadEntry(old)
+        } catch (error) {
+          await this.unload(old)
+          old.definition = undefined
+          old.failure = 'import'
+          this.setState(old, 'failed', errorMessage(error))
+          await this.reconcile()
+        }
+      } else await this.rescanFiles()
+      const entry = [...this.files.values()].find(
+        (item) => item.state.path && (item.state.path === target || dirname(item.state.path) === target),
+      )
+      if (!entry) throw new ManagementError(400, 'Uploaded plugin entry was not found')
+      if (entry.failure === 'duplicate') {
+        await this.removeEntries([entry])
+        await this.ensureRealInside(root, target)
+        await rm(target, { recursive: true, force: true })
+        await this.reconcile()
+        throw new ManagementError(409, 'Duplicate plugin name')
+      }
+      return { ...entry.state }
+    })
+  }
+
+  uninstall(name: string, purge = false): Promise<void> {
+    return this.serial(async () => {
+      const entry = this.require(name)
+      if (entry.state.source === 'builtin')
+        throw new ManagementError(409, 'Built-in plugins cannot be uninstalled')
+      if (entry.manifest) return this.uninstallPackage(entry.manifest.name, purge, () => {})
+      const path = entry.state.path as string
+      const root = this.dirs.find((dir) => this.isInside(dir, path))
+      if (!root) throw new ManagementError(409, 'Plugin is outside plugin directories')
+      const target = basename(path) === 'index.ts' || basename(path) === 'index.js' ? dirname(path) : path
+      await this.ensureRealInside(root, target)
+      const enabled = entry.state.enabled
+      await this.removeEntries([entry])
+      try {
+        await rm(target, { recursive: true, force: true })
+      } catch (error) {
+        entry.state.enabled = enabled
+        this.entries.set(name, entry)
+        this.files.set(path, entry)
+        await this.reconcile()
+        throw error
+      }
+      if (purge) await this.purge(name)
+      await this.reconcile()
+    })
+  }
+
+  packageInfo(name: string) {
+    const manifest = this.entries.get(name)?.manifest
+    return manifest ? this.packages.info(manifest) : undefined
   }
 
   updateConfig(name: string, value: unknown): Promise<void> {
@@ -186,11 +362,13 @@ export class PluginManager {
     return groupId === undefined || this.app.storage.isGroupEnabled(name, `${event.platform}:${groupId}`)
   }
 
-  private serial(work: () => Promise<void>): Promise<void> {
+  private serial<T>(work: () => Promise<T>): Promise<T> {
     const result = this.queue.then(work)
-    this.queue = result.catch((error: unknown) => {
-      this.app.logger.debug({ err: error }, 'Plugin operation failed')
-    })
+    this.queue = result
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        this.app.logger.debug({ err: error }, 'Plugin operation failed')
+      })
     return result
   }
 
@@ -218,7 +396,7 @@ export class PluginManager {
 
   private add(
     definition: PluginDefinition,
-    source: 'builtin' | 'file',
+    source: 'builtin' | 'file' | 'package',
     path?: string,
     files = new Set<string>(),
     release?: () => void,
@@ -263,14 +441,18 @@ export class PluginManager {
     }
     for (const item of names.sort((a, b) => a.name.localeCompare(b.name))) {
       let path: string | undefined
-      if (item.isFile() && item.name.endsWith('.ts') && !item.name.endsWith('.d.ts'))
+      if (item.isFile() && /\.(ts|js)$/.test(item.name) && !item.name.endsWith('.d.ts'))
         path = join(dir, item.name)
       else if (item.isDirectory()) {
-        const index = join(dir, item.name, 'index.ts')
-        try {
-          if ((await stat(index)).isFile()) path = index
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        for (const index of [join(dir, item.name, 'index.ts'), join(dir, item.name, 'index.js')]) {
+          try {
+            if ((await stat(index)).isFile()) {
+              path = index
+              break
+            }
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+          }
         }
       }
       if (!path || this.files.has(path)) continue
@@ -283,7 +465,9 @@ export class PluginManager {
           throw error
         }
       } catch (error) {
-        const name = basename(path) === 'index.ts' ? basename(resolve(path, '..')) : basename(path, '.ts')
+        const name = /^index\.(ts|js)$/.test(basename(path))
+          ? basename(resolve(path, '..'))
+          : basename(path, extname(path))
         const state: PluginState = {
           name,
           source: 'file',
@@ -299,6 +483,210 @@ export class PluginManager {
         this.app.logger.error({ err: error, path }, 'Failed to import plugin')
       }
     }
+  }
+
+  private isInside(root: string, path: string): boolean {
+    const rel = relative(root, path)
+    return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)
+  }
+
+  private ensureInside(root: string, path: string): void {
+    if (!this.isInside(root, path)) throw new ManagementError(400, 'Path is outside the plugin directory')
+  }
+
+  private async ensureRealInside(root: string, path: string): Promise<void> {
+    const [actualRoot, actualPath] = await Promise.all([realpath(root), realpath(path)])
+    if (!this.isInside(actualRoot, actualPath))
+      throw new ManagementError(409, 'Plugin path is outside its directory')
+  }
+
+  private async purge(name: string): Promise<void> {
+    if (this.configPath) await deleteConfigValue(this.configPath, ['plugins', name])
+    delete this.app.config.plugins[name]
+    this.app.storage.purgePlugin(name)
+    const path = join(this.app.config.dataDir, 'plugins', name)
+    try {
+      await this.ensureRealInside(this.app.config.dataDir, path)
+      await rm(path, { recursive: true, force: true })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+
+  private async removeEntries(entries: Entry[]): Promise<void> {
+    for (const entry of entries) entry.state.enabled = false
+    await this.reconcile()
+    for (const entry of entries) {
+      if (this.entries.get(entry.state.name) === entry) this.entries.delete(entry.state.name)
+      const duplicate = this.duplicates.indexOf(entry)
+      if (duplicate !== -1) this.duplicates.splice(duplicate, 1)
+      if (entry.state.path) this.files.delete(entry.state.path)
+      entry.release?.()
+    }
+  }
+
+  private async rescanFiles(): Promise<{ added: string[]; removed: string[] }> {
+    const previous = new Set(this.files.keys())
+    const missing: Entry[] = []
+    for (const [path, entry] of this.files) {
+      if (entry.state.source !== 'file') continue
+      try {
+        if (!(await stat(path)).isFile()) missing.push(entry)
+      } catch (error) {
+        if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error
+        missing.push(entry)
+      }
+    }
+    if (missing.length) await this.removeEntries(missing)
+    for (const dir of this.dirs) await this.discover(dir)
+    await this.reconcile()
+    return {
+      added: [...this.files]
+        .filter(([path, entry]) => !previous.has(path) && entry.state.source === 'file')
+        .map(([, entry]) => entry.state.name),
+      removed: missing.map((entry) => entry.state.name),
+    }
+  }
+
+  private installedPackages(): Map<string, { manifest: PackageManifest; plugin: string }> {
+    const result = new Map<string, { manifest: PackageManifest; plugin: string }>()
+    for (const entry of this.entries.values()) {
+      if (entry.manifest)
+        result.set(entry.manifest.name, { manifest: entry.manifest, plugin: entry.state.name })
+    }
+    return result
+  }
+
+  private async packageEntry(manifest: PackageManifest): Promise<string> {
+    if (manifest.type !== 'module') throw new ManagementError(400, 'Plugin package must be ESM')
+    const select = (value: unknown): string | undefined => {
+      if (typeof value === 'string') return value
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          const found = select(item)
+          if (found) return found
+        }
+      } else if (value && typeof value === 'object') {
+        for (const [condition, item] of Object.entries(value)) {
+          if (['import', 'node', 'default'].includes(condition)) {
+            const found = select(item)
+            if (found) return found
+          }
+        }
+      }
+      return undefined
+    }
+    let exports = manifest.exports
+    if (
+      exports &&
+      typeof exports === 'object' &&
+      !Array.isArray(exports) &&
+      Object.keys(exports).some((key) => key.startsWith('.'))
+    )
+      exports = (exports as Record<string, unknown>)['.']
+    const target = manifest.exports === undefined ? (manifest.main ?? 'index.js') : select(exports)
+    if (!target || !/\.(?:js|mjs)$/.test(target))
+      throw new ManagementError(400, 'Plugin package entry must be JavaScript')
+    const root = join(this.packages.dir, 'node_modules', ...manifest.name.split('/'))
+    const path = resolve(root, target)
+    this.ensureInside(root, path)
+    await this.ensureRealInside(root, path)
+    return path
+  }
+
+  private async addPackage(manifest: PackageManifest, existing?: Entry): Promise<Entry> {
+    const path = await this.packageEntry(manifest)
+    const imported = await importPlugin(path)
+    try {
+      const definition = validateDefinition(imported.value)
+      const conflict = this.entries.get(definition.name)
+      if (conflict && conflict !== existing)
+        throw new ManagementError(409, `Duplicate plugin name "${definition.name}"`)
+      if (existing?.definition && definition.name !== existing.state.name)
+        throw new ManagementError(409, 'Updated package changed its plugin name')
+      if (!existing) {
+        const entry = this.add(definition, 'package', path, imported.files, imported.release)
+        entry.manifest = manifest
+        return entry
+      }
+      const oldPath = existing.state.path
+      const oldManifest = existing.manifest
+      existing.state.path = path
+      existing.manifest = manifest
+      // reloadEntry imports the validated path and cascades to dependents.
+      try {
+        await this.reloadEntry(existing)
+      } catch (error) {
+        existing.state.path = oldPath
+        existing.manifest = oldManifest
+        throw error
+      }
+      if (oldPath) this.files.delete(oldPath)
+      this.files.set(path, existing)
+      imported.release()
+      return existing
+    } catch (error) {
+      imported.release()
+      throw error
+    }
+  }
+
+  private async installPackage(
+    manifest: PackageManifest,
+    kind: 'install' | 'update',
+    log: (line: string) => void,
+  ): Promise<PluginState> {
+    const previous = [...this.entries.values()].find((entry) => entry.manifest?.name === manifest.name)
+    if (kind === 'update' && !previous) throw new ManagementError(404, 'Package is not installed')
+    const oldManifest = previous?.manifest
+    const spec = `${manifest.name}@${kind === 'update' ? 'latest' : manifest.version}`
+    await this.packages.runNpm(this.packages.installArgs(spec), log)
+    try {
+      const installed = await this.packages.manifest(manifest.name)
+      if (
+        installed.name !== manifest.name ||
+        installed.version !== manifest.version ||
+        !installed.keywords?.includes('asabot-plugin')
+      )
+        throw new ManagementError(409, 'Installed package does not match registry metadata')
+      const entry = await this.addPackage(installed, previous)
+      await this.reconcile()
+      return { ...entry.state }
+    } catch (error) {
+      try {
+        if (oldManifest)
+          await this.packages.runNpm(
+            this.packages.installArgs(`${oldManifest.name}@${oldManifest.version}`),
+            log,
+          )
+        else
+          await this.packages.runNpm(
+            ['uninstall', manifest.name, '--ignore-scripts', '--no-audit', '--no-fund'],
+            log,
+          )
+      } catch (rollback) {
+        throw new Error(`${errorMessage(error)}; npm rollback failed: ${errorMessage(rollback)}`)
+      }
+      throw error
+    }
+  }
+
+  private async uninstallPackage(name: string, purge: boolean, log: (line: string) => void): Promise<void> {
+    const entry = [...this.entries.values()].find((item) => item.manifest?.name === name)
+    if (!entry) throw new ManagementError(404, 'Package is not installed')
+    const enabled = entry.state.enabled
+    await this.removeEntries([entry])
+    try {
+      await this.packages.runNpm(['uninstall', name, '--ignore-scripts', '--no-audit', '--no-fund'], log)
+    } catch (error) {
+      entry.state.enabled = enabled
+      this.entries.set(entry.state.name, entry)
+      if (entry.state.path) this.files.set(entry.state.path, entry)
+      await this.reconcile()
+      throw error
+    }
+    if (purge) await this.purge(entry.state.name)
+    await this.reconcile()
   }
 
   private ordered(): Entry[] {
@@ -482,6 +870,7 @@ export class PluginManager {
   private async handleChange(dir: string, path: string): Promise<void> {
     const removed: Entry[] = []
     for (const [entryPath, entry] of this.files) {
+      if (entry.state.source !== 'file') continue
       try {
         if (!(await stat(entryPath)).isFile()) removed.push(entry)
       } catch (error) {

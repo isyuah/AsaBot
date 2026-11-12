@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { z } from 'zod'
 import { parseDuration } from '../utils/duration.ts'
 
@@ -38,7 +39,17 @@ const dispatchSchema = z
 const pluginLoaderSchema = z
   .object({
     dirs: z.array(z.string()).default(['./plugins']),
+    uploadDir: z.string().min(1).optional(),
     hotReload: z.union([z.literal('auto'), z.boolean()]).default('auto'),
+  })
+  .strict()
+
+const packagesSchema = z
+  .object({
+    dir: z.string().min(1).optional(),
+    registry: z.url().default('https://registry.npmjs.org'),
+    npm: z.string().min(1).default('npm'),
+    installTimeout: durationSchema.default(300_000),
   })
   .strict()
 
@@ -67,9 +78,18 @@ export const configSchema = z
     dispatch: dispatchSchema.default(() => dispatchSchema.parse({})),
     adapters: z.record(z.string(), z.unknown()).default({}),
     pluginLoader: pluginLoaderSchema.default(() => pluginLoaderSchema.parse({})),
+    packages: packagesSchema.default(() => packagesSchema.parse({})),
     plugins: z.record(z.string(), pluginEntrySchema).default({}),
     server: serverSchema.default(() => serverSchema.parse({})),
   })
   .strict()
+  .transform((config) => ({
+    ...config,
+    pluginLoader: {
+      ...config.pluginLoader,
+      uploadDir: config.pluginLoader.uploadDir ?? config.pluginLoader.dirs[0],
+    },
+    packages: { ...config.packages, dir: config.packages.dir ?? join(config.dataDir, 'packages') },
+  }))
 
 export type Config = z.output<typeof configSchema>

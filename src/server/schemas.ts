@@ -48,3 +48,17 @@ export const accessSchema = z.object({
   subject: z.enum(['user', 'group']),
   key: z.string().regex(/^[^:\s]+:[^\s]+$/, 'Expected platform:id'),
 })
+
+export const uploadSchema = z.object({
+  filename: z.string(),
+  content: z.string(),
+  overwrite: z.boolean().optional(),
+})
+export const purgeSchema = z.object({ purge: z.boolean() })
+export const packageInstallSchema = z.object({
+  name: z.string(),
+  version: z.string().optional(),
+  force: z.boolean().optional(),
+})
+export const packageNameSchema = z.object({ name: z.string() })
+export const packageUninstallSchema = z.object({ name: z.string(), purge: z.boolean() })

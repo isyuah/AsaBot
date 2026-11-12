@@ -57,3 +57,21 @@ export async function writeConfigValue(
     throw new ConfigError(`Unable to write configuration file "${path}"`, { cause: error })
   }
 }
+
+export async function deleteConfigValue(path: string, keyPath: string[]): Promise<void> {
+  const source = await readFile(path, 'utf8')
+  const document = parseDocument(source, { uniqueKeys: true })
+  if (document.errors.length) throw new ConfigError(`Unable to read configuration file "${path}"`)
+  if (!document.hasIn(keyPath)) return
+  document.deleteIn(keyPath)
+  const temporary = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`)
+  try {
+    await writeFile(temporary, document.toString({ flowCollectionPadding: false }), { flag: 'wx' })
+    await rename(temporary, path)
+  } catch (error) {
+    await unlink(temporary).catch((cleanupError: NodeJS.ErrnoException) => {
+      if (cleanupError.code !== 'ENOENT') throw cleanupError
+    })
+    throw new ConfigError(`Unable to write configuration file "${path}"`, { cause: error })
+  }
+}

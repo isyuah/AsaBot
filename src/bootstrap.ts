@@ -5,6 +5,7 @@ import { formatIssuePath } from './core/config/load.ts'
 import type { Config } from './core/config/schema.ts'
 import { ConfigError } from './core/errors.ts'
 import { createLogger } from './core/logger.ts'
+import type { PackageOptions } from './core/plugin/packages.ts'
 import { createAdminPlugin } from './plugins/admin.ts'
 import { createHelpPlugin } from './plugins/help.ts'
 import { createStatusPlugin } from './plugins/status.ts'
@@ -13,11 +14,13 @@ import { HttpServer } from './server/index.ts'
 export interface CreateAppOptions {
   logger?: Logger
   configPath?: string
+  packages?: PackageOptions
 }
 
 export function createApp(config: Config, options: CreateAppOptions = {}): App {
   const app = new App(config, options.logger ?? createLogger({ level: config.logLevel }), {
     configPath: options.configPath,
+    packages: options.packages,
   })
   app.plugins.register(createHelpPlugin(app))
   app.plugins.register(createStatusPlugin(app))

@@ -153,6 +153,29 @@ export class Storage {
       .map((row) => ({ groupKey: String(row.group_key), enabled: row.enabled === 1 }))
   }
 
+  purgePlugin(owner: string): void {
+    const db = this.db
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      db.exec('PRAGMA defer_foreign_keys = ON')
+      for (const table of ['kv', 'migrations', 'plugin_group_state']) {
+        db.prepare(`DELETE FROM ${table} WHERE plugin = ?`).run(owner)
+      }
+      const prefix = `p_${owner}_`
+      for (const row of db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()) {
+        const name = String(row.name)
+        if (name.startsWith(prefix)) db.exec(`DROP TABLE IF EXISTS "${name.replaceAll('"', '""')}"`)
+      }
+      db.exec('COMMIT')
+    } catch (error) {
+      db.exec('ROLLBACK')
+      throw error
+    }
+    for (const key of this.groups.keys()) {
+      if ((JSON.parse(key) as string[])[0] === owner) this.groups.delete(key)
+    }
+  }
+
   allows(event: DispatchEvent): boolean {
     const userId = 'userId' in event ? event.userId : undefined
     const groupId = 'groupId' in event ? event.groupId : undefined
