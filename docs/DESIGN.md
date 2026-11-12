@@ -1007,6 +1007,436 @@ export default definePlugin({ name: 'shop', inject: ['coins'], setup(ctx) { cons
   - 版本下拉框中标出兼容的版本。
   - 搜索框旁边增加排序切换。
 
+## 24. 批次 4（插件生态与运营）
+
+本节修订前面相关章节，以本节为准。新增的公开名称都从框架包导出（包名见 24.12）。
+
+**放在哪一层**：只有通用、或者用插件不好表达的能力才进核心；其余能力尽量做成内置插件，或者做成官方插件包。
+| 位置 | 条目 |
+|---|---|
+| 核心 | I1 能力声明与统一降级、F3 推送目标、F4 命令增强、F5 过滤上下文与按群配置、F12 平台 API 拦截、G1 指令覆盖、G2 的分发追踪、F10 插件面板页的宿主、A9/A10 的小扩展 |
+| 内置插件（随框架发布，可在 `plugins:` 中停用） | `http`（F8）、`history`（G2 的消息记录）、`long-message`（G6） |
+| 官方插件包（单独发布，按需安装） | `@asabot/plugin-render`（F2）。依赖体积约 40MB（satori、resvg 原生模块、中文字体），不适合打进框架本体 |
+| 服务端与面板 | G3 群组规则页、G4 调试台、G1 指令管理页、F10 插件页面、G2 消息记录页 |
+
+### 24.1 I1 能力声明与统一降级（修订 5、7、8）
+
+**能力声明**
+```ts
+interface BotCapabilities {
+  segments: readonly string[]       // 能原生发送的段类型；平台专属段写成 '<platform>:*' 表示整个命名空间
+  textStyles: readonly TextStyle[]  // text 段 style 中能原样呈现的样式
+  actions: readonly string[]        // 支持的 Bot 方法名，例如 'sendForward'、'muteMember'
+}
+interface Bot { readonly capabilities: BotCapabilities /* ……原有成员 */ }
+function supports(bot: Bot, feature: string): boolean   // feature 是段类型或 Bot 方法名
+```
+- 能力按 Bot 实例声明，因为同一协议的不同实现能力可能不同；适配器最晚在 Bot 上线时确定能力。
+- 方法不在 `actions` 中时，调用照旧抛 `UnsupportedError`。`supports()` 只是让插件和框架可以提前判断。
+- OneBot 11：`segments` 为 text、at、face、image、audio、video、file、reply、forward 和 `onebot11:*`；`textStyles` 为空；`actions` 包含第 7、22 节的全部中立方法。
+- 虚拟适配器：默认支持全部中立段、全部样式和全部方法，可以通过构造选项 `capabilities` 覆盖。`createTestApp({ capabilities })` 和调试台（24.11）都用它模拟能力较弱的平台。
+- 面板的 `BotView` 新增 `capabilities`，机器人页展示能力表。
+
+**IR 扩充**（第 5 节新增，仍是扁平的段列表）
+```ts
+type TextStyle = 'bold' | 'italic' | 'underline' | 'strike' | 'code' | 'spoiler'
+| { type: 'text'; data: { text: string; style?: TextStyle[] } }
+| { type: 'markdown'; data: { content: string } }
+| { type: 'button'; data: { label: string; kind: 'link' | 'command'; value: string } }  // link：value 为 URL；command：value 为点按后要发送或填入的文本
+```
+- 构造器：`seg.text(text, style?)`、`seg.markdown(content)`、`seg.button(label, { link } | { command })`。
+- 按钮点击回调需要新的事件模型，等接入支持回调按钮的平台时再加。
+
+**平台专属段的命名空间**
+- 中立段以外的类型一律写成 `<platform>:<type>`，例如 `onebot11:json`、`onebot11:mface`。收发两个方向使用同一名称：OneBot 适配器入站时加前缀，出站时去掉前缀；CQ 码解析的结果同样带前缀。
+- 不带命名空间、又不属于中立段的类型视为插件错误。降级时丢弃这类段，并记 warn。
+
+**统一降级**（`src/core/message/lower.ts`）
+- `App.prepareOutgoing` 的顺序改为：先执行发送前钩子（A9），再按目标 Bot 的能力做降级，最后交给适配器编码。合并转发的每个节点分别降级。
+- 钩子内部发出的消息会跳过钩子，但仍然要经过降级。
+- 降级规则集中在这一处，只测一次。只降级不在 `segments` 中的段：
+  | 段 | 降级结果 |
+  |---|---|
+  | text 的 style | 去掉不支持的样式 |
+  | markdown | 去掉标记后的纯文本：标题和列表保留文字，`**x**`、`` `x` `` 去掉符号，`[t](u)` 写成 `t (u)`，代码块保留内容 |
+  | button | link 写成 `label: URL`，command 写成 `label：发送 value` |
+  | at | `@<id>` |
+  | face | `[表情]` |
+  | image / audio / video | `[图片]` / `[语音]` / `[视频]` |
+  | file | `[文件 name]` |
+  | forward | `[合并转发]` |
+  | reply | 丢弃 |
+  | 其他平台的命名空间段 | 丢弃 |
+- 降级后相邻的 text 段合并。降级后消息为空时，发送以 `UnsupportedError(platform, '发送 <段类型>')` 失败。发生降级时记 debug 日志，列出被降级的段类型。
+- `bot.message.sent` 里带的是降级后的最终内容。
+
+### 24.2 A9、A10 的扩展
+
+**发送前钩子代为发送**：`BeforeSend` 的返回值新增 `{ sent: SendResult }`。
+- 含义：钩子已经用别的方式把内容发出去了，例如改成合并转发或分段发送。
+- 后续钩子不再执行，适配器也不再发送原消息，原调用直接以这个结果 resolve。
+- 钩子自己发出的消息各自派发 `bot.message.sent`。
+- `AdapterHost.prepareOutgoing` 的返回值相应改为 `Message | { sent: SendResult }`。
+
+**可选服务**：`definePlugin` 的 `inject` 改为接受 `string[] | { required?: string[]; optional?: string[] }`，数组形式等同于 `required`。
+- 可选服务缺失时，插件照常加载。`ctx.injectOptional(name)` 返回服务实例或 `undefined`；对没有在 `optional` 中声明的名称调用时，直接抛错。
+- 可选服务的提供方出现、消失或重载时，使用方级联重载，因此插件在 setup 中拿到的引用始终有效。
+- 面板插件视图的 `inject` 改为 `{ name: string; optional: boolean }[]`。
+
+### 24.3 F3 推送目标（修订 6、7、18）
+
+```ts
+interface Target { platform: string; selfId?: string; type: 'group' | 'private'; id: string }
+session.target: Target                          // 带 selfId
+ctx.send(target: Target | string, content: Sendable): Promise<SendResult>
+ctx.broadcast(targets: (Target | string)[], content: Sendable, options?: { interval?: Duration }): Promise<{ target: Target; result?: SendResult; error?: Error }[]>
+formatTarget(target): string                    // 'platform:type:id'，带 selfId 时为 'platform:selfId:type:id'（与 channelKey 一致）
+parseTarget(text): Target                       // 第二段是 group/private 时按三段解析，否则按四段解析；最后一段之后的内容都属于 id
+targetSchema                                    // zod：接受上面的字符串或对象，输出 Target，供插件配置使用
+```
+- **选择 Bot**：
+  - 指定了 `selfId` 时，只用这个 Bot；它不在线时抛 `NoBotOnlineError`。
+  - 没有指定时，用该平台第一个在线的 Bot。
+- `broadcast` 逐个发送：单个目标失败不影响其余目标，失败记在对应结果的 `error` 中。`interval` 默认为 0，各 Bot 的发送队列照常限速。
+- `Target` 是可以序列化的普通对象，可以直接存进 KV 或持久任务（A6）。`MessageTarget { type, id }` 仍然用于 Bot 自己的方法。
+- 面板的 `/send` 和对外 API 的 `/api/v1/send` 请求体改为 `{ target: Target | string, message }`，不再接受单独的 `platform`、`selfId` 字段。
+
+### 24.4 F4 命令增强（修订 9、10）
+
+- **新类型**：
+  - `posint`：正整数；
+  - `natural`：非负整数；
+  - `date`：返回 `Date`，接受 `YYYY-MM-DD`、`YYYY-MM-DD HH:mm`、`MM-DD`、`HH:mm`，省略的部分取 `timezone` 下的今天。
+- **枚举**：类型位置写成 `on|off`，例如 `<mode:on|off>`，选项中同样可以这样写。推断出的类型是 `'on' | 'off'`，输入不在列表中时报参数错误，并列出可选值。
+- **约束**：参数用 `.arg(name, settings)` 设置约束，选项在 `.option(name, spec, settings)` 的 `settings` 中设置，两者的字段相同：
+  ```ts
+  { description?: string; min?: number; max?: number; pattern?: RegExp; validate?: (value) => true | string }
+  ```
+  - `min`、`max` 用于数值类型，包含边界；`pattern` 用于 `string` 类型。
+  - `validate` 返回字符串时，把它作为错误原因回复给用户。
+  - `.arg` 指定了未声明的参数名时，注册直接抛错。
+  - 错误文案集中放在 `messages.ts`。
+  - 参数说明会显示在 help 的命令详情中。
+- **匹配器上下文**：`MatchHandler` 改为 `(context: { session; signal; match?: RegExpExecArray }) => …`。pattern 为 RegExp 时，`match` 是对 `session.text` 的匹配结果。现有调用点全部改用新签名。
+- **相似命令提示**：新增配置 `command.suggest: 'off' | 'direct' | 'always'`，默认 `direct`。
+  - 触发条件：命令没有匹配上，且没有任何匹配器命中，并且满足下面之一：
+    - `direct`：私聊、`toMe`；
+    - `always`：再加上所有带前缀的消息。
+  - 比较方式：取第一个 token，与当前会话可见的命令名和别名比较（与 help 的可见规则相同）。编辑距离不超过 1（名称不超过 4 个字符时）或不超过 2（更长的名称），且只有唯一的最近结果时，回复 `没有这个命令，你是不是想用 /xxx？`。
+  - 只给出提示，不自动执行。
+  - 设置页的 `command` 表单增加这一项。
+
+### 24.5 F5 过滤上下文与按群配置（修订 9、12、20.3）
+
+**过滤上下文**
+```ts
+ctx.filter(predicate: (event: DispatchEvent) => boolean): FilteredContext
+ctx.platform(...names: string[]): FilteredContext
+groupKeyOf(event): string | undefined           // `${platform}:${groupId}`；没有 groupId 时为 undefined
+```
+- `FilteredContext` 只提供 `on`、`middleware`、`command`、`match`、`filter`、`platform`。多次过滤是“且”的关系。资源仍然归原插件所有，随插件卸载回收。
+- 实现方式：`Scope` 新增可选的 `filter`。观察者、中间件、命令、匹配器在执行前都检查它；`listCommands`、help 和相似命令提示也按它过滤。
+- 带过滤的命令仍然占用全局的命令路径，两个插件不能用互不相交的过滤条件注册同名命令。
+
+**按群配置覆盖**
+- `ctx.configFor(target: string | { platform: string; groupId?: string }): Readonly<Config>`：返回该群的有效配置。
+  - 字符串参数表示 groupKey。传入私聊会话（没有 groupId）时，返回全局配置。
+- **覆盖方式**：只覆盖顶层键。有效配置等于 `schema.parse({ ...全局配置的原始输入, ...覆盖项 })`，结果按 groupKey 缓存，配置变更时失效。
+- **存储**：新表 `plugin_group_config(plugin, group_key, config)`，config 为 JSON，通过新增一步 core 迁移创建。purge 时删除该插件的行。
+- 修改覆盖项不会重载插件，只有通过 `configFor` 读取的代码会生效；插件在 setup 中读取的全局配置不受影响。
+- 全局配置变更导致某个群的合并结果不再有效时：该群回落到全局配置，并且每个群只记一次 warn。
+- **PluginManager**：
+  - `getGroupConfig(name, groupKey)`；
+  - `setGroupConfig(name, groupKey, override | null)`：先对合并结果做校验，失败抛 `PluginConfigError`，带上字段路径；
+  - 插件没有声明 config schema 时，拒绝设置覆盖项。
+
+### 24.6 F12 平台 API 拦截
+
+```ts
+ctx.interceptApi(
+  (call: { bot: Bot; method: string; args: unknown[] }, next: () => Promise<unknown>) => Promise<unknown>,
+  { priority?: number },
+): Disposer
+```
+- 采用洋葱模型：
+  - 在 `next()` 之前可以修改 `call.args`；
+  - 在 `next()` 之后可以修改返回值；
+  - 不调用 `next()` 时，直接返回模拟结果；
+  - 抛出的异常原样传给调用方。
+- 按 priority 降序执行，同一优先级按注册顺序。
+- **覆盖范围**：Bot 的所有中立方法，加上 `call`。Session 的 `send` 和 `reply` 按 `sendGroup` / `sendPrivate` 计入；平台专属封装（例如 `bot.onebot.*`）内部统一走 `bot.call`，因此以 `call` 的形式出现。
+- **实现位置**：`registerBot` 时，core 在 Bot 实例上原地包装这些方法。适配器在事件中放入的是同一个实例，所以无论从哪里拿到 Bot 引用，调用都会经过拦截器。
+- **执行顺序**：发送类调用先经过拦截器，再在适配器内部经过发送前钩子和降级。
+- 拦截器内部发起的 API 调用不再经过拦截器（用 AsyncLocalStorage 标记，与 A9 相同）。
+
+### 24.7 G1 指令覆盖（修订 10、18）
+
+```yaml
+command:
+  prefixes: ['/']
+  suggest: direct
+  overrides:                       # 键为命令的主路径
+    'plugin reload': { permission: superuser }
+    echo: { enabled: false }
+    weather: { aliases: [天气预报], cooldown: { duration: 30s, scope: group } }
+```
+```ts
+type CommandOverride = {
+  enabled?: boolean
+  aliases?: string[]                                  // 追加的别名（完整路径）
+  permission?: 'everyone' | 'superuser' | 'group.admin' | 'group.owner'   // 替换插件声明的权限；everyone 表示不限制
+  cooldown?: { duration: Duration; scope?: 'user' | 'group' | 'global' } | false   // false 表示取消冷却
+  hidden?: boolean
+}
+```
+- 覆盖项在运行时生效，分发器在匹配时读取当前值。修改覆盖项不重载插件。
+- 停用的命令对所有人（包括超管）都等于不存在：消息会继续交给匹配器处理。
+- **别名冲突**：追加的别名与现有路径冲突时，跳过这个别名并记 warn，冲突原因写进 `CommandView.overrideIssues`；插件的加载不受影响。
+- 尚未注册的命令，它的覆盖项保留在配置里，等插件加载后生效。
+- **按群停用命令**：新表 `command_group_state(command, group_key, enabled)`，由 core 迁移创建。
+- **接口**：
+  - `CommandView` 新增 `override?: CommandOverride`、`disabledGroups: string[]`、`overrideIssues: string[]`；
+  - `PUT /commands/override { path, override: CommandOverride | null }`：写回 YAML `command.overrides.<path>`（null 表示删除），返回最新的 `CommandView`；
+  - `PUT /commands/groups { path, groupKey, enabled }`；
+  - 命令路径包含空格，所以放在请求体中传递。
+- 设置接口（C4）的 `command` 不包含 `overrides`，覆盖项只通过上面的接口修改。
+- **面板**：命令页增加启用开关和编辑抽屉，可以编辑别名、权限、冷却和隐藏。
+
+### 24.8 G2 分发追踪与消息记录（修订 6、9、14）
+
+**核心：追踪**
+```ts
+type TraceStep = {
+  stage: 'filter' | 'observer' | 'middleware' | 'prompt' | 'command' | 'matcher' | 'suggest'
+  plugin?: string; command?: string
+  outcome: 'handled' | 'passed' | 'blocked' | 'denied' | 'cooldown' | 'invalid' | 'error' | 'timeout'
+  duration: number; error?: string
+}
+type DispatchTrace = {
+  eventId: string; name: string; platform: string; selfId: string
+  channel?: string                // channelKey
+  userId?: string
+  time: number; duration: number
+  steps: TraceStep[]
+  sent: string[]                  // 处理过程中发出的消息 ID
+}
+```
+- **记录哪些步骤**：只记录实际执行过的处理器，跳过的不记录。
+  - 匹配器只记命中的；中间件调用了 `next` 记为 `passed`，否则记为 `handled`。
+  - 被黑名单拦下的事件只有一步：`filter` / `blocked`。
+  - 被 prompt 消费的消息记为 `prompt`，`plugin` 填等待中的那个插件。
+  - `invalid` 表示参数错误。
+- **派发时机**：一次分发（包括观察者）全部结束后，派发内部事件 `dispatch.trace`，事件体为 `{ trace }`，`EventMap` 中有对应类型。内部事件和 meta 事件不产生追踪，`dispatch.trace` 自身也不会被追踪。
+- **事件上下文**：分发器在调用处理器时，用 AsyncLocalStorage 记录当前的 eventId。
+  - 发出的消息据此关联到触发它的事件：`bot.message.sent` 新增 `eventId?`，同时写入 trace 的 `sent`。
+  - logger 用 pino 的 `mixin` 给处理期间的每条日志加上 `eventId`，`LogRecord` 也相应带上这个字段。
+- **面板日志页**：可以按 eventId 筛选日志。
+
+**内置插件 `history`**（`src/plugins/history.ts`）
+- **记录内容**：收到的消息（`message.*` 会话）、发出的消息（`bot.message.sent`），以及 `dispatch.trace`。
+  - 表通过 `ctx.migrate` 创建：`p_history_messages`（自增 id、event_id、direction、platform、self_id、channel、user_id、nickname、message_id、message JSON、text、time）和 `p_history_traces`（event_id 主键、trace JSON、time）。
+  - 消息中的 `base64://` 内容只保留前 64 个字符和原始长度，避免撑大数据库。
+- **配置**：`retention: 7d`、`maxMessages: 100000`、`ignorePlatforms: ['virtual']`（默认不记录调试台的消息）。每小时清理一次过期数据和超出上限的旧数据。
+- **服务 `history`**：
+  - `query({ channel?, userId?, before?, limit?, q? })` 返回按时间倒序的消息；
+  - `trace(eventId)` 返回对应的追踪记录。
+- **面板接口**（通过 F10 的 `ctx.panel.route`，需要登录）：
+  - `GET /channels`：最近有消息的会话，带最后一条消息的预览；
+  - `GET /messages?channel=&before=&limit=&q=`；
+  - `GET /traces/:eventId`；
+  - `GET /export?channel=`：导出 JSONL。
+- **面板**：原生页面“消息记录”，由我编写，插件处于 active 时显示。左侧是会话列表，右侧是消息流；点击收到的消息可以展开查看它的处理链，以及这次处理产生的日志。
+
+### 24.9 F10 插件面板页（修订 12、18、19）
+
+```ts
+ctx.panel.page({ title: string; icon?: string; root: URL | string; entry?: string })   // root 为静态文件目录，entry 默认 index.html；每个插件最多一个页面
+ctx.panel.route((app: Hono) => void)                // 挂在 /api/panel/ext/<name>/*，需要面板登录，CSRF 规则与其他面板接口相同
+ctx.panel.push(topic: string, data: unknown)        // 通过面板实时推送发出 { type: 'plugin-event', plugin, topic, data }
+```
+- **静态文件**：通过 `/plugin-pages/<name>/*` 提供。
+  - 不需要登录，因为沙箱 iframe 的请求不会带上 cookie。文档要求页面文件中不能放敏感数据，数据一律通过 `panel.route` 获取。
+  - 响应头带 `Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups`，即使有人直接打开这个地址，页面也处在沙箱中。另带 `Access-Control-Allow-Origin: *`，保证沙箱页面能加载模块脚本。
+  - 路径穿越检查与插件上传相同。
+- **面板宿主**：
+  - 路由为 `/pages/<name>`，用 `<iframe sandbox="allow-scripts allow-forms allow-popups">` 加载页面，不给 `allow-same-origin`，页面因此读不到面板的 cookie 和 DOM。
+  - 侧边栏增加“插件页面”分组。
+  - `PluginView` 新增 `page?: { title: string; icon?: string }`。
+- **桥接协议**（postMessage；宿主只处理 `event.source` 是该 iframe 的消息）：
+  - 页面 → 宿主：
+    - `{ asabot: 1, id, kind: 'fetch', path, method, body? }`：宿主带 cookie 请求 `/api/panel/ext/<name><path>`，然后回复 `{ asabot: 1, id, status, body }`；
+    - `{ asabot: 1, kind: 'toast', text, level? }`：在面板中显示提示。
+  - 宿主 → 页面：
+    - `{ asabot: 1, kind: 'theme', mode, tokens }`：加载完成和主题切换时发送；
+    - `{ asabot: 1, kind: 'event', topic, data }`：转发该插件的 `plugin-event`。
+- **客户端 SDK**：框架在 `/plugin-pages/_sdk.js` 提供，包含：
+  - `asabot.fetch(path, init)`、`asabot.on(topic, fn)`、`asabot.toast(text)`；
+  - 自动把主题变量写到 `:root`，插件页面直接使用面板的配色。
+- 内置插件（例如 history）的页面由面板原生实现，但数据接口同样走 `ctx.panel.route`。
+
+### 24.10 G3 群组规则（修订 18、19）
+
+- **`GET /groups`** 返回 `GroupView[]`：
+  ```ts
+  { groupKey, platform, groupId, name?, bots: string[], rules: { plugins: number; configs: number; commands: number }, access?: 'block' | 'allow' }
+  ```
+  - 群列表合并两个来源：在线 Bot 的群列表（缓存 5 分钟，`?refresh=1` 时强制刷新），以及在 `plugin_group_state`、`plugin_group_config`、`command_group_state` 中出现过的 groupKey。
+- **`GET /groups/:groupKey`** 返回：
+  ```ts
+  { group: GroupView; plugins: { name; enabled: boolean; configurable: boolean; override?: unknown }[]; commands: { path; owner; enabled: boolean }[] }
+  ```
+- **修改**：
+  - `PUT /plugins/:name/groups/:groupKey { enabled?, config?: object | null }`：配置覆盖项校验失败时返回 400，`issues` 带字段路径；
+  - `PUT /commands/groups`（见 24.7）；
+  - 访问控制沿用 `/acl`。
+- `GET /plugins/:name/groups` 返回 `{ groupKey, enabled?, config? }[]`，只列出有设置的群。
+- **面板**：新增“群组”页面。点开某个群后有三个分区：
+  - 插件：开关，以及配置覆盖表单。表单预填有效配置，保存时只提交与全局配置不同的顶层键。
+  - 命令：开关。
+  - 访问控制：拉黑或加入白名单。
+
+### 24.11 G4 调试台（修订 18）
+
+- **`POST /playground`**：
+  - 请求新增 `capabilities?: Partial<BotCapabilities>`，用来模拟能力较弱的平台。
+  - 响应改为：
+    ```ts
+    { incoming: { messageId }; replies: { messageId; message: Segment[]; text: string }[]; actions: { action: string; params: Record<string, unknown> }[]; traces: DispatchTrace[]; logs: LogRecord[] }
+    ```
+    - `actions` 是虚拟 Bot 在这次处理中记录的群管理等操作；
+    - `traces` 和 `logs` 包含这次请求触发的所有事件。
+  - 收发的消息都有 messageId，面板可以引用之前的消息（reply 段），虚拟 Bot 的 `getMessage` 能查到这些消息。
+- **`POST /playground/event { name, user, group?, fields? }`**：模拟通知和请求事件，响应格式同上。
+  - 支持的 name：`notice.member.join`、`notice.member.leave`、`notice.member.mute`、`notice.poke`、`notice.message.recall`、`request.friend`、`request.group.join`、`request.group.invite`。
+  - 请求事件被 `approve` / `reject` 时，记入 `actions`。
+- 消息段仍然遵守 E2：图片以 `base64://` 上传，单个请求不超过 2MB。
+- **面板**：
+  - 输入区支持粘贴或选择图片、@ 某个用户、引用某条消息，以及从菜单发送通知或请求；
+  - 气泡中渲染图片；
+  - 每次回复下面可以展开处理链和日志；
+  - 有一个开关用来模拟纯文本平台。
+
+### 24.12 F1 发布与起步（修订 2、3、20.2）
+
+- **包名**：
+  - 框架发布为 `@asabot/core`，子路径不变：`@asabot/core/testing`、`@asabot/core/onebot11`、`@asabot/core/onebot11/testing`。
+  - 仓库内所有 `from 'asabot'` 改为 `from '@asabot/core'`，`declare module 'asabot'` 同样改。
+  - 插件包的 `peerDependencies` 改为声明 `@asabot/core`。加载钩子保证 `@asabot/core` 解析到当前运行的框架实例。
+  - 第三方插件包继续使用 `asabot-plugin-*` 命名和 `asabot-plugin` 关键词；官方插件包命名为 `@asabot/plugin-*`，同样带这个关键词。
+- **构建**：
+  - 仓库内的开发方式不变，仍然直接运行 `.ts`。
+  - `pnpm build` 依次执行：构建面板（`web/dist`）；`tsc -p tsconfig.build.json --outDir dist --declaration --rewriteRelativeImportExtensions`，只包含 `src`，排除测试文件。
+  - 发布用的 `exports`、`bin` 放在 `publishConfig` 中，`pnpm publish` 时替换成 dist 路径；`files` 为 `dist`、`web/dist`、README、LICENSE、`asabot.config.example.yaml`。
+  - 服务端按模块相对路径 `../../web/dist` 查找面板，这个相对路径在仓库和发布包中都成立。
+- **CLI**：`bin: { asabot }`。
+  - `asabot start [--config <path>]`：现在 `main.ts` 的行为。
+  - `asabot dev`：强制开启热重载，使用 pretty 日志。
+  - `asabot --version`。
+  - `main.ts` 的逻辑移入 `src/cli.ts`，`pnpm start` / `pnpm dev` 改为调用它。
+- **脚手架** `@asabot/create`（workspace 包 `packages/create`，用法 `npm create @asabot@latest [dir]`）：
+  - 交互式询问模板和目录，基于 node:readline，不引入依赖；也可以用 `--template bot|plugin --name <n> --yes --install` 跳过询问。
+  - **`bot` 模板**：
+    - `package.json`：依赖 `@asabot/core`，scripts 为 `start` / `dev`；
+    - `plugins/hello.ts`；
+    - `tsconfig.json`：只用于编辑器类型检查；
+    - `.gitignore`：忽略 data、`asabot.config.yaml`、`.env`；
+    - README。
+    - 不生成配置文件，首次启动走设置向导（第 23 节）。
+  - **`plugin` 模板**：
+    - 一个 `asabot-plugin-<name>` 包；
+    - `src/index.ts`，用 tsc 构建出 JS 和 `.d.ts`；
+    - keywords 和 `peerDependencies`；
+    - 一个 `createTestApp` 的 vitest 示例；
+    - 发布说明。
+- **文档注释**：`src/index.ts` 导出的每个公开 API 都有 JSDoc，Context 的方法和 Session、Bot、seg 的成员要写到“做什么、何时失败”。
+- **发布流程**：
+  1. 用 `pnpm pack` 打出 tarball；
+  2. 在临时目录中用 `bot` 模板和这个 tarball 起一个项目，验证首次运行向导、插件加载和面板访问；
+  3. 用 `plugin` 模板构建一个插件包，并验证能安装到这个项目；
+  4. 上述全部通过后才发布。首个版本为 0.1.0。
+
+### 24.13 F8 内置插件 `http`
+
+```ts
+interface HttpService {
+  fetch(url: string | URL, init?: HttpInit): Promise<Response>
+  json<T = unknown>(url: string | URL, init?: HttpInit): Promise<T>
+  text(url: string | URL, init?: HttpInit): Promise<string>
+  buffer(url: string | URL, init?: HttpInit): Promise<Buffer>
+}
+type HttpInit = RequestInit & { timeout?: Duration; proxy?: boolean | string; maxSize?: number }
+```
+- **配置**：
+  ```yaml
+  proxy: ''              # 例如 http://127.0.0.1:7890，可写 ${HTTPS_PROXY:-}
+  noProxy: []            # 不走代理的主机，支持 *.example.com
+  timeout: 30s
+  userAgent: ''          # 为空时用 AsaBot/<version>
+  ```
+- 代理通过 `undici` 的 `ProxyAgent` 实现。`proxy: false` 表示这次请求不走代理，传入字符串则使用指定的代理。
+- **错误与限制**：
+  - `json`、`text`、`buffer` 在响应不是 2xx 时抛 `HttpError { status, url }`，其中 url 只保留 origin 和 pathname，避免泄露查询参数里的 token。
+  - 响应体超过 `maxSize`（默认 10MB）时中止请求。
+  - 插件传入的 `signal` 与超时信号合并。
+- 缓存不另做服务，文档推荐使用 `ctx.store.set(key, value, { ttl })`。
+
+### 24.14 G6 内置插件 `long-message`
+
+- 通过发送前钩子处理过长的消息，priority 为 -100，排在修改内容的钩子之后。
+- **配置**（支持按群覆盖，通过 `configFor(target)` 读取）：
+  ```yaml
+  threshold: 1000        # 纯文本长度超过这个值时处理
+  strategy: forward      # forward | image | split
+  chunkSize: 800
+  splitInterval: 1s
+  markdownAsImage: true  # 平台不支持 markdown 段、且有 render 服务时，把 markdown 段渲染成图片
+  ```
+- **适用范围**：只处理由 text、at、face、reply、markdown 组成的消息；带媒体的消息原样放行。
+- **三种策略**（条件不满足时依次退到下一种）：
+  - `image`：需要 `render` 服务（可选注入）。text 用 `render.text`，markdown 用 `render.markdown`，结果作为一张图片，替换原消息返回。
+  - `forward`：需要 `supports(bot, 'sendForward')`。按段落把文本切成不超过 `chunkSize` 的节点，节点的发送者为机器人自己，由钩子自己发出合并转发，然后返回 `{ sent }`。
+  - `split`：按段落和句子切成不超过 `chunkSize` 的多条消息，间隔 `splitInterval` 依次发出；reply 段只保留在第一条。发完后返回最后一条的 `{ sent }`。
+
+### 24.15 F2 官方插件包 `@asabot/plugin-render`
+
+- **位置**：workspace 包 `packages/plugin-render`，插件名 `render`，提供 `render` 服务，可选注入 `http`（用来下载 emoji）。
+  ```ts
+  interface RenderService {
+    element(node: RenderNode, options?: RenderOptions): Promise<Buffer>      // satori 的 { type, props } 节点；PNG
+    html(html: string, options?: RenderOptions): Promise<Buffer>             // 用 satori-html 解析，只支持 satori 的 CSS 子集（flex 布局）
+    markdown(markdown: string, options?: RenderOptions & { theme?: 'light' | 'dark' }): Promise<Buffer>
+    text(text: string, options?: RenderOptions & { theme?: 'light' | 'dark' }): Promise<Buffer>
+    page(input: { html: string } | { url: string }, options?: { width?: number; selector?: string; timeout?: Duration }): Promise<Buffer>  // 浏览器后端
+  }
+  type RenderOptions = { width?: number; height?: number; scale?: number }
+  ```
+- **默认后端**：satori 加 `@resvg/resvg-js`。
+  - resvg 必须关闭系统字体加载（`font.loadSystemFonts: false`）。satori 输出的是字形路径，resvg 用不到字体；不关闭的话每次渲染会多花约 500ms。
+  - 实测首次渲染需要约 0.8s 解析字体，之后每张图不到 10ms。
+- **markdown 的渲染**：用 `marked` 的词法分析结果构建 satori 节点树。所有块级元素都用 flex 列布局；支持标题、段落、列表、引用、代码块、行内样式和链接文字，表格按行列简单排版。
+- **字体**：
+  - 内置 Noto Sans SC 的 400 和 700 两个字重，每个字重是约 100 个 unicode-range 子集的 woff 文件，各约 4.7MB。构建时从 `@fontsource/noto-sans-sc`（devDependency）复制到包内的 `fonts/`，同时附带 OFL 许可证。
+  - 每个子集注册为不同的字体名。实测这样才能按字符回退；用同一个名字注册时会全部显示成方块。
+  - 配置 `fonts: string[]` 可以追加 ttf、otf、woff 文件，追加的字体排在前面。satori 不支持 woff2 和 ttc。
+- **emoji**：通过 satori 的 `loadAdditionalAsset` 加载 Twemoji SVG。
+  - 配置 `emoji: twemoji | none`，以及 `emojiBaseUrl`（默认为 jsDelivr 上的 jdecked/twemoji）。
+  - 缓存在内存和 `ctx.dataDir/emoji/` 中。
+  - 下载失败时这个字符留空，并记 debug 日志。
+- **浏览器后端**：配置 `browser.executablePath`（本机的 Chrome 或 Edge）或 `browser.wsEndpoint`，用 `puppeteer-core` 驱动。
+  - 未配置时，`page()` 抛 `UnsupportedError('render', 'page')`。
+  - 浏览器实例懒启动，空闲 5 分钟后关闭，同时打开的页面数不超过 `browser.concurrency`（默认 2）。
+  - `page({ url })` 只接受 http(s) 地址。
+- 渲染失败时以带原因的错误 reject，插件自己决定是否降级成文本。
+
+### 24.16 实施顺序
+
+1. **F1a**：改包名和导入、构建、CLI、`publishConfig`（暂不发布）。这一步最机械，但会改动所有文件，所以放在最前面，避免和后续改动冲突。
+2. **核心**：I1、24.2、F3、F4、F5、F12、G1 的核心部分、G2 的追踪和日志 eventId。
+3. **服务端接口**：F10、G1、G3、G4 的接口，`BotView.capabilities`，`/send` 的新请求体。
+4. **插件**：内置插件 http、history、long-message，以及官方插件包 plugin-render。
+5. **F1b**：脚手架、JSDoc、README，然后按 24.12 的流程验证并发布。
+6. **面板**（我编写，接口就绪后进行）：能力表、命令管理、群组页、消息记录、调试台增强、插件页面宿主、设置项 `command.suggest`。
+
 ## 已知限制
 
 - **取消是协作式的**：插件代码如果不理会 `signal`，被取消（超时、卸载、退出）后仍会继续执行；框架只是不再等待它，也不会自动发送它的返回值。
@@ -1016,3 +1446,7 @@ export default definePlugin({ name: 'shop', inject: ['coins'], setup(ctx) { cons
 - **`bot.call()` 不经过发送前钩子**：透传的平台 API 由插件自己负责，框架不解析其中是否在发送消息。
 - **插件市场排序范围**：搜索结果最多取 250 条参与排序和分页，超出部分需要更精确的关键词。
 - **删除插件文件**：入口文件删除后插件会被卸载并从列表中移除；依赖它的插件进入 failed，入口恢复后自动恢复。
+- **带过滤的命令仍占用全局路径**：两个插件不能用互不相交的过滤条件注册同名命令（24.5）。
+- **按群配置只对 `configFor` 生效**：插件在 setup 中读取的全局配置（例如 cron 表达式）不会随群覆盖变化。
+- **satori 的 CSS 子集**：`render.html` 只支持 flex 布局和 satori 支持的属性，需要完整 CSS 时用浏览器后端的 `render.page`。
+- **插件页面的静态文件公开**：`/plugin-pages/<name>/*` 无需登录即可访问，数据必须走需要登录的 `ctx.panel.route`。
