@@ -116,7 +116,34 @@ export default definePlugin({ name: 'new-plugin', setup(ctx) { ctx.command('new'
   )
   await active
   assertEqual(await t.say('/new'), ['new'])
-  const result = 'HOT_RELOAD_OK first second second! retained fixed new'
+  active = nextState('consumer', 'active')
+  await writeFile(
+    join(dir, 'consumer.ts'),
+    `import { definePlugin } from 'asabot'
+export default definePlugin({ name: 'consumer', depends: ['hello'], setup(ctx) { ctx.command('consumer').action(() => 'ready') } })\n`,
+  )
+  await active
+  assertEqual(await t.say('/consumer'), ['ready'])
+  const dependentFailed = nextState('consumer', 'failed')
+  await rm(entry)
+  await dependentFailed
+  // Queue behind the watcher so the removal has finished before examining the list.
+  await t.app.plugins.enable('consumer')
+  assertEqual(t.app.plugins.get('hello'), undefined)
+  assertEqual(t.app.plugins.get('consumer')?.error, '依赖 hello 未激活')
+  assertEqual(await t.say('/hello'), [])
+  assertEqual(await t.say('/consumer'), [])
+  active = nextState('hello', 'active')
+  const dependentActive = nextState('consumer', 'active')
+  await writeFile(
+    entry,
+    `import { definePlugin } from 'asabot'
+export default definePlugin({ name: 'hello', setup(ctx) { ctx.command('hello').action(() => 'returned') } })\n`,
+  )
+  await Promise.all([active, dependentActive])
+  assertEqual(await t.say('/hello'), ['returned'])
+  assertEqual(await t.say('/consumer'), ['ready'])
+  const result = 'HOT_RELOAD_OK first second second! retained fixed new deleted restored'
   if (process.argv[2]) await writeFile(process.argv[2], result)
   process.stdout.write(`${result}\n`)
 } finally {

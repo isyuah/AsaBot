@@ -27,7 +27,9 @@ describe('Node loader hot reload', () => {
           else reject(new Error(`Hot reload child exited ${code}`))
         })
       })
-      expect(await readFile(path, 'utf8')).toContain('HOT_RELOAD_OK first second second! retained fixed new')
+      expect(await readFile(path, 'utf8')).toContain(
+        'HOT_RELOAD_OK first second second! retained fixed new deleted restored',
+      )
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

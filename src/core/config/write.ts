@@ -39,7 +39,10 @@ export async function writeConfigValue(
     if (document.errors.length) throw document.errors[0]
     if (options) update(document, keyPath, value, options.previousValue)
     else document.setIn(keyPath, value)
-    await writeFile(temporary, document.toString(), { encoding: 'utf8', flag: 'wx' })
+    await writeFile(temporary, document.toString({ flowCollectionPadding: false }), {
+      encoding: 'utf8',
+      flag: 'wx',
+    })
     await rename(temporary, path)
   } catch (error) {
     try {

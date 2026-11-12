@@ -470,6 +470,28 @@ export class PluginManager {
   }
 
   private async handleChange(dir: string, path: string): Promise<void> {
+    const removed: Entry[] = []
+    for (const [entryPath, entry] of this.files) {
+      try {
+        if (!(await stat(entryPath)).isFile()) removed.push(entry)
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error
+        removed.push(entry)
+      }
+    }
+    if (removed.length > 0) {
+      // Reconcile before removing entries so dependents are disposed before their dependencies.
+      for (const entry of removed) entry.state.enabled = false
+      await this.reconcile()
+      for (const entry of removed) {
+        if (this.entries.get(entry.state.name) === entry) this.entries.delete(entry.state.name)
+        const duplicate = this.duplicates.indexOf(entry)
+        if (duplicate !== -1) this.duplicates.splice(duplicate, 1)
+        if (entry.state.path) this.files.delete(entry.state.path)
+        entry.release?.()
+      }
+    }
     const previous = new Set(this.files.keys())
     await this.discover(dir)
     const affected = [...this.entries.values()].filter(
