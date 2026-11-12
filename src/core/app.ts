@@ -343,7 +343,9 @@ export class App implements AdapterHost {
 
   async prepareOutgoing(input: OutgoingMessage): Promise<PreparedOutgoing> {
     const prepared = await this.outgoing.prepare(input)
-    return Array.isArray(prepared) ? lowerMessage(input.bot, prepared, this.logger) : prepared
+    return Array.isArray(prepared)
+      ? lowerMessage(input.bot, prepared, this.logger)
+      : { sent: await this.outgoing.deliver(prepared) }
   }
 
   invokeApi(call: ApiCall, execute: (args: unknown[]) => Promise<unknown>): Promise<unknown> {

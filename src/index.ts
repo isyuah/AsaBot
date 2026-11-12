@@ -6,6 +6,7 @@ export type {
   AdapterHost,
   BeforeSend,
   BotInfo,
+  Delivery,
   OutgoingMessage,
   PreparedOutgoing,
   UpgradeHandler,
@@ -137,3 +138,5 @@ export {
 export { formatTarget, parseTarget, type Target, targetSchema } from './core/target.ts'
 export { type Duration, parseDuration } from './core/utils/duration.ts'
 export { LruSet } from './core/utils/lru.ts'
+export type { HistoryChannel, HistoryMessage, HistoryQuery, HistoryService } from './plugins/history.ts'
+export { HttpError, type HttpInit, type HttpService } from './plugins/http.ts'

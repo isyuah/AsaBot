@@ -105,6 +105,40 @@ plugins:
   admin:
     # 内置插件管理和访问控制命令
     enabled: true
+  http:
+    # 提供支持代理、超时和响应大小限制的 HTTP 服务
+    enabled: true
+    config:
+      proxy: ""
+      noProxy: [] # 例如 [localhost, '*.example.com']
+      timeout: 30s
+      userAgent: "" # 为空时使用 AsaBot/<version>
+  history:
+    # 记录消息和分发追踪，默认忽略调试台的虚拟平台
+    enabled: true
+    config:
+      retention: 7d
+      maxMessages: 100000
+      ignorePlatforms: [virtual]
+  long-message:
+    # 长消息优先尝试合并转发；也可选 image 或 split
+    enabled: true
+    config:
+      threshold: 1000
+      strategy: forward
+      chunkSize: 800
+      splitInterval: 1s
+      markdownAsImage: true
+  # 安装 @asabot/plugin-render 后可配置：
+  # render:
+  #   enabled: true
+  #   config:
+  #     fonts: [] # 用户字体的绝对路径；默认使用包内中文字体
+  #     emoji: twemoji # 或 none
+  #     emojiBaseUrl: https://cdn.jsdelivr.net/gh/jdecked/twemoji@latest/assets/svg
+  #     browser:
+  #       concurrency: 2
+  #       executablePath: /path/to/chrome # 或配置 wsEndpoint
   echo:
     # 示例复读插件
     enabled: true

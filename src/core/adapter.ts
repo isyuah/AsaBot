@@ -12,10 +12,18 @@ export interface OutgoingMessage {
   message: Message
 }
 
+/**
+ * A hook takes over delivery (e.g. as a merged forward or several messages). `deliver` runs after the hook chain,
+ * outside the hook timeout; sends inside it skip the hooks but are still lowered to the bot's capabilities.
+ */
+export interface Delivery {
+  deliver: () => Promise<SendResult>
+}
+/** What an adapter sends: the final message, or the result of a delivery a hook already performed. */
 export type PreparedOutgoing = Message | { sent: SendResult }
 export type BeforeSend = (
   input: OutgoingMessage,
-) => PreparedOutgoing | false | undefined | Promise<PreparedOutgoing | false | undefined>
+) => Message | Delivery | false | undefined | Promise<Message | Delivery | false | undefined>
 
 export interface Adapter {
   readonly platform: string

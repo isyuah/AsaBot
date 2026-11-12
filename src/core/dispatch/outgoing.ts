@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { Logger } from 'pino'
-import type { BeforeSend, OutgoingMessage, PreparedOutgoing } from '../adapter.ts'
+import type { BeforeSend, Delivery, OutgoingMessage } from '../adapter.ts'
+import type { SendResult } from '../bot.ts'
 import { SendBlockedError } from '../errors.ts'
 import type { Message } from '../message/index.ts'
 
@@ -28,7 +29,7 @@ export class OutgoingHooks {
     }
   }
 
-  async prepare(input: OutgoingMessage): Promise<PreparedOutgoing> {
+  async prepare(input: OutgoingMessage): Promise<Message | Delivery> {
     if (this.inHook.getStore()) return input.message
     let message = input.message
     for (const hook of [...this.hooks].sort((a, b) => b.priority - a.priority)) {
@@ -67,5 +68,10 @@ export class OutgoingHooks {
       if (blocked) throw new SendBlockedError(hook.plugin)
     }
     return message
+  }
+
+  /** Runs a hook's delivery; its own sends skip the hooks (they already decided) like any send made inside a hook. */
+  deliver(delivery: Delivery): Promise<SendResult> {
+    return this.inHook.run(true, () => delivery.deliver())
   }
 }

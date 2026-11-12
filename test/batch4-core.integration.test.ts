@@ -68,7 +68,7 @@ describe('batch 4 core', () => {
         definePlugin({
           name: 'replacement',
           setup(ctx) {
-            ctx.beforeSend(async ({ bot }) => ({ sent: await bot.sendPrivate('20', 'replacement') }))
+            ctx.beforeSend(({ bot }) => ({ deliver: () => bot.sendPrivate('20', 'replacement') }))
             ctx.beforeSend(
               () => {
                 throw new Error('must not run')

@@ -8,6 +8,9 @@ import { createLogger } from './core/logger.ts'
 import type { PackageOptions } from './core/plugin/packages.ts'
 import { createAdminPlugin } from './plugins/admin.ts'
 import { createHelpPlugin } from './plugins/help.ts'
+import history from './plugins/history.ts'
+import http from './plugins/http.ts'
+import longMessage from './plugins/long-message.ts'
 import { createStatusPlugin } from './plugins/status.ts'
 import { HttpServer } from './server/index.ts'
 
@@ -27,6 +30,9 @@ export function createApp(config: Config, options: CreateAppOptions = {}): App {
   app.plugins.register(createHelpPlugin(app))
   app.plugins.register(createStatusPlugin(app))
   app.plugins.register(createAdminPlugin(app))
+  app.plugins.register(http)
+  app.plugins.register(history)
+  app.plugins.register(longMessage)
   app.configureAdapters((name, value) => {
     const definition = adapters[name]
     if (!definition) throw new ConfigError(`Unknown adapter "${name}"`)

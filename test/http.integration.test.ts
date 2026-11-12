@@ -221,7 +221,7 @@ describe('HTTP service contract', () => {
           },
         },
       ],
-      plugins: { active: 4 },
+      plugins: { active: 7 },
       today: { received: 0, sent: 0 },
     })
     const plugins = await (await request(url, cookie, '/plugins')).json()

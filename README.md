@@ -92,7 +92,29 @@ server:
 | `plugins.<name>.config` | 对应插件的配置；示例 `echo` 支持 `maxLen` 和 `welcome` |
 | `server` | HTTP 监听地址和端口、面板密码、对外 API token；密码或 token 为空时分别关闭对应功能 |
 
-时长可以写毫秒数或 `10s`、`5m`、`1h30m` 等字符串。内置插件 `help`、`status`、`admin` 也使用 `plugins` 配置。通过管理命令修改全局插件开关时会写回配置文件；按群开关和访问控制保存在 SQLite 中。
+时长可以写毫秒数或 `10s`、`5m`、`1h30m` 等字符串。内置插件也使用 `plugins` 配置。通过管理命令修改全局插件开关时会写回配置文件；按群开关和访问控制保存在 SQLite 中。
+
+## 内置插件
+
+`help`、`status`、`admin` 提供帮助、状态和管理命令；`http`、`history`、`long-message` 默认启用，可以在 `plugins.<name>.enabled` 中停用。
+
+- `http` 提供 `fetch`、`json`、`text`、`buffer` 服务，支持代理、超时和响应体大小限制。需要缓存时可用 `ctx.store.set(key, value, { ttl: '1h' })`。
+- `history` 记录收到和发出的消息及分发追踪，并提供按会话查询、搜索、分页和 JSONL 导出接口。默认保留 7 天、最多 100000 条消息，忽略调试台的 `virtual` 平台。
+- `long-message` 对过长的纯文本消息优先使用合并转发；可配置为图片或分段发送，并为不同群覆盖配置。图片策略及不支持 Markdown 的平台可使用可选的 `render` 服务。
+
+插件可以声明 `inject: ['http']` 或 `inject: ['history']`，然后通过 `ctx.inject('http')` 或 `ctx.inject('history')` 使用相应服务。完整默认配置见示例配置文件。
+
+## 官方插件
+
+`@asabot/plugin-render` 将文本、Markdown 和 satori HTML 渲染为 PNG，也可通过配置 Chrome 或 Edge 使用网页截图。可在插件市场安装，或由超管发送 `/plugin install @asabot/plugin-render`。在插件中声明 `inject: ['render']` 后即可使用：
+
+```ts
+const render = ctx.inject('render')
+const image = await render.markdown('# 你好\n\n- AsaBot\n- Markdown')
+await session.send(seg.image(image))
+```
+
+字体、emoji、浏览器配置及完整服务 API 见 [render 插件 README](packages/plugin-render/README.md)。
 
 ## 管理面板与对外 API
 

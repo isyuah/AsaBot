@@ -786,7 +786,7 @@ describe('OneBot neutral management and forwarding', () => {
         })
         ctx.beforeSend(() => {
           order.push('hook')
-          return { sent: { messageId: 'replacement-id' } }
+          return { deliver: async () => ({ messageId: 'replacement-id' }) }
         })
       },
     })

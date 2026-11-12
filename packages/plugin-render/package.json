@@ -29,7 +29,9 @@
     "fonts",
     "README.md"
   ],
-  "scripts": {},
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json && node scripts/copy-fonts.mjs"
+  },
   "license": "MIT",
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2",

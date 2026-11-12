@@ -1072,11 +1072,12 @@ type TextStyle = 'bold' | 'italic' | 'underline' | 'strike' | 'code' | 'spoiler'
 
 ### 24.2 A9、A10 的扩展
 
-**发送前钩子代为发送**：`BeforeSend` 的返回值新增 `{ sent: SendResult }`。
-- 含义：钩子已经用别的方式把内容发出去了，例如改成合并转发或分段发送。
-- 后续钩子不再执行，适配器也不再发送原消息，原调用直接以这个结果 resolve。
-- 钩子自己发出的消息各自派发 `bot.message.sent`。
-- `AdapterHost.prepareOutgoing` 的返回值相应改为 `Message | { sent: SendResult }`。
+**发送前钩子代为发送**：`BeforeSend` 的返回值新增 `{ deliver: () => Promise<SendResult> }`。
+- 含义：钩子决定用别的方式发送这条内容，例如改成合并转发或分段发送。
+- 后续钩子不再执行，适配器也不再发送原消息。框架在钩子链之后执行 `deliver`，原调用以它的结果 resolve，它抛出的异常原样传给调用方。
+- `deliver` 不受钩子 3 秒超时的限制：钩子只负责尽快做出决定，耗时的发送放在 `deliver` 里。如果直接在钩子里逐条发送，超时后原消息会被照常发出，造成重复。
+- `deliver` 里发出的消息跳过钩子，但仍然经过降级，并且各自派发 `bot.message.sent`。
+- `AdapterHost.prepareOutgoing` 的返回值为 `Message | { sent: SendResult }`：交付由框架执行，适配器只会拿到它的结果。
 
 **可选服务**：`definePlugin` 的 `inject` 改为接受 `string[] | { required?: string[]; optional?: string[] }`，数组形式等同于 `required`。
 - 可选服务缺失时，插件照常加载。`ctx.injectOptional(name)` 返回服务实例或 `undefined`；对没有在 `optional` 中声明的名称调用时，直接抛错。
@@ -1238,6 +1239,7 @@ type DispatchTrace = {
   - 表通过 `ctx.migrate` 创建：`p_history_messages`（自增 id、event_id、direction、platform、self_id、channel、user_id、nickname、message_id、message JSON、text、time）和 `p_history_traces`（event_id 主键、trace JSON、time）。
   - 消息中的 `base64://` 内容只保留前 64 个字符和原始长度，避免撑大数据库。
 - **配置**：`retention: 7d`、`maxMessages: 100000`、`ignorePlatforms: ['virtual']`（默认不记录调试台的消息）。每小时清理一次过期数据和超出上限的旧数据。
+- 被黑名单拦下的消息不会进入观察者阶段，因此只有 trace（`filter` / `blocked`），没有消息内容。
 - **服务 `history`**：
   - `query({ channel?, userId?, before?, limit?, q? })` 返回按时间倒序的消息；
   - `trace(eventId)` 返回对应的追踪记录。
@@ -1412,8 +1414,8 @@ type HttpInit = RequestInit & { timeout?: Duration; proxy?: boolean | string; ma
 - **适用范围**：只处理由 text、at、face、reply、markdown 组成的消息；带媒体的消息原样放行。
 - **三种策略**（条件不满足时依次退到下一种）：
   - `image`：需要 `render` 服务（可选注入）。text 用 `render.text`，markdown 用 `render.markdown`，结果作为一张图片，替换原消息返回。
-  - `forward`：需要 `supports(bot, 'sendForward')`。按段落把文本切成不超过 `chunkSize` 的节点，节点的发送者为机器人自己，由钩子自己发出合并转发，然后返回 `{ sent }`。
-  - `split`：按段落和句子切成不超过 `chunkSize` 的多条消息，间隔 `splitInterval` 依次发出；reply 段只保留在第一条。发完后返回最后一条的 `{ sent }`。
+  - `forward`：需要 `supports(bot, 'sendForward')`。按段落把文本切成不超过 `chunkSize` 的节点，节点的发送者为机器人自己，通过 `{ deliver }` 发出合并转发。
+  - `split`：按段落和句子切成不超过 `chunkSize` 的多条消息，通过 `{ deliver }` 间隔 `splitInterval` 依次发出；reply 段只保留在第一条，原调用拿到最后一条的结果。
 
 ### 24.15 F2 官方插件包 `@asabot/plugin-render`
 
