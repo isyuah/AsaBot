@@ -99,8 +99,9 @@ onebot11:
     - type: forward
       url: ws://127.0.0.1:3001
       accessToken: ${NAPCAT_TOKEN:-}
-  # 第二期：reverse 连接由 server 提供 /onebot/v11/ws
-  sendQueue: { interval: 500ms, jitter: 300ms }   # M4
+  reverse:                  # M5：配置了这一段才接受反向连接（NapCat 主动连 AsaBot），地址为 ws://<server>/onebot/v11/ws
+    accessToken: ${ONEBOT_REVERSE_TOKEN:-}
+  sendQueue: { interval: 500ms, jitter: 300ms, maxPending: 100 }   # M5
 
 pluginLoader:
   dirs: [./plugins]
@@ -270,6 +271,26 @@ interface AdapterHost {
 - 发出的消息 ID 写入 toMe 缓存，并派发 `bot.message.sent` 内部事件。
 
 **OneBotApi 首批封装**：`sendPrivateMsg`、`sendGroupMsg`、`deleteMsg`、`getMsg`、`getLoginInfo`、`getVersionInfo`、`getStrangerInfo`、`getFriendList`、`getGroupInfo`、`getGroupList`、`getGroupMemberInfo`、`getGroupMemberList`、`setGroupBan`、`setGroupWholeBan`、`setGroupKick`、`setGroupCard`、`setGroupAdmin`、`setGroupSpecialTitle`、`setFriendAddRequest`、`setGroupAddRequest`、`sendGroupForwardMsg`、`sendPrivateForwardMsg`、`groupPoke`、`friendPoke`（NapCat 扩展）。
+
+### 8.1 反向 WS 与发送队列（M5）
+
+**会话与传输分离**：把现在 `OneBotConnection` 中与传输无关的部分抽成 `OneBotSession`，包括 API 的 echo 配对与超时、入站帧处理、事件转换、Bot 生命周期、活性检测（ping/pong 和 heartbeat）、发送队列。正向连接 = 客户端 socket + 退避重连 + 一个 OneBotSession；反向连接 = 服务端接受的 socket + 一个 OneBotSession，不负责重连（由 NapCat 负责）。两者行为一致，不允许出现两份重复的协议实现。
+
+**反向 WS**
+- 只要配置了 `onebot11.reverse`，HTTP 服务就会启动（即使面板和对外 API 都没开），并在 `/onebot/v11/ws` 接受升级。
+- 鉴权：`Authorization: Bearer <token>`，或查询参数 `access_token`（OneBot 11 规范允许）。`reverse.accessToken` 为空时不校验，同时在启动时记一条 warn：“反向 WS 未设置 token”。校验失败返回 401。
+- 账号识别：必须带 `X-Self-ID`（纯数字），缺失时返回 400。只支持 `X-Client-Role: Universal`（NapCat 默认）或不带这个头；`API` 和 `Event` 拆分连接返回 400，并写明原因。
+- 握手成功后照样调用 `get_login_info`。返回的 user_id 与 `X-Self-ID` 不一致时关闭连接（1008），记 warn。
+- 同一个 selfId 出现新的反向连接时，**新连接替换旧连接**：旧 socket 以 1000 `replaced` 关闭，挂起的请求以 NotConnectedError reject，Bot 实例保持不变，只派发一次 bot.offline/bot.online（或者不派发，由实现决定，但面板的 Bot 状态最终必须正确）。原因：反向模式下这种情况通常是 NapCat 重启了，而旧连接已经半死不活。
+- 正向连接与反向连接同时登录同一个账号时，沿用第 7 节“先上线者占有”的规则。
+- `BotView.connection` 为 `reverse`；`url` 省略。
+
+**发送队列**（每个 Bot 一个）
+- 只作用于发送消息的 action：`send_private_msg`、`send_group_msg`、`send_msg`、`send_group_forward_msg`、`send_private_forward_msg`。其他 action 不排队。
+- 相邻两次发送的间隔至少为 `interval + random(0, jitter)`。默认 500ms 加 0–300ms 抖动；interval 为 0 时不限速。
+- 排队数量超过 `maxPending` 时，新请求立即以 `SendQueueFullError` reject，并记 warn。
+- 断线时，排队中尚未发出的请求全部以 NotConnectedError reject，不跨断线缓存。
+- 调用方等待的是“真正发出并收到响应”的那一刻，所以 `session.send` 的 await 语义不变。
 
 ## 9. 分发管线
 
