@@ -1,6 +1,7 @@
 import type { Bot, SendResult } from '../bot.ts'
 import type { Message, Sendable } from '../message/index.ts'
 import { isSegment, normalizeSendable, plainText, seg } from '../message/index.ts'
+import { formatTarget } from '../target.ts'
 import type { LruSet } from '../utils/lru.ts'
 import type { DialogueOptions, PromptOptions, Session, SessionServices } from './types.ts'
 
@@ -129,6 +130,12 @@ export function createSession(init: SessionInit, services: SessionServices): Ses
     (segment) => isSegment(segment, 'at') && segment.data.id === init.selfId,
   )
   const toMe = init.messageType === 'private' || hasMention || isReplyToSelf
+  const target = {
+    platform: init.platform,
+    selfId: init.selfId,
+    type: init.messageType,
+    id: init.groupId ?? init.userId,
+  }
   const session: Session = {
     id: init.id,
     platform: init.platform,
@@ -142,7 +149,8 @@ export function createSession(init: SessionInit, services: SessionServices): Ses
     messageId: init.messageId,
     userId: init.userId,
     ...(init.groupId === undefined ? {} : { groupId: init.groupId }),
-    channelKey: `${init.platform}:${init.selfId}:${init.messageType}:${init.groupId ?? init.userId}`,
+    channelKey: formatTarget(target),
+    target,
     message: init.message,
     text: plainText(init.message),
     sender: init.sender,

@@ -7,11 +7,13 @@ export type {
   BeforeSend,
   BotInfo,
   OutgoingMessage,
+  PreparedOutgoing,
   UpgradeHandler,
 } from './core/adapter.ts'
 export { App } from './core/app.ts'
 export type {
   Bot,
+  BotCapabilities,
   ForwardMessage,
   ForwardNode,
   GroupInfo,
@@ -21,7 +23,7 @@ export type {
   SendResult,
   UserInfo,
 } from './core/bot.ts'
-export { BotRegistry } from './core/bot.ts'
+export { BotRegistry, supports } from './core/bot.ts'
 export type { CommandDefinition, OptionDefinition, OptionSettings } from './core/command/builder.ts'
 export { CommandBuilder } from './core/command/builder.ts'
 export { formatUsage } from './core/command/parse.ts'
@@ -29,6 +31,7 @@ export type { CommandAction, CommandArgs, CommandContext, OptionValue } from './
 export { interpolateConfigValues, loadConfig } from './core/config/load.ts'
 export { type Config, configSchema } from './core/config/schema.ts'
 export { writeConfigValue } from './core/config/write.ts'
+export type { ApiCall, ApiInterceptor } from './core/dispatch/api.ts'
 export { Dispatcher } from './core/dispatch/dispatcher.ts'
 export type {
   AccessFilter,
@@ -93,7 +96,14 @@ export {
   logger,
   subscribeLogs,
 } from './core/logger.ts'
-export type { KnownSegment, Message, Segment, Sendable, UnknownSegment } from './core/message/index.ts'
+export type {
+  KnownSegment,
+  Message,
+  Segment,
+  Sendable,
+  TextStyle,
+  UnknownSegment,
+} from './core/message/index.ts'
 export {
   isSegment,
   normalizeSendable,
@@ -115,5 +125,6 @@ export {
   KVStore,
   Storage,
 } from './core/storage/index.ts'
+export { formatTarget, parseTarget, type Target, targetSchema } from './core/target.ts'
 export { type Duration, parseDuration } from './core/utils/duration.ts'
 export { LruSet } from './core/utils/lru.ts'

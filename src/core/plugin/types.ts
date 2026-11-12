@@ -11,7 +11,7 @@ export interface PluginState {
   error?: string
   enabled: boolean
   provides: string[]
-  inject: string[]
+  inject: { name: string; optional: boolean }[]
   configSchema?: Record<string, unknown>
 }
 

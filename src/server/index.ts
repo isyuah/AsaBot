@@ -10,10 +10,10 @@ import { deleteCookie, setCookie } from 'hono/cookie'
 import WebSocket, { WebSocketServer } from 'ws'
 import { z } from 'zod'
 import type { App, ServerService } from '../core/app.ts'
-import type { Bot } from '../core/bot.ts'
+import { type Bot, supports } from '../core/bot.ts'
 import { logLevelSchema } from '../core/config/schema.ts'
 import type { DispatchEvent } from '../core/dispatch/types.ts'
-import { PluginConfigError } from '../core/errors.ts'
+import { NoBotOnlineError, PluginConfigError } from '../core/errors.ts'
 import type { MessageSentEvent } from '../core/event/index.ts'
 import { getRecentLogs, subscribeLogs } from '../core/logger.ts'
 import { plainText } from '../core/message/index.ts'
@@ -593,18 +593,12 @@ export class HttpServer implements ServerService {
   }
 
   private async send(input: z.output<typeof sendSchema>) {
-    const bot = this.app.bots
-      .list()
-      .find(
-        (item) =>
-          item.status === 'online' &&
-          (input.platform === undefined || input.platform === item.platform) &&
-          (input.selfId === undefined || input.selfId === item.selfId),
-      )
-    if (!bot) throw new HttpError(409, 'CONFLICT', 'No matching online bot')
-    return input.target.type === 'group'
-      ? bot.sendGroup(input.target.id, input.message)
-      : bot.sendPrivate(input.target.id, input.message)
+    try {
+      return await this.app.send(input.target, input.message)
+    } catch (error) {
+      if (error instanceof NoBotOnlineError) throw new HttpError(409, 'CONFLICT', 'No matching online bot')
+      throw error
+    }
   }
 
   private connect(client: WebSocket, cookie: string | undefined): void {
@@ -685,7 +679,7 @@ export class HttpServer implements ServerService {
         channel: { type: event.messageType, id: event.groupId ?? event.userId },
         userId: event.userId,
         nickname: event.sender.nickname,
-        avatar: event.bot.getAvatarUrl?.(event.userId),
+        avatar: supports(event.bot, 'getAvatarUrl') ? event.bot.getAvatarUrl?.(event.userId) : undefined,
         preview: [...event.text].slice(0, 120).join(''),
         time: event.time,
       }
@@ -698,7 +692,7 @@ export class HttpServer implements ServerService {
         selfId: sent.selfId,
         channel: { type: sent.messageType, id: sent.groupId ?? sent.userId },
         ...(sent.userId === undefined ? {} : { userId: sent.userId }),
-        avatar: sent.bot.getAvatarUrl?.(sent.selfId),
+        avatar: supports(sent.bot, 'getAvatarUrl') ? sent.bot.getAvatarUrl?.(sent.selfId) : undefined,
         preview: [...plainText(sent.message)].slice(0, 120).join(''),
         time: sent.time,
       }

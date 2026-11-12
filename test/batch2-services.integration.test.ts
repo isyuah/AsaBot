@@ -45,7 +45,7 @@ describe('plugin services', () => {
     expect(app.app.plugins.get('shop')).toMatchObject({
       state: 'failed',
       error: '服务 coins 不可用',
-      inject: ['coins'],
+      inject: [{ name: 'coins', optional: false }],
       provides: [],
     })
     await app.app.plugins.enable('wallet')
@@ -83,6 +83,12 @@ describe('plugin services', () => {
             ctx.inject('coins')
           },
         }),
+        definePlugin({
+          name: 'undeclared-optional',
+          setup(ctx) {
+            ctx.injectOptional('coins')
+          },
+        }),
       ],
     })
     expect(app.app.plugins.get('second')).toMatchObject({
@@ -92,6 +98,10 @@ describe('plugin services', () => {
     expect(app.app.plugins.get('undeclared')).toMatchObject({
       state: 'failed',
       error: expect.stringMatching(/未声明.*coins/),
+    })
+    expect(app.app.plugins.get('undeclared-optional')).toMatchObject({
+      state: 'failed',
+      error: expect.stringMatching(/未声明可选服务.*coins/),
     })
   })
 
@@ -122,5 +132,40 @@ describe('plugin services', () => {
     await vi.waitFor(() => expect(app?.app.plugins.get('late-shop')?.state).toBe('active'))
     withdraw()
     await vi.waitFor(() => expect(app?.app.plugins.get('late-shop')?.state).toBe('failed'))
+  })
+
+  it('reloads optional consumers when the service appears, reloads and disappears', async () => {
+    const seen: (number | undefined)[] = []
+    app = await createTestApp({
+      plugins: [
+        definePlugin({
+          name: 'optional-shop',
+          inject: { optional: ['coins'] },
+          setup(ctx) {
+            const coins = ctx.injectOptional('coins')
+            expectTypeOf(coins).toEqualTypeOf<{ balance: number } | undefined>()
+            seen.push(coins?.balance)
+          },
+        }),
+        definePlugin({
+          name: 'optional-wallet',
+          setup(ctx) {
+            ctx.provide('coins', { balance: 9 })
+          },
+        }),
+      ],
+      config: { plugins: { 'optional-wallet': { enabled: false } } },
+    })
+    expect(seen).toEqual([undefined])
+    expect(app.app.plugins.get('optional-shop')).toMatchObject({
+      state: 'active',
+      inject: [{ name: 'coins', optional: true }],
+    })
+    await app.app.plugins.enable('optional-wallet')
+    expect(seen).toEqual([undefined, 9])
+    await app.app.plugins.reload('optional-wallet')
+    expect(seen).toEqual([undefined, 9, 9])
+    await app.app.plugins.disable('optional-wallet')
+    expect(seen).toEqual([undefined, 9, 9, undefined])
   })
 })

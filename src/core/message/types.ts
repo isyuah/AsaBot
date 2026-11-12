@@ -1,5 +1,9 @@
+export type TextStyle = 'bold' | 'italic' | 'underline' | 'strike' | 'code' | 'spoiler'
+
 export type KnownSegment =
-  | { type: 'text'; data: { text: string } }
+  | { type: 'text'; data: { text: string; style?: TextStyle[] } }
+  | { type: 'markdown'; data: { content: string } }
+  | { type: 'button'; data: { label: string; kind: 'link' | 'command'; value: string } }
   | { type: 'at'; data: { id: string } }
   | { type: 'face'; data: { id: string } }
   | { type: 'image'; data: { file: string; url?: string; summary?: string } }

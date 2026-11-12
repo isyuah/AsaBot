@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { Logger } from 'pino'
-import type { BeforeSend, OutgoingMessage } from '../adapter.ts'
+import type { BeforeSend, OutgoingMessage, PreparedOutgoing } from '../adapter.ts'
 import { SendBlockedError } from '../errors.ts'
 import type { Message } from '../message/index.ts'
 
@@ -28,7 +28,7 @@ export class OutgoingHooks {
     }
   }
 
-  async prepare(input: OutgoingMessage): Promise<Message> {
+  async prepare(input: OutgoingMessage): Promise<PreparedOutgoing> {
     if (this.inHook.getStore()) return input.message
     let message = input.message
     for (const hook of [...this.hooks].sort((a, b) => b.priority - a.priority)) {
@@ -55,7 +55,10 @@ export class OutgoingHooks {
           timedOut = true
           this.logger.warn({ plugin: hook.plugin }, 'Before-send hook timed out')
         } else if (result === false) blocked = true
-        else if (result !== undefined) message = result
+        else if (result !== undefined) {
+          if (!Array.isArray(result)) return result
+          message = result
+        }
       } catch (error) {
         this.logger.error({ err: error, plugin: hook.plugin }, 'Before-send hook failed')
       } finally {

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { targetSchema } from '../core/target.ts'
 
 const mediaTypes = new Set(['image', 'audio', 'video', 'file'])
 /** `file:` URLs and absolute paths (POSIX, Windows drive, UNC / root-relative). */
@@ -7,6 +8,8 @@ const localFile = /^(?:file:|[\\/]|[a-z]:[\\/])/i
 const segment = z
   .object({ type: z.string().min(1), data: z.record(z.string(), z.unknown()) })
   .superRefine((value, context) => {
+    const rawType = value.type.includes(':') ? value.type.slice(value.type.indexOf(':') + 1) : value.type
+    const type = rawType === 'record' ? 'audio' : rawType
     const required: Record<string, string> = {
       text: 'text',
       at: 'id',
@@ -17,14 +20,34 @@ const segment = z
       reply: 'id',
       file: 'file',
       forward: 'id',
+      markdown: 'content',
+      button: 'label',
     }
-    const field = required[value.type]
+    const field = required[type]
     if (field && typeof value.data[field] !== 'string') {
       context.addIssue({ code: 'custom', path: ['data', field], message: 'Expected string' })
       return
     }
+    if (
+      type === 'button' &&
+      ((value.data.kind !== 'link' && value.data.kind !== 'command') || typeof value.data.value !== 'string')
+    ) {
+      context.addIssue({ code: 'custom', path: ['data'], message: 'Invalid button' })
+    }
+    if (
+      type === 'text' &&
+      value.data.style !== undefined &&
+      (!Array.isArray(value.data.style) ||
+        value.data.style.some(
+          (style: unknown) =>
+            typeof style !== 'string' ||
+            !['bold', 'italic', 'underline', 'strike', 'code', 'spoiler'].includes(style),
+        ))
+    ) {
+      context.addIssue({ code: 'custom', path: ['data', 'style'], message: 'Invalid text style' })
+    }
     // HTTP callers must not make the adapter (or the OneBot implementation's host) read local files.
-    if (mediaTypes.has(value.type) && localFile.test(value.data.file as string)) {
+    if (mediaTypes.has(type) && localFile.test(value.data.file as string)) {
       context.addIssue({
         code: 'custom',
         path: ['data', 'file'],
@@ -33,12 +56,12 @@ const segment = z
     }
   })
 
-export const sendSchema = z.object({
-  platform: z.string().min(1).optional(),
-  selfId: z.string().min(1).optional(),
-  target: z.object({ type: z.enum(['group', 'private']), id: z.string().min(1) }),
-  message: z.union([z.string(), z.array(segment)]),
-})
+export const sendSchema = z
+  .object({
+    target: targetSchema,
+    message: z.union([z.string(), z.array(segment)]),
+  })
+  .strict()
 
 export const playgroundSchema = z
   .object({

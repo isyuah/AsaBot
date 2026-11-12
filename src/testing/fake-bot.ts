@@ -9,6 +9,7 @@ import type {
   SendResult,
   UserInfo,
 } from '../core/bot.ts'
+import { botActions } from '../core/bot.ts'
 import { UnsupportedError } from '../core/errors.ts'
 import type { Message, Sendable } from '../core/message/index.ts'
 import { normalizeSendable } from '../core/message/index.ts'
@@ -23,6 +24,7 @@ export class FakeBot implements Bot {
   readonly platform = 'fake'
   readonly selfId = '10000'
   readonly status = 'online'
+  readonly capabilities = { segments: ['text'], textStyles: [], actions: botActions }
   readonly sends: FakeSend[] = []
 
   async sendPrivate(userId: string, content: Sendable): Promise<SendResult> {

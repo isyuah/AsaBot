@@ -1,6 +1,7 @@
 import type { z } from 'zod'
 import { VirtualAdapter } from '../adapters/virtual/index.ts'
 import type { App } from '../core/app.ts'
+import { botActions } from '../core/bot.ts'
 import type { Message } from '../core/message/index.ts'
 import { plainText } from '../core/message/index.ts'
 import type { playgroundSchema } from './schemas.ts'
@@ -14,7 +15,11 @@ export class Playground {
   private readonly virtual: VirtualAdapter
 
   constructor(app: App) {
-    this.virtual = new VirtualAdapter(app, { selfId: 'playground' })
+    this.virtual = new VirtualAdapter(app, {
+      selfId: 'playground',
+      capabilities: { actions: [...botActions.filter((action) => action !== 'call'), 'getAvatarUrl'] },
+    })
+    app.apiInterceptors.wrap(this.virtual.bot)
     app.excludeBotFromStats(this.virtual.bot)
   }
 

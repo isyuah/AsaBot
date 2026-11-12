@@ -1,6 +1,6 @@
 export type { OneBotAdapterOptions } from './adapter.ts'
 export { OneBotAdapter } from './adapter.ts'
-export type { OneBotApiHooks } from './api.ts'
+export type { OneBotApiHooks, OneBotOutgoingRequest } from './api.ts'
 export { normalizeOutbound, OneBotApiImpl } from './api.ts'
 export type { OneBotApi, OneBotBot, OneBotForwardNode, OneBotMessageInfo, OneBotVersionInfo } from './bot.ts'
 export { isOneBot } from './bot.ts'

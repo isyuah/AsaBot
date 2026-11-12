@@ -22,6 +22,8 @@ export function incomingSegment(segment: { type: string; data: Record<string, un
   }
   const required: Record<string, string> = {
     text: 'text',
+    markdown: 'content',
+    button: 'label',
     at: 'id',
     face: 'id',
     image: 'file',
@@ -34,6 +36,22 @@ export function incomingSegment(segment: { type: string; data: Record<string, un
   const field = required[segment.type]
   if (field !== undefined && typeof data[field] !== 'string')
     throw new Error(`Invalid OneBot ${segment.type} ${field}`)
+  if (
+    segment.type === 'button' &&
+    ((data.kind !== 'link' && data.kind !== 'command') || typeof data.value !== 'string')
+  )
+    throw new Error('Invalid OneBot button')
+  if (
+    segment.type === 'text' &&
+    data.style !== undefined &&
+    (!Array.isArray(data.style) ||
+      data.style.some(
+        (style: unknown) =>
+          typeof style !== 'string' ||
+          !['bold', 'italic', 'underline', 'strike', 'code', 'spoiler'].includes(style),
+      ))
+  )
+    throw new Error('Invalid OneBot text style')
   const optional: Record<string, string[]> = {
     image: ['url', 'summary'],
     record: ['url'],
@@ -44,7 +62,8 @@ export function incomingSegment(segment: { type: string; data: Record<string, un
     if (data[key] !== undefined && typeof data[key] !== 'string')
       throw new Error(`Invalid OneBot ${segment.type} ${key}`)
   }
-  return { type: segment.type === 'record' ? 'audio' : segment.type, data } as Segment
+  const type = segment.type === 'record' ? 'audio' : segment.type
+  return { type: Object.hasOwn(required, segment.type) ? type : `onebot11:${type}`, data } as Segment
 }
 
 export function outgoingSegment(segment: Segment): Segment {
@@ -58,5 +77,6 @@ export function outgoingSegment(segment: Segment): Segment {
   if (segment.type === 'face' || segment.type === 'reply') {
     data.id = idNumber(String(data.id))
   }
-  return { type: segment.type === 'audio' ? 'record' : segment.type, data } as Segment
+  const type = segment.type === 'audio' ? 'record' : segment.type.replace(/^onebot11:/, '')
+  return { type, data } as Segment
 }

@@ -10,6 +10,7 @@ const onebotMocks: MockOneBot[] = []
 
 const sample = definePlugin({
   name: 'panel-sample',
+  inject: { optional: ['coins'] },
   config: z.object({ amount: z.number().int().min(1).default(1) }),
   setup(ctx) {
     ctx.route((app) => app.get('/hello', (c) => c.json({ ok: true })))
@@ -207,7 +208,19 @@ describe('HTTP service contract', () => {
     expect(overview).toMatchObject({
       version: expect.any(String),
       node: process.version,
-      bots: [{ platform: 'virtual', selfId: '10000', status: 'online', connection: '虚拟' }],
+      bots: [
+        {
+          platform: 'virtual',
+          selfId: '10000',
+          status: 'online',
+          connection: '虚拟',
+          capabilities: {
+            segments: expect.arrayContaining(['text', 'markdown', 'button']),
+            textStyles: expect.arrayContaining(['bold']),
+            actions: expect.arrayContaining(['sendGroup']),
+          },
+        },
+      ],
       plugins: { active: 4 },
       today: { received: 0, sent: 0 },
     })
@@ -215,7 +228,7 @@ describe('HTTP service contract', () => {
     expect(plugins.find((item: { name: string }) => item.name === 'panel-sample')).toMatchObject({
       state: 'active',
       provides: [],
-      inject: [],
+      inject: [{ name: 'coins', optional: true }],
       config: { amount: 1 },
       commands: expect.arrayContaining([
         {
@@ -315,12 +328,12 @@ describe('HTTP service contract', () => {
       { type: 'at', data: { id: 'user-alice' } },
       { type: 'audio', data: { file: 'base64://AA==' } },
       { type: 'image', data: { file: 'https://example.invalid/image', extra: 2 } },
-      { type: 'custom', data: { value: true } },
+      { type: 'markdown', data: { content: '**hello**' } },
     ]
     expect(
       (
         await request(url, cookie, '/send', 'POST', {
-          target: { type: 'group', id: 'room-alpha' },
+          target: { platform: 'virtual', type: 'group', id: 'room-alpha' },
           message,
         })
       ).status,
@@ -329,7 +342,7 @@ describe('HTTP service contract', () => {
     expect(
       (
         await request(url, cookie, '/send', 'POST', {
-          target: { type: 'private', id: 'user-alice' },
+          target: { platform: 'virtual', type: 'private', id: 'user-alice' },
           message: [{ type: 'at', data: {} }],
         })
       ).status,
@@ -348,7 +361,7 @@ describe('HTTP service contract', () => {
       '\\\\host\\share\\a.png',
     ]) {
       const response = await request(url, cookie, '/send', 'POST', {
-        target: { type: 'group', id: '1' },
+        target: { platform: 'virtual', type: 'group', id: '1' },
         message: [
           { type: 'text', data: { text: 'x' } },
           { type: 'file', data: { file } },
@@ -359,6 +372,11 @@ describe('HTTP service contract', () => {
         error: { code: 'BAD_REQUEST', issues: [{ path: 'message[1].data.file' }] },
       })
     }
+    const namespaced = await request(url, cookie, '/send', 'POST', {
+      target: 'virtual:group:1',
+      message: [{ type: 'onebot11:image', data: { file: 'file:///etc/passwd' } }],
+    })
+    expect(namespaced.status).toBe(400)
     const playground = await request(url, cookie, '/playground', 'POST', {
       user: { id: '1' },
       message: [{ type: 'image', data: { file: 'file:///etc/passwd' } }],
@@ -368,7 +386,7 @@ describe('HTTP service contract', () => {
       method: 'POST',
       headers: { Authorization: 'Bearer api-secret', 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        target: { type: 'group', id: '1' },
+        target: { platform: 'virtual', type: 'group', id: '1' },
         message: [{ type: 'audio', data: { file: '/root/.env' } }],
       }),
     })
@@ -426,7 +444,7 @@ describe('HTTP service contract', () => {
       const response = await fetch(`${url}/api/v1/send`, {
         method: 'POST',
         headers: { Authorization: 'Bearer api-secret', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target: { type: 'group', id: '123' }, message: 'from api' }),
+        body: JSON.stringify({ target: 'virtual:group:123', message: 'from api' }),
       })
       expect(response.status).toBe(200)
       expect(await response.json()).toEqual({ messageId: expect.any(String) })
@@ -461,6 +479,17 @@ describe('HTTP service contract', () => {
       const bot = t.app.getBot('onebot11', '10001')
       if (!bot) throw new Error('OneBot did not come online')
       const bots = await (await request(url, cookie, '/bots')).json()
+      expect(bots.find((item: { platform: string }) => item.platform === 'onebot11')).toMatchObject({
+        capabilities: {
+          segments: expect.arrayContaining(['onebot11:*']),
+          textStyles: [],
+          actions: expect.arrayContaining(['sendGroup']),
+        },
+      })
+      await waitFor(() => frames.some((frame) => frame.type === 'bot'))
+      expect(frames.find((frame) => frame.type === 'bot')).toMatchObject({
+        bot: { capabilities: { segments: expect.arrayContaining(['onebot11:*']) } },
+      })
       mock.emitGroupMessage({ groupId: '200', userId: '300', message: 'from user' })
       await waitFor(() => frames.some((frame) => frame.type === 'message' && frame.preview === 'from user'))
       await bot.sendPrivate('400', 'from bot')

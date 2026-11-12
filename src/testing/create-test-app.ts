@@ -6,6 +6,7 @@ import type { z } from 'zod'
 import { VirtualAdapter } from '../adapters/virtual/index.ts'
 import { createApp } from '../bootstrap.ts'
 import type { App } from '../core/app.ts'
+import type { BotCapabilities } from '../core/bot.ts'
 import { configSchema } from '../core/config/schema.ts'
 import type { Message } from '../core/message/index.ts'
 import { plainText } from '../core/message/index.ts'
@@ -18,6 +19,7 @@ type DeepPartial<T> = T extends readonly (infer Item)[]
     : T
 
 export interface TestAppOptions {
+  capabilities?: Partial<BotCapabilities>
   plugins?: PluginDefinition[]
   pluginDirs?: string[]
   config?: DeepPartial<z.input<typeof configSchema>>
@@ -55,7 +57,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
       },
     })
     app = createApp(config, { logger: pino({ level: 'silent' }) })
-    const mock = new VirtualAdapter(app)
+    const mock = new VirtualAdapter(app, { capabilities: options.capabilities })
     app.useAdapter(mock)
     for (const plugin of options.plugins ?? []) app.plugins.register(plugin)
     await app.start()

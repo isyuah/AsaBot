@@ -8,7 +8,7 @@ import { deleteConfigValue, writeConfigValue } from '../config/write.ts'
 import type { DispatchEvent } from '../dispatch/types.ts'
 import { PluginConfigError, PluginError } from '../errors.ts'
 import { Context } from './context.ts'
-import type { PluginDefinition } from './definition.ts'
+import { type PluginDefinition, serviceDependencies } from './definition.ts'
 import { importPlugin, registerPluginRoots } from './loader.ts'
 import { type PackageManifest, type PackageOptions, PackageService, redact } from './packages.ts'
 import type { PluginState } from './types.ts'
@@ -22,6 +22,7 @@ interface Entry {
   release?: () => void
   failure?: 'dependency' | 'setup' | 'import' | 'duplicate'
   manifest?: PackageManifest
+  optionalServices?: Map<string, { plugin: string; value: unknown } | undefined>
 }
 
 function errorMessage(error: unknown): string {
@@ -52,12 +53,24 @@ function validateDefinition(value: unknown): PluginDefinition {
   ) {
     throw new PluginError(`Invalid dependencies for plugin "${value.name}"`)
   }
-  if (
-    'inject' in value &&
-    value.inject !== undefined &&
-    (!Array.isArray(value.inject) || !value.inject.every((item: unknown) => typeof item === 'string'))
-  )
-    throw new PluginError(`Invalid service dependencies for plugin "${value.name}"`)
+  if ('inject' in value && value.inject !== undefined) {
+    const strings = (item: unknown): item is string[] =>
+      Array.isArray(item) && item.every((part: unknown) => typeof part === 'string')
+    const inject = value.inject
+    if (
+      !strings(inject) &&
+      !(
+        typeof inject === 'object' &&
+        inject !== null &&
+        !Array.isArray(inject) &&
+        Object.entries(inject).every(
+          ([key, item]) => (key === 'required' || key === 'optional') && strings(item),
+        )
+      )
+    ) {
+      throw new PluginError(`Invalid service dependencies for plugin "${value.name}"`)
+    }
+  }
   return value as PluginDefinition
 }
 
@@ -68,6 +81,7 @@ export class PluginManager {
   readonly packages: PackageService
   private readonly entries = new Map<string, Entry>()
   private readonly services = new Map<string, { plugin: string; value: unknown }>()
+  private readonly serviceProviders = new Map<string, string>()
   private readonly files = new Map<string, Entry>()
   private readonly duplicates: Entry[] = []
   private readonly uninstalling = new Set<string>()
@@ -153,6 +167,7 @@ export class PluginManager {
       )
     const service = { plugin, value }
     this.services.set(name, service)
+    this.serviceProviders.set(name, plugin)
     const entry = this.require(plugin)
     entry.state.provides = [...entry.state.provides, name]
     if (entry.state.state === 'active') this.publishState(entry)
@@ -170,6 +185,10 @@ export class PluginManager {
     const service = this.services.get(name)
     if (!service) throw new PluginError(`服务 ${name} 不可用`)
     return service.value
+  }
+
+  injectOptional(name: string): unknown {
+    return this.services.get(name)?.value
   }
 
   getConfig(name: string): unknown {
@@ -523,7 +542,11 @@ export class PluginManager {
     if (!definition) return
     entry.state.version = definition.version
     entry.state.description = definition.description
-    entry.state.inject = [...(definition.inject ?? [])]
+    const dependencies = serviceDependencies(definition.inject)
+    entry.state.inject = [
+      ...dependencies.required.map((name) => ({ name, optional: false })),
+      ...dependencies.optional.map((name) => ({ name, optional: true })),
+    ]
     entry.state.configSchema = definition.config
       ? z.toJSONSchema(definition.config, { unrepresentable: 'any' })
       : undefined
@@ -820,9 +843,9 @@ export class PluginManager {
         const target = this.entries.get(dependency)
         if (target) visit(target)
       }
-      for (const service of entry.definition?.inject ?? []) {
-        const provider = this.services.get(service)
-        const target = provider && this.entries.get(provider.plugin)
+      for (const { name: service } of entry.state.inject) {
+        const provider = this.services.get(service)?.plugin ?? this.serviceProviders.get(service)
+        const target = provider && this.entries.get(provider)
         if (target) visit(target)
       }
       result.push(entry)
@@ -878,7 +901,7 @@ export class PluginManager {
             const badDependency = entry.definition?.depends?.some(
               (dep) => !this.entries.has(dep) || unavailable.has(dep),
             )
-            const badService = entry.definition?.inject?.some((name) => {
+            const badService = serviceDependencies(entry.definition?.inject).required.some((name) => {
               const provider = this.services.get(name)
               return !provider || unavailable.has(provider.plugin)
             })
@@ -888,8 +911,35 @@ export class PluginManager {
             }
           }
         }
+        const affected = new Set<string>()
+        for (const entry of ordered) {
+          if (!entry.context) continue
+          for (const name of serviceDependencies(entry.definition?.inject).optional) {
+            const service = this.services.get(name)
+            const available = service && !unavailable.has(service.plugin) ? service : undefined
+            if (entry.optionalServices?.get(name) !== available) affected.add(entry.state.name)
+          }
+        }
+        let cascading = true
+        while (cascading) {
+          cascading = false
+          for (const entry of ordered) {
+            if (!entry.context || affected.has(entry.state.name)) continue
+            const depends = entry.definition?.depends?.some((name) => affected.has(name))
+            const injects = entry.state.inject.some(({ name }) => {
+              const service = this.services.get(name)
+              return service !== undefined && affected.has(service.plugin)
+            })
+            if (depends || injects) {
+              affected.add(entry.state.name)
+              cascading = true
+            }
+          }
+        }
         for (const entry of [...ordered].reverse()) {
-          if (entry.context && unavailable.has(entry.state.name)) await this.unload(entry)
+          if (entry.context && (unavailable.has(entry.state.name) || affected.has(entry.state.name))) {
+            await this.unload(entry)
+          }
         }
         for (const entry of ordered) {
           if (!entry.state.enabled) {
@@ -912,7 +962,9 @@ export class PluginManager {
             this.setState(entry, 'failed', `依赖 ${missing} 未激活`)
             continue
           }
-          const missingService = entry.definition.inject?.find((name) => !this.services.has(name))
+          const missingService = serviceDependencies(entry.definition.inject).required.find(
+            (name) => !this.services.has(name),
+          )
           if (missingService) {
             if (entry.context) await this.unload(entry)
             entry.failure = 'dependency'
@@ -951,6 +1003,9 @@ export class PluginManager {
       if (!entry.definition?.config && value !== undefined)
         this.app.logger.warn({ plugin: entry.state.name }, 'Plugin has configuration but no schema')
       const parsed = this.validateConfig(entry, value)
+      entry.optionalServices = new Map(
+        serviceDependencies(entry.definition?.inject).optional.map((name) => [name, this.services.get(name)]),
+      )
       context = new Context(this.app, entry.state.name, parsed, entry.definition?.inject)
       let timedOut = false
       let timer: NodeJS.Timeout | undefined
@@ -1027,8 +1082,8 @@ export class PluginManager {
         if (
           !affected.has(item.state.name) &&
           (item.definition?.depends?.some((dep) => affected.has(dep)) ||
-            item.definition?.inject?.some((service) => {
-              const provider = this.services.get(service)
+            item.state.inject.some(({ name }) => {
+              const provider = this.services.get(name)
               return provider !== undefined && affected.has(provider.plugin)
             }))
         ) {

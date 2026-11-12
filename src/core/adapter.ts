@@ -1,7 +1,8 @@
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import type { Logger } from 'pino'
-import type { Bot, MessageTarget } from './bot.ts'
+import type { Bot, MessageTarget, SendResult } from './bot.ts'
+import type { ApiCall } from './dispatch/api.ts'
 import type { AnyEvent, SessionServices } from './event/index.ts'
 import type { Message } from './message/index.ts'
 
@@ -11,9 +12,10 @@ export interface OutgoingMessage {
   message: Message
 }
 
+export type PreparedOutgoing = Message | { sent: SendResult }
 export type BeforeSend = (
   input: OutgoingMessage,
-) => Message | false | undefined | Promise<Message | false | undefined>
+) => PreparedOutgoing | false | undefined | Promise<PreparedOutgoing | false | undefined>
 
 export interface Adapter {
   readonly platform: string
@@ -38,7 +40,8 @@ export interface AdapterHost {
   setBotInfo(bot: Bot, info: BotInfo): void
   whenIdle(): Promise<void>
   isSuperuser(userId: string): boolean
-  prepareOutgoing(input: OutgoingMessage): Promise<Message>
+  prepareOutgoing(input: OutgoingMessage): Promise<PreparedOutgoing>
+  invokeApi(call: ApiCall, execute: (args: unknown[]) => Promise<unknown>): Promise<unknown>
 }
 
 export type UpgradeHandler = (request: IncomingMessage, socket: Duplex, head: Buffer) => void

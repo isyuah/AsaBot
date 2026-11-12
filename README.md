@@ -104,10 +104,10 @@ server:
 curl -H "Authorization: Bearer $ASABOT_API_TOKEN" http://127.0.0.1:5140/api/v1/bots
 curl -X POST http://127.0.0.1:5140/api/v1/send \
   -H "Authorization: Bearer $ASABOT_API_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"target":{"type":"group","id":"123456"},"message":"你好"}'
+  -d '{"target":{"platform":"onebot11","type":"group","id":"123456"},"message":"你好"}'
 ```
 
-`target.type` 可为 `group` 或 `private`；可选传 `platform` 和 `selfId` 选择在线 Bot，不指定时使用第一个在线 Bot。`message` 接受纯文本字符串或消息段数组，成功时返回 `{ "messageId": "..." }`。插件可以通过 `ctx.route(app => ...)` 注册 Hono 路由，地址为 `/plugins/<插件名>/...`；这些路由不使用面板登录鉴权，插件卸载后立即失效。
+`target.type` 可为 `group` 或 `private`；`target.platform` 指定平台，可选的 `target.selfId` 指定账号，否则使用该平台第一个在线 Bot。也可以将目标写成 `"onebot11:group:123456"`。`message` 接受纯文本字符串或消息段数组，成功时返回 `{ "messageId": "..." }`。插件可以通过 `ctx.route(app => ...)` 注册 Hono 路由，地址为 `/plugins/<插件名>/...`；这些路由不使用面板登录鉴权，插件卸载后立即失效。
 
 ## 内置命令
 
@@ -185,6 +185,9 @@ export default definePlugin({
 | `ctx.cron`、`ctx.interval`、`ctx.timeout` | 注册定时任务 |
 | `ctx.store`、`ctx.db`、`ctx.migrate(steps)` | 插件独立 KV、共享 SQLite 句柄、按插件版本管理的迁移 |
 | `ctx.bot(selfId?)`、`ctx.bots` | 查找在线 Bot、列出 Bot；找不到在线 Bot 时 `ctx.bot()` 抛错 |
+| `ctx.send`、`ctx.broadcast` | 向指定平台和会话主动发送或批量发送 |
+| `ctx.beforeSend`、`ctx.interceptApi` | 处理出站消息或拦截 Bot API 调用 |
+| `ctx.provide`、`ctx.inject`、`ctx.injectOptional` | 提供或使用插件服务 |
 | `ctx.dataDir`、`ctx.signal`、`ctx.onDispose(fn)` | 插件数据目录、卸载信号、自定义清理函数 |
 
 观察者、命令、中间件、匹配器和定时任务随插件卸载自动回收。事件处理器应配合 `signal` 取消耗时操作；插件代码仍运行在主进程中。
@@ -255,6 +258,61 @@ export default definePlugin({
 
 使用 `.permission('superuser')`、`.permission('group.owner')`、`.permission('group.admin')` 或 `perm` 组合规则限制权限；群主通过管理员检查，超管通过内置角色检查。`.scope('group')` 和 `.scope('private')` 限制会话类型。`.cooldown('10s', { scope: 'user' })` 支持 `user`、`group` 和 `global`，超管不受冷却限制。
 
+### 能力与消息段
+
+`supports(bot, feature)` 可检查 Bot 是否原生支持某种消息段或方法；发送时框架会自动把不支持的段降级，例如图片变成 `[图片]`、Markdown 变成纯文本。平台专属段使用 `onebot11:json` 这样的命名空间。
+
+```ts
+import { seg, supports } from '@asabot/core'
+
+const message = [seg.text('标题', ['bold']), seg.markdown('**内容**'), seg.button('打开', { link: 'https://example.com' })]
+if (supports(session.bot, 'button')) ctx.logger.info('支持原生按钮')
+await session.send(message) // 不支持按钮时降级为“打开: https://example.com”
+```
+
+`seg.button('执行', { command: '/help' })` 创建命令按钮，不支持时降级为“执行：发送 /help”。
+
+### 主动发送
+
+`Target` 包含 `platform`、`type`、`id` 和可选的 `selfId`；`session.target` 是当前会话目标。`formatTarget` 与 `parseTarget` 可在对象和 `platform[:selfId]:type:id` 字符串之间转换，`targetSchema` 可用于插件配置。
+
+```ts
+import { formatTarget, parseTarget, type Target } from '@asabot/core'
+
+const target: Target = { platform: 'onebot11', type: 'group', id: '123456' }
+await ctx.send(target, '定时提醒')
+const results = await ctx.broadcast([formatTarget(target), parseTarget('onebot11:private:42')], '通知')
+for (const result of results) if (result.error) ctx.logger.warn({ err: result.error }, '发送失败')
+```
+
+批量发送按顺序进行，单个目标失败会记入对应结果；可传 `{ interval: 1000 }` 设置发送间隔，单位为毫秒。
+
+### 可选服务
+
+在插件定义中用 `inject: { required: [...], optional: [...] }` 声明服务，必需服务缺失时插件等待服务恢复，可选服务缺失时正常加载。可选服务出现、消失或重载时，使用方会自动重载。
+
+```ts
+export default definePlugin({
+  name: 'shop',
+  inject: { optional: ['coins'] },
+  setup(ctx) {
+    const coins = ctx.injectOptional('coins') // 服务实例或 undefined
+    ctx.logger.info({ hasCoins: coins !== undefined }, '服务状态')
+  },
+})
+```
+
+### API 拦截
+
+`ctx.interceptApi` 按优先级从高到低执行；可修改 `call.args`、等待 `next()` 后修改结果，或直接返回模拟结果。拦截器内部调用 Bot API 不会再次进入拦截器，插件卸载时自动移除。
+
+```ts
+ctx.interceptApi(async (call, next) => {
+  if (call.method === 'sendGroup' && call.args[0] === '旧群') call.args[0] = '新群'
+  return next()
+}, { priority: 10 })
+```
+
 ### 存储与定时任务
 
 `ctx.store.set('key', value, { ttl: '1h' })` 保存可 JSON 序列化的值，`ctx.store.get<T>('key')` 读取，另有 `delete(key)` 和 `keys(prefix?)`。每个插件有独立命名空间。
@@ -300,6 +358,6 @@ it('打招呼', async () => {
 
 `say` 默认模拟群 `10` 中用户 `20` 的消息，可传 `{ group: 'room-a', user: 'user-a', role: 'admin' }`，或用 `{ group: null }` 模拟私聊。返回值是本次发送内容的数组；测试结束调用 `dispose()`。也可传 `pluginDirs` 加载目录、传 `config` 覆盖配置，使用 `t.app` 和虚拟适配器 `t.mock` 检查状态或模拟通知。测试 OneBot 协议时可从 `@asabot/core/onebot11/testing` 导入 `MockOneBot`。
 
-消息段通过 `seg.at(id)`、`seg.audio(file)` 等构造，未知的平台消息段会保留。需要 OneBot 专属能力时，从 `@asabot/core/onebot11` 导入 `isOneBot`、`parseCQ`、`toCQ`、`ApiError` 和相关类型；字符串始终作为纯文本发送。`createTestApp` 不接受外部适配器配置。
+消息段通过 `seg.at(id)`、`seg.audio(file)` 等构造，平台专属消息段使用平台命名空间。需要 OneBot 专属能力时，从 `@asabot/core/onebot11` 导入 `isOneBot`、`parseCQ`、`toCQ`、`ApiError` 和相关类型；字符串始终作为纯文本发送。`createTestApp` 不接受外部适配器配置，可通过 `capabilities` 模拟能力较弱的平台。
 
 项目检查命令：`pnpm typecheck`、`pnpm lint`、`pnpm test`。

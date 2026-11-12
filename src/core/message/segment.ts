@@ -1,6 +1,6 @@
 import { isAbsolute, win32 } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { KnownSegment, Segment } from './types.ts'
+import type { KnownSegment, Segment, TextStyle } from './types.ts'
 
 type TypedSegment<K extends KnownSegment['type']> = Extract<KnownSegment, { type: K }>
 
@@ -40,8 +40,16 @@ function mediaSource(source: string | Buffer | URL): string {
 }
 
 export const seg = {
-  text(text: string): TypedSegment<'text'> {
-    return { type: 'text', data: { text } }
+  text(text: string, style?: TextStyle[]): TypedSegment<'text'> {
+    return { type: 'text', data: { text, ...(style === undefined ? {} : { style }) } }
+  },
+  markdown(content: string): TypedSegment<'markdown'> {
+    return { type: 'markdown', data: { content } }
+  },
+  button(label: string, options: { link: string } | { command: string }): TypedSegment<'button'> {
+    return 'link' in options
+      ? { type: 'button', data: { label, kind: 'link', value: options.link } }
+      : { type: 'button', data: { label, kind: 'command', value: options.command } }
   },
   at(id: string): TypedSegment<'at'> {
     return { type: 'at', data: { id } }

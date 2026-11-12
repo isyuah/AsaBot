@@ -2,13 +2,22 @@ import type { AddressInfo } from 'node:net'
 import { isDeepStrictEqual } from 'node:util'
 import type { Hono } from 'hono'
 import type { Logger } from 'pino'
-import type { Adapter, AdapterHost, BotInfo, OutgoingMessage, UpgradeHandler } from './adapter.ts'
-import { type Bot, BotRegistry } from './bot.ts'
+import type {
+  Adapter,
+  AdapterHost,
+  BotInfo,
+  OutgoingMessage,
+  PreparedOutgoing,
+  UpgradeHandler,
+} from './adapter.ts'
+import { type Bot, BotRegistry, type SendResult } from './bot.ts'
 import type { Config } from './config/schema.ts'
+import { type ApiCall, ApiInterceptors } from './dispatch/api.ts'
 import { Dispatcher } from './dispatch/dispatcher.ts'
 import { OutgoingHooks } from './dispatch/outgoing.ts'
 import { MessageStats } from './dispatch/stats.ts'
 import type { DispatchEvent } from './dispatch/types.ts'
+import { NoBotOnlineError } from './errors.ts'
 import type {
   AnyEvent,
   EventMap,
@@ -21,12 +30,14 @@ import type {
   SessionServices,
 } from './event/index.ts'
 import { logger as defaultLogger } from './logger.ts'
-import type { Message } from './message/index.ts'
+import type { Sendable } from './message/index.ts'
+import { lowerMessage } from './message/lower.ts'
 import { PluginManager } from './plugin/manager.ts'
 import type { PackageOptions } from './plugin/packages.ts'
 import { TaskCoordinator } from './plugin/tasks.ts'
 import type { PluginStateEvent } from './plugin/types.ts'
 import { Storage } from './storage/index.ts'
+import { type Target, targetSchema } from './target.ts'
 
 type AppState = 'created' | 'running' | 'stopped'
 export interface ServerService {
@@ -76,6 +87,7 @@ export class App implements AdapterHost {
   readonly logger: Logger
   readonly dispatcher: Dispatcher
   readonly outgoing: OutgoingHooks
+  readonly apiInterceptors = new ApiInterceptors()
   readonly tasks = new TaskCoordinator()
   readonly sessionServices: SessionServices
   readonly events: CoreEvents
@@ -282,12 +294,18 @@ export class App implements AdapterHost {
     return this.dispatcher.whenIdle()
   }
 
-  prepareOutgoing(input: OutgoingMessage): Promise<Message> {
-    return this.outgoing.prepare(input)
+  async prepareOutgoing(input: OutgoingMessage): Promise<PreparedOutgoing> {
+    const prepared = await this.outgoing.prepare(input)
+    return Array.isArray(prepared) ? lowerMessage(input.bot, prepared, this.logger) : prepared
+  }
+
+  invokeApi(call: ApiCall, execute: (args: unknown[]) => Promise<unknown>): Promise<unknown> {
+    return this.apiInterceptors.invoke(call, execute)
   }
 
   registerBot(bot: Bot): void {
     this.bots.register(bot)
+    this.apiInterceptors.wrap(bot)
   }
 
   unregisterBot(bot: Bot): void {
@@ -300,6 +318,22 @@ export class App implements AdapterHost {
 
   getBot(platform: string, selfId: string): Bot | undefined {
     return this.bots.get(platform, selfId)
+  }
+
+  async send(target: Target | string, content: Sendable): Promise<SendResult> {
+    const destination = targetSchema.parse(target)
+    const bot = this.bots
+      .list()
+      .find(
+        (item) =>
+          item.status === 'online' &&
+          item.platform === destination.platform &&
+          (destination.selfId === undefined || item.selfId === destination.selfId),
+      )
+    if (!bot) throw new NoBotOnlineError()
+    return destination.type === 'group'
+      ? bot.sendGroup(destination.id, content)
+      : bot.sendPrivate(destination.id, content)
   }
 
   get status(): AppState {

@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
+import type { PreparedOutgoing } from '../../core/adapter.ts'
 import type {
   ForwardMessage,
   GroupInfo,
@@ -16,10 +17,16 @@ import { incomingMessage } from './message.ts'
 import type { OneBotMessage } from './types.ts'
 
 type Request = (action: string, params?: Record<string, unknown>) => Promise<unknown>
+export type OneBotOutgoingRequest = (action: string, params: Record<string, unknown>) => Promise<unknown>
 
 export interface OneBotApiHooks {
   assertOnline?: () => void
-  prepareOutgoing?: (target: MessageTarget, message: Message) => Promise<Message>
+  prepareOutgoing?: (target: MessageTarget, message: Message) => Promise<PreparedOutgoing>
+  executeOutgoing?: (
+    action: string,
+    params: Record<string, unknown>,
+    execute: OneBotOutgoingRequest,
+  ) => Promise<unknown>
   onMessageSent?: (input: {
     messageType: 'private' | 'group'
     userId?: string
@@ -176,39 +183,11 @@ export class OneBotApiImpl implements OneBotApi {
   }
 
   async sendPrivateMsg(userId: string, content: Sendable): Promise<SendResult> {
-    this.hooks.assertOnline?.()
-    const message = await this.prepare({ type: 'private', id: userId }, content)
-    const result = messageResult(
-      await this.request('send_private_msg', {
-        user_id: idNumber(userId),
-        message: await normalizeOutbound(message),
-      }),
-    )
-    this.hooks.onMessageSent?.({
-      messageType: 'private',
-      userId,
-      messageId: result.messageId,
-      message,
-    })
-    return result
+    return this.sendOutgoing('send_private_msg', { type: 'private', id: userId }, content, false)
   }
 
   async sendGroupMsg(groupId: string, content: Sendable): Promise<SendResult> {
-    this.hooks.assertOnline?.()
-    const message = await this.prepare({ type: 'group', id: groupId }, content)
-    const result = messageResult(
-      await this.request('send_group_msg', {
-        group_id: idNumber(groupId),
-        message: await normalizeOutbound(message),
-      }),
-    )
-    this.hooks.onMessageSent?.({
-      messageType: 'group',
-      groupId,
-      messageId: result.messageId,
-      message,
-    })
-    return result
+    return this.sendOutgoing('send_group_msg', { type: 'group', id: groupId }, content, false)
   }
 
   async deleteMsg(messageId: string): Promise<void> {
@@ -344,39 +323,63 @@ export class OneBotApiImpl implements OneBotApi {
   }
 
   async sendGroupForwardMsg(groupId: string, messages: OneBotForwardNode[]): Promise<SendResult> {
-    this.hooks.assertOnline?.()
-    const prepared = await this.prepareNodes({ type: 'group', id: groupId }, messages)
-    const result = messageResult(
-      await this.request('send_group_forward_msg', {
-        group_id: idNumber(groupId),
-        messages: await normalizeForwardNodes(prepared),
-      }),
-    )
-    this.hooks.onMessageSent?.({
-      messageType: 'group',
-      groupId,
-      messageId: result.messageId,
-      message: [seg.forward(result.messageId)],
-    })
-    return result
+    return this.sendOutgoing('send_group_forward_msg', { type: 'group', id: groupId }, messages, true)
   }
 
   async sendPrivateForwardMsg(userId: string, messages: OneBotForwardNode[]): Promise<SendResult> {
-    this.hooks.assertOnline?.()
-    const prepared = await this.prepareNodes({ type: 'private', id: userId }, messages)
-    const result = messageResult(
-      await this.request('send_private_forward_msg', {
-        user_id: idNumber(userId),
-        messages: await normalizeForwardNodes(prepared),
-      }),
-    )
-    this.hooks.onMessageSent?.({
-      messageType: 'private',
-      userId,
-      messageId: result.messageId,
-      message: [seg.forward(result.messageId)],
-    })
-    return result
+    return this.sendOutgoing('send_private_forward_msg', { type: 'private', id: userId }, messages, true)
+  }
+
+  private async sendOutgoing(
+    action: string,
+    destination: MessageTarget,
+    content: Sendable | OneBotForwardNode[],
+    forward: boolean,
+  ): Promise<SendResult> {
+    const idKey = destination.type === 'group' ? 'group_id' : 'user_id'
+    const messageKey = forward ? 'messages' : 'message'
+    const params = { [idKey]: idNumber(destination.id), [messageKey]: content }
+    let replacement: { response: unknown; sent: SendResult } | undefined
+    const execute: OneBotOutgoingRequest = async (actualAction, actualParams) => {
+      this.hooks.assertOnline?.()
+      const id = String(actualParams[idKey])
+      const target = { type: destination.type, id }
+      let wireContent: OneBotMessage | Record<string, unknown>[]
+      let eventMessage: Message | undefined
+      if (forward) {
+        const prepared = await this.prepareNodes(target, actualParams[messageKey] as OneBotForwardNode[])
+        if (!Array.isArray(prepared)) {
+          replacement = { response: { message_id: prepared.sent.messageId }, sent: prepared.sent }
+          return replacement.response
+        }
+        wireContent = await normalizeForwardNodes(prepared)
+      } else {
+        const prepared = await this.prepare(target, actualParams[messageKey] as Sendable)
+        if (!Array.isArray(prepared)) {
+          replacement = { response: { message_id: prepared.sent.messageId }, sent: prepared.sent }
+          return replacement.response
+        }
+        wireContent = await normalizeOutbound(prepared)
+        eventMessage = prepared
+      }
+      const response = await this.request(actualAction, {
+        ...actualParams,
+        [idKey]: idNumber(id),
+        [messageKey]: wireContent,
+      })
+      const result = messageResult(response)
+      this.hooks.onMessageSent?.({
+        messageType: destination.type,
+        ...(destination.type === 'group' ? { groupId: id } : { userId: id }),
+        messageId: result.messageId,
+        message: eventMessage ?? [seg.forward(result.messageId)],
+      })
+      return response
+    }
+    const response = this.hooks.executeOutgoing
+      ? await this.hooks.executeOutgoing(action, params, execute)
+      : await execute(action, params)
+    return replacement && response === replacement.response ? replacement.sent : messageResult(response)
   }
 
   async getForwardMsg(id: string): Promise<ForwardMessage[]> {
@@ -399,7 +402,7 @@ export class OneBotApiImpl implements OneBotApi {
     })
   }
 
-  private async prepare(target: MessageTarget, content: Sendable): Promise<Message> {
+  private async prepare(target: MessageTarget, content: Sendable): Promise<PreparedOutgoing> {
     const message = normalizeSendable(content)
     return this.hooks.prepareOutgoing ? this.hooks.prepareOutgoing(target, message) : message
   }
@@ -407,7 +410,7 @@ export class OneBotApiImpl implements OneBotApi {
   private async prepareNodes(
     target: MessageTarget,
     nodes: OneBotForwardNode[],
-  ): Promise<OneBotForwardNode[]> {
+  ): Promise<OneBotForwardNode[] | { sent: SendResult }> {
     const result: OneBotForwardNode[] = []
     for (const node of nodes) {
       // A reference node points at a message that already exists on the platform, not content we produce;
@@ -415,6 +418,7 @@ export class OneBotApiImpl implements OneBotApi {
       if ('id' in node.data) result.push(node)
       else {
         const content = await this.prepare(target, node.data.content)
+        if (!Array.isArray(content)) return content
         result.push({ type: 'node', data: { ...node.data, content } })
       }
     }

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import type { App } from '../core/app.ts'
-import type { Bot } from '../core/bot.ts'
+import { type Bot, supports } from '../core/bot.ts'
 import type { CommandDefinition } from '../core/command/builder.ts'
 import { formatUsage } from '../core/command/parse.ts'
 import type { PluginState } from '../core/plugin/types.ts'
@@ -13,13 +13,14 @@ const version = (
 
 export function botView(app: App, bot: Bot) {
   const info = app.getBotInfo(bot)
-  const avatar = bot.getAvatarUrl?.(bot.selfId)
+  const avatar = supports(bot, 'getAvatarUrl') ? bot.getAvatarUrl?.(bot.selfId) : undefined
   return {
     platform: bot.platform,
     selfId: bot.selfId,
     ...(bot.nickname === undefined ? {} : { nickname: bot.nickname }),
     ...(avatar === undefined ? {} : { avatar }),
     status: bot.status,
+    capabilities: bot.capabilities,
     connection: info?.connection ?? '',
     ...(info?.url === undefined ? {} : { url: info.url }),
   }

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Duplex } from 'node:stream'
 import type { Logger } from 'pino'
 import WebSocket, { type RawData, WebSocketServer } from 'ws'
-import type { Adapter, AdapterHost, BotInfo } from '../../core/adapter.ts'
+import type { Adapter, AdapterHost, BotInfo, PreparedOutgoing } from '../../core/adapter.ts'
 import type {
   ForwardMessage,
   ForwardNode,
@@ -13,6 +13,7 @@ import type {
   SendResult,
   UserInfo,
 } from '../../core/bot.ts'
+import { botActions } from '../../core/bot.ts'
 import { ApiTimeoutError, NotConnectedError } from '../../core/errors.ts'
 import type {
   BotOfflineEvent,
@@ -26,7 +27,7 @@ import { createSession } from '../../core/event/index.ts'
 import type { Message, Sendable } from '../../core/message/index.ts'
 import { LruSet } from '../../core/utils/lru.ts'
 import { constantTimeEqual } from '../../core/utils/security.ts'
-import { OneBotApiImpl } from './api.ts'
+import { OneBotApiImpl, type OneBotOutgoingRequest } from './api.ts'
 import type { OneBotApi, OneBotBot } from './bot.ts'
 import { ApiError } from './errors.ts'
 import { incomingMessage } from './message.ts'
@@ -121,6 +122,11 @@ function platformId(value: unknown): string {
 
 class OneBotBotImpl implements OneBotBot {
   readonly platform = 'onebot11'
+  readonly capabilities = {
+    segments: ['text', 'at', 'face', 'image', 'audio', 'video', 'file', 'reply', 'forward', 'onebot11:*'],
+    textStyles: [],
+    actions: [...botActions, 'getAvatarUrl'],
+  }
   readonly onebot: OneBotApi
   readonly sentMessageIds = new LruSet<string>(1_000)
   private currentStatus: 'connecting' | 'online' | 'offline' = 'connecting'
@@ -133,9 +139,11 @@ class OneBotBotImpl implements OneBotBot {
     this.connection = connection
     this.selfId = selfId
     this.sendQueue = new SendQueue(options.sendQueue, options.logger, selfId)
-    this.onebot = new OneBotApiImpl((action, params) => this.connection.requestForBot(this, action, params), {
+    this.onebot = new OneBotApiImpl((action, params) => this.call(action, params), {
       assertOnline: () => this.connection.assertOnline(this),
       prepareOutgoing: (target, message) => this.connection.prepareOutgoing(this, target, message),
+      executeOutgoing: (action, params, execute) =>
+        this.connection.interceptOutgoing(this, action, params, execute),
       onMessageSent: (input) => {
         this.sentMessageIds.add(input.messageId)
         this.connection.emitMessageSent(this, input)
@@ -329,8 +337,19 @@ class OneBotSession {
     return this.request(action, params)
   }
 
-  prepareOutgoing(bot: OneBotBotImpl, target: MessageTarget, message: Message): Promise<Message> {
+  prepareOutgoing(bot: OneBotBotImpl, target: MessageTarget, message: Message): Promise<PreparedOutgoing> {
     return this.host.prepareOutgoing({ bot, target, message })
+  }
+
+  interceptOutgoing(
+    bot: OneBotBotImpl,
+    action: string,
+    params: Record<string, unknown>,
+    execute: OneBotOutgoingRequest,
+  ): Promise<unknown> {
+    return this.host.invokeApi({ bot, method: 'call', args: [action, params] }, (args) =>
+      execute(args[0] as string, args[1] as Record<string, unknown>),
+    )
   }
 
   assertOnline(bot: OneBotBotImpl): void {

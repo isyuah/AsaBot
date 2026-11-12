@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Adapter, AdapterHost } from '../../core/adapter.ts'
 import type {
   Bot,
+  BotCapabilities,
   ForwardMessage,
   ForwardNode,
   GroupInfo,
@@ -11,11 +12,13 @@ import type {
   SendResult,
   UserInfo,
 } from '../../core/bot.ts'
+import { botActions } from '../../core/bot.ts'
 import { UnsupportedError } from '../../core/errors.ts'
 import type { BaseEvent, NoticeEvent } from '../../core/event/index.ts'
 import { createSession } from '../../core/event/index.ts'
 import type { Message, Sendable } from '../../core/message/index.ts'
 import { normalizeSendable, seg } from '../../core/message/index.ts'
+import { neutralSegments } from '../../core/message/lower.ts'
 import { LruSet } from '../../core/utils/lru.ts'
 
 export interface VirtualSend {
@@ -41,6 +44,7 @@ export class VirtualBot implements Bot {
   readonly platform = 'virtual'
   readonly selfId: string
   readonly nickname = 'VirtualBot'
+  readonly capabilities: BotCapabilities
   status: Bot['status'] = 'online'
   readonly sends: VirtualSend[] = []
   readonly actions: { action: string; params: Record<string, unknown> }[] = []
@@ -49,16 +53,28 @@ export class VirtualBot implements Bot {
   private readonly forwards = new Map<string, ForwardMessage[]>()
   private readonly host: AdapterHost
 
-  constructor(host: AdapterHost, selfId: string) {
+  constructor(host: AdapterHost, selfId: string, capabilities: Partial<BotCapabilities> = {}) {
     this.host = host
     this.selfId = selfId
+    this.capabilities = {
+      segments: neutralSegments,
+      textStyles: ['bold', 'italic', 'underline', 'strike', 'code', 'spoiler'],
+      actions: [...botActions, 'getAvatarUrl'],
+      ...capabilities,
+    }
+  }
+
+  private assertAction(action: string): void {
+    if (!this.capabilities.actions.includes(action)) throw new UnsupportedError(this.platform, action)
   }
 
   async sendPrivate(userId: string, content: Sendable): Promise<SendResult> {
+    this.assertAction('sendPrivate')
     return this.send('private', userId, content)
   }
 
   async sendGroup(groupId: string, content: Sendable): Promise<SendResult> {
+    this.assertAction('sendGroup')
     return this.send('group', groupId, content)
   }
 
@@ -68,6 +84,7 @@ export class VirtualBot implements Bot {
       target: { type, id: target },
       message: normalizeSendable(content),
     })
+    if (!Array.isArray(message)) return message.sent
     return this.record(type, target, message)
   }
 
@@ -106,12 +123,14 @@ export class VirtualBot implements Bot {
   }
 
   async getMessage(messageId: string): Promise<MessageInfo> {
+    this.assertAction('getMessage')
     const message = this.messages.get(messageId)
     if (!message) throw new Error(`Message ${messageId} not found`)
     return message
   }
 
   async sendForward(target: MessageTarget, nodes: ForwardNode[]): Promise<SendResult> {
+    this.assertAction('sendForward')
     const messages: ForwardMessage[] = []
     for (const node of nodes) {
       const message = await this.host.prepareOutgoing({
@@ -119,6 +138,7 @@ export class VirtualBot implements Bot {
         target,
         message: normalizeSendable(node.message),
       })
+      if (!Array.isArray(message)) return message.sent
       messages.push({ userId: node.userId, nickname: node.nickname, message })
     }
     const result = this.record(target.type, target.id, [seg.forward(String(this.sends.length + 1))])
@@ -127,45 +147,63 @@ export class VirtualBot implements Bot {
   }
 
   async getForward(id: string): Promise<ForwardMessage[]> {
+    this.assertAction('getForward')
     const messages = this.forwards.get(id)
     if (!messages) throw new Error(`Forward ${id} not found`)
     return messages
   }
 
   async getGroupMembers(groupId: string): Promise<GroupMemberInfo[]> {
+    this.assertAction('getGroupMembers')
     this.actions.push({ action: 'getGroupMembers', params: { groupId } })
     return []
   }
   async muteMember(groupId: string, userId: string, duration: number): Promise<void> {
+    this.assertAction('muteMember')
     this.actions.push({ action: 'muteMember', params: { groupId, userId, duration } })
   }
   async kickMember(groupId: string, userId: string, options?: { rejectRequest?: boolean }): Promise<void> {
+    this.assertAction('kickMember')
     this.actions.push({
       action: 'kickMember',
       params: { groupId, userId, ...(options === undefined ? {} : { options }) },
     })
   }
   async setMemberCard(groupId: string, userId: string, card: string): Promise<void> {
+    this.assertAction('setMemberCard')
     this.actions.push({ action: 'setMemberCard', params: { groupId, userId, card } })
   }
 
-  async deleteMessage(_messageId: string): Promise<void> {
-    throw new UnsupportedError(this.platform, 'deleteMessage')
+  async deleteMessage(messageId: string): Promise<void> {
+    this.assertAction('deleteMessage')
+    this.actions.push({ action: 'deleteMessage', params: { messageId } })
+    this.messages.delete(messageId)
   }
   async getSelf(): Promise<UserInfo> {
-    throw new UnsupportedError(this.platform, 'getSelf')
+    this.assertAction('getSelf')
+    return { userId: this.selfId, nickname: this.nickname }
   }
   async getGroupList(): Promise<GroupInfo[]> {
-    throw new UnsupportedError(this.platform, 'getGroupList')
+    this.assertAction('getGroupList')
+    return []
   }
-  async getGroupMember(_groupId: string, _userId: string): Promise<GroupMemberInfo> {
-    throw new UnsupportedError(this.platform, 'getGroupMember')
+  async getGroupMember(groupId: string, userId: string): Promise<GroupMemberInfo> {
+    this.assertAction('getGroupMember')
+    return { groupId, userId, nickname: userId }
   }
   async getFriendList(): Promise<UserInfo[]> {
-    throw new UnsupportedError(this.platform, 'getFriendList')
+    this.assertAction('getFriendList')
+    return []
   }
-  async call(_action: string, _params?: Record<string, unknown>): Promise<unknown> {
-    throw new UnsupportedError(this.platform, 'call')
+  async call(action: string, params?: Record<string, unknown>): Promise<unknown> {
+    this.assertAction('call')
+    this.actions.push({ action, params: params ?? {} })
+    return {}
+  }
+
+  getAvatarUrl(_userId: string): string | undefined {
+    this.assertAction('getAvatarUrl')
+    return undefined
   }
 }
 
@@ -175,9 +213,9 @@ export class VirtualAdapter implements Adapter {
   private readonly host: AdapterHost
   private queue: Promise<void> = Promise.resolve()
 
-  constructor(host: AdapterHost, options: { selfId?: string } = {}) {
+  constructor(host: AdapterHost, options: { selfId?: string; capabilities?: Partial<BotCapabilities> } = {}) {
     this.host = host
-    this.bot = new VirtualBot(host, options.selfId ?? '10000')
+    this.bot = new VirtualBot(host, options.selfId ?? '10000', options.capabilities)
   }
 
   async start(): Promise<void> {

@@ -1099,6 +1099,7 @@ targetSchema                                    // zod：接受上面的字符�
   - 没有指定时，用该平台第一个在线的 Bot。
 - `broadcast` 逐个发送：单个目标失败不影响其余目标，失败记在对应结果的 `error` 中。`interval` 默认为 0，各 Bot 的发送队列照常限速。
 - `Target` 是可以序列化的普通对象，可以直接存进 KV 或持久任务（A6）。`MessageTarget { type, id }` 仍然用于 Bot 自己的方法。
+- 字符串形式要求 platform 和 selfId 不含冒号，并且 selfId 不能恰好是 `group` 或 `private`；不满足时只能使用对象形式。
 - 面板的 `/send` 和对外 API 的 `/api/v1/send` 请求体改为 `{ target: Target | string, message }`，不再接受单独的 `platform`、`selfId` 字段。
 
 ### 24.4 F4 命令增强（修订 9、10）
@@ -1164,7 +1165,7 @@ ctx.interceptApi(
   - 不调用 `next()` 时，直接返回模拟结果；
   - 抛出的异常原样传给调用方。
 - 按 priority 降序执行，同一优先级按注册顺序。
-- **覆盖范围**：Bot 的所有中立方法，加上 `call`。Session 的 `send` 和 `reply` 按 `sendGroup` / `sendPrivate` 计入；平台专属封装（例如 `bot.onebot.*`）内部统一走 `bot.call`，因此以 `call` 的形式出现。
+- **覆盖范围**：Bot 的所有异步中立方法，加上 `call`。`getAvatarUrl` 只是同步拼出地址、不调用平台，所以不经过拦截器。Session 的 `send` 和 `reply` 按 `sendGroup` / `sendPrivate` 计入；平台专属封装（例如 `bot.onebot.*`）内部统一走 `bot.call`，因此以 `call` 的形式出现。
 - **实现位置**：`registerBot` 时，core 在 Bot 实例上原地包装这些方法。适配器在事件中放入的是同一个实例，所以无论从哪里拿到 Bot 引用，调用都会经过拦截器。
 - **执行顺序**：发送类调用先经过拦截器，再在适配器内部经过发送前钩子和降级。
 - 拦截器内部发起的 API 调用不再经过拦截器（用 AsyncLocalStorage 标记，与 A9 相同）。

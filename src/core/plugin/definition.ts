@@ -7,8 +7,17 @@ export interface PluginDefinition<Schema extends z.ZodType | undefined = z.ZodTy
   description?: string
   config?: Schema
   depends?: string[]
-  inject?: string[]
+  inject?: string[] | { required?: string[]; optional?: string[] }
   setup(ctx: Context<Schema extends z.ZodType ? z.output<Schema> : undefined>): void | Promise<void>
+}
+
+export function serviceDependencies(inject: PluginDefinition['inject']): {
+  required: readonly string[]
+  optional: readonly string[]
+} {
+  return Array.isArray(inject)
+    ? { required: inject, optional: [] }
+    : { required: inject?.required ?? [], optional: inject?.optional ?? [] }
 }
 
 export function definePlugin(definition: PluginDefinition<undefined>): PluginDefinition<undefined>

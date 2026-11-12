@@ -746,17 +746,14 @@ describe('OneBot neutral management and forwarding', () => {
     ])
     expect((await mock.waitForCall('get_forward_msg')).params).toEqual({ id: 'resid-abc' })
     await bot.onebot.sendPrivateMsg('300', 'direct')
-    expect((await mock.waitForCall('send_private_msg')).params.message).toEqual([
-      seg.text('direct'),
-      seg.text('!'),
-    ])
+    expect((await mock.waitForCall('send_private_msg')).params.message).toEqual([seg.text('direct!')])
     await bot.onebot.sendPrivateForwardMsg('300', [
       { type: 'node', data: { userId: '400', nickname: 'Bob', content: 'direct' } },
     ])
     expect((await mock.waitForCall('send_private_forward_msg')).params.messages).toEqual([
       {
         type: 'node',
-        data: { user_id: 400, nickname: 'Bob', content: [seg.text('direct'), seg.text('!')] },
+        data: { user_id: 400, nickname: 'Bob', content: [seg.text('direct!')] },
       },
     ])
     const lookups = mock.calls.filter((call) => call.action === 'get_msg').length
@@ -773,5 +770,73 @@ describe('OneBot neutral management and forwarding', () => {
       ]),
     ).rejects.toMatchObject({ name: 'SendBlockedError', plugin: 'send-filter' })
     expect(mock.calls.filter((call) => call.action === 'send_group_forward_msg')).toHaveLength(count)
+  })
+
+  it('intercepts OneBot sends before hooks and honors replacement results on every send path', async () => {
+    const order: string[] = []
+    const filter = definePlugin({
+      name: 'replacement',
+      setup(ctx) {
+        ctx.interceptApi(async (call, next) => {
+          order.push(`api:${call.method}`)
+          if (call.method === 'call' && call.args[0] === 'send_group_msg') {
+            await call.bot.call('get_group_list')
+          }
+          return next()
+        })
+        ctx.beforeSend(() => {
+          order.push('hook')
+          return { sent: { messageId: 'replacement-id' } }
+        })
+      },
+    })
+    const { app, mock } = await setup({ token: 'test-token' }, [filter])
+    const bot = app.bots.list()[0]
+    if (!bot || !isOneBot(bot)) throw new Error('OneBot did not come online')
+    const sessionPromise = new Promise<Session>((resolve) => {
+      app.events.on('message.group', resolve)
+    })
+    mock.emitGroupMessage({ groupId: '200', userId: '300', message: 'incoming' })
+    const session = await sessionPromise
+    const results = [
+      await bot.sendGroup('200', 'original'),
+      await bot.sendPrivate('300', 'original'),
+      await bot.sendForward({ type: 'group', id: '200' }, [
+        { userId: '300', nickname: 'A', message: 'node' },
+      ]),
+      await bot.onebot.sendGroupMsg('200', 'original'),
+      await bot.onebot.sendPrivateMsg('300', 'original'),
+      await bot.onebot.sendGroupForwardMsg('200', [
+        { type: 'node', data: { userId: '300', nickname: 'A', content: 'node' } },
+      ]),
+      await bot.onebot.sendPrivateForwardMsg('300', [
+        { type: 'node', data: { userId: '300', nickname: 'A', content: 'node' } },
+      ]),
+      await session.send('original'),
+      await session.reply('original'),
+    ]
+    expect(results).toEqual(Array.from({ length: 9 }, () => ({ messageId: 'replacement-id' })))
+    expect(order).toEqual([
+      'api:sendGroup',
+      'hook',
+      'api:sendPrivate',
+      'hook',
+      'api:sendForward',
+      'hook',
+      'api:call',
+      'hook',
+      'api:call',
+      'hook',
+      'api:call',
+      'hook',
+      'api:call',
+      'hook',
+      'api:sendGroup',
+      'hook',
+      'api:sendGroup',
+      'hook',
+    ])
+    expect(mock.calls.filter((call) => call.action.startsWith('send_'))).toEqual([])
+    expect(mock.calls.filter((call) => call.action === 'get_group_list')).toHaveLength(1)
   })
 })

@@ -1,5 +1,6 @@
 import type { Bot, ForwardNode, SendResult } from '../bot.ts'
 import type { Message, Sendable } from '../message/index.ts'
+import type { Target } from '../target.ts'
 
 export interface PromptOptions {
   timeout?: string | number
@@ -38,6 +39,7 @@ export interface Session extends BaseEvent {
   readonly userId: string
   readonly groupId?: string
   readonly channelKey: string
+  readonly target: Target
   readonly message: Message
   readonly text: string
   readonly sender: {

@@ -1,4 +1,38 @@
-import type { Message, Sendable } from './message/index.ts'
+import type { Message, Sendable, TextStyle } from './message/index.ts'
+
+export interface BotCapabilities {
+  segments: readonly string[]
+  textStyles: readonly TextStyle[]
+  actions: readonly string[]
+}
+
+export const botActions = [
+  'sendPrivate',
+  'sendGroup',
+  'sendForward',
+  'getForward',
+  'deleteMessage',
+  'getMessage',
+  'getSelf',
+  'getGroupList',
+  'getGroupMember',
+  'getGroupMembers',
+  'muteMember',
+  'kickMember',
+  'setMemberCard',
+  'getFriendList',
+  'call',
+] as const
+
+export function supports(bot: Bot, feature: string): boolean {
+  return bot.capabilities.actions.includes(feature) || supportsSegment(bot, feature)
+}
+
+export function supportsSegment(bot: Bot, feature: string): boolean {
+  return bot.capabilities.segments.some(
+    (segment) => segment === feature || (segment.endsWith(':*') && feature.startsWith(segment.slice(0, -1))),
+  )
+}
 
 export interface MessageInfo {
   messageId: string
@@ -54,6 +88,7 @@ export interface Bot {
   readonly platform: string
   readonly selfId: string
   readonly status: 'connecting' | 'online' | 'offline'
+  readonly capabilities: BotCapabilities
   /** Display name of the bot account, known once it has logged in. */
   readonly nickname?: string
   sendPrivate(userId: string, content: Sendable): Promise<SendResult>

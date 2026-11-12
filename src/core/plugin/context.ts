@@ -6,8 +6,9 @@ import type { Logger } from 'pino'
 import type { Services } from '../../index.ts'
 import type { BeforeSend } from '../adapter.ts'
 import type { App } from '../app.ts'
-import type { Bot } from '../bot.ts'
+import type { Bot, SendResult } from '../bot.ts'
 import type { CommandBuilder } from '../command/builder.ts'
+import type { ApiInterceptor } from '../dispatch/api.ts'
 import type { Disposer, MatchHandler, MatchPattern, Middleware, Scope } from '../dispatch/types.ts'
 import { NoBotOnlineError, PluginError } from '../errors.ts'
 import type {
@@ -18,8 +19,12 @@ import type {
   PlatformNoticeEvent,
   RequestEvent,
 } from '../event/index.ts'
+import type { Sendable } from '../message/index.ts'
 import { Scheduler } from '../scheduler.ts'
 import type { KVStore } from '../storage/index.ts'
+import { type Target, targetSchema } from '../target.ts'
+import { type Duration, parseDuration } from '../utils/duration.ts'
+import { type PluginDefinition, serviceDependencies } from './definition.ts'
 import { PersistentTasks, type TaskHandle, type TaskHandler } from './tasks.ts'
 import type { PluginStateEvent } from './types.ts'
 
@@ -38,15 +43,15 @@ export class Context<Config = undefined> {
   private readonly kv: KVStore
   private readonly tasks: PersistentTasks
   private readonly cleanups: Cleanup[] = []
-  private readonly dependencies: readonly string[]
+  private readonly dependencies: ReturnType<typeof serviceDependencies>
   private routeApp?: Hono
   private disposed = false
 
-  constructor(app: App, name: string, config: Config, dependencies: readonly string[] = []) {
+  constructor(app: App, name: string, config: Config, dependencies?: PluginDefinition['inject']) {
     this.app = app
     this.owner = name
     this.value = config
-    this.dependencies = dependencies
+    this.dependencies = serviceDependencies(dependencies)
     this.childLogger = app.logger.child({ plugin: name })
     this.scope = { owner: name, signal: this.controller.signal }
     this.scheduler = new Scheduler(this.childLogger, this.controller.signal, app.config.timezone)
@@ -105,6 +110,31 @@ export class Context<Config = undefined> {
     return bot
   }
 
+  send(target: Target | string, content: Sendable): Promise<SendResult> {
+    this.assertActive()
+    return this.app.send(target, content)
+  }
+
+  async broadcast(
+    targets: (Target | string)[],
+    content: Sendable,
+    options: { interval?: Duration } = {},
+  ): Promise<{ target: Target; result?: SendResult; error?: Error }[]> {
+    this.assertActive()
+    const destinations = targets.map((target) => targetSchema.parse(target))
+    const interval = parseDuration(options.interval ?? 0)
+    const results: { target: Target; result?: SendResult; error?: Error }[] = []
+    for (const [index, target] of destinations.entries()) {
+      if (index > 0 && interval > 0) await new Promise<void>((resolve) => setTimeout(resolve, interval))
+      try {
+        results.push({ target, result: await this.send(target, content) })
+      } catch (error) {
+        results.push({ target, error: error instanceof Error ? error : new Error(String(error)) })
+      }
+    }
+    return results
+  }
+
   migrate(steps: string[]): void {
     this.assertActive()
     this.app.storage.migrate(this.owner, steps)
@@ -122,8 +152,18 @@ export class Context<Config = undefined> {
 
   inject<K extends string>(name: K): K extends keyof Services ? Services[K] : unknown {
     this.assertActive()
-    if (!this.dependencies.includes(name)) throw new PluginError(`插件 "${this.owner}" 未声明服务 ${name}`)
+    if (!this.dependencies.required.includes(name))
+      throw new PluginError(`插件 "${this.owner}" 未声明服务 ${name}`)
     return this.app.plugins.inject(name) as K extends keyof Services ? Services[K] : unknown
+  }
+
+  injectOptional<K extends string>(name: K): (K extends keyof Services ? Services[K] : unknown) | undefined {
+    this.assertActive()
+    if (!this.dependencies.optional.includes(name))
+      throw new PluginError(`插件 "${this.owner}" 未声明可选服务 ${name}`)
+    return this.app.plugins.injectOptional(name) as
+      | (K extends keyof Services ? Services[K] : unknown)
+      | undefined
   }
 
   on<K extends keyof KnownEventMap>(
@@ -159,6 +199,15 @@ export class Context<Config = undefined> {
   beforeSend(fn: BeforeSend, options: { priority?: number } = {}): Disposer {
     this.assertActive()
     const dispose = this.app.outgoing.add(this.owner, fn, options.priority ?? 0)
+    this.controller.signal.addEventListener('abort', dispose, { once: true })
+    return () => {
+      this.controller.signal.removeEventListener('abort', dispose)
+      dispose()
+    }
+  }
+  interceptApi(fn: ApiInterceptor, options: { priority?: number } = {}): Disposer {
+    this.assertActive()
+    const dispose = this.app.apiInterceptors.add(fn, options.priority ?? 0)
     this.controller.signal.addEventListener('abort', dispose, { once: true })
     return () => {
       this.controller.signal.removeEventListener('abort', dispose)

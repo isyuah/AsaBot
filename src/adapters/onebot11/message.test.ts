@@ -6,7 +6,7 @@ import { incomingMessage } from './message.ts'
 
 describe('OneBot message conversion', () => {
   it('round trips escaped text, parameters and unknown segments', () => {
-    const message = [seg.text('a&b[c],x'), { type: 'mystery', data: { value: 'a&b[c],x' } }]
+    const message = [seg.text('a&b[c],x'), { type: 'onebot11:mystery', data: { value: 'a&b[c],x' } }]
     const cq = toCQ(message)
     expect(cq).toBe('a&amp;b&#91;c&#93;,x[CQ:mystery,value=a&amp;b&#91;c&#93;&#44;x]')
     expect(toCQ(parseCQ(cq))).toBe(cq)
@@ -14,7 +14,7 @@ describe('OneBot message conversion', () => {
     expect(normalizeSendable('[CQ:at,qq=123]literal')).toEqual([seg.text('[CQ:at,qq=123]literal')])
     expect(parseCQ('&#44; [CQ:unknown,value=&#44;]')).toEqual([
       seg.text('&#44; '),
-      { type: 'unknown', data: { value: ',' } },
+      { type: 'onebot11:unknown', data: { value: ',' } },
     ])
   })
 
@@ -30,10 +30,14 @@ describe('OneBot message conversion', () => {
       seg.at('123'),
       seg.audio('base64://AA=='),
       { type: 'image', data: { file: 'https://example.invalid/i', sub_type: 1 } },
-      { type: 'json', data: { data: '{}' } },
+      { type: 'onebot11:json', data: { data: '{}' } },
     ])
     expect(await normalizeOutbound(message)).toEqual(protocol)
     expect(parseCQ('[CQ:at,qq=123][CQ:record,file=base64://AA==]')).toEqual(message.slice(0, 2))
+    expect(parseCQ('[CQ:markdown,content=hello][CQ:button,label=go,kind=command,value=/go]')).toEqual([
+      seg.markdown('hello'),
+      seg.button('go', { command: '/go' }),
+    ])
     expect(toCQ(message.slice(0, 2))).toBe('[CQ:at,qq=123][CQ:record,file=base64://AA==]')
     await expect(normalizeOutbound(seg.at('not-a-number'))).rejects.toThrow(/safe integer/)
     await expect(normalizeOutbound(seg.at('9007199254740992'))).rejects.toThrow(/safe integer/)
