@@ -42,4 +42,9 @@ describe('OneBot message conversion', () => {
       { type: 'forward', data: { id: 'resource-id' } },
     ])
   })
+
+  it('rejects malformed known segments at the protocol boundary', () => {
+    expect(() => incomingMessage([{ type: 'text', data: { text: 123 } }])).toThrow(/text/)
+    expect(() => incomingMessage([{ type: 'at', data: { qq: {} } }])).toThrow(/at/)
+  })
 })

@@ -21,6 +21,8 @@ const coreMigrations = [
    CREATE TABLE access_list (list TEXT NOT NULL, subject TEXT NOT NULL, key TEXT NOT NULL,
     PRIMARY KEY (list, subject, key));`,
   `CREATE TABLE plugin_tables (plugin TEXT NOT NULL, table_name TEXT PRIMARY KEY);`,
+  `CREATE TABLE scheduled_tasks (plugin TEXT NOT NULL, name TEXT NOT NULL, key TEXT NOT NULL,
+    run_at INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (plugin, name, key));`,
 ]
 
 export class Storage {
@@ -185,7 +187,7 @@ export class Storage {
     db.exec('BEGIN IMMEDIATE')
     try {
       db.exec('PRAGMA defer_foreign_keys = ON')
-      for (const table of ['kv', 'migrations', 'plugin_group_state']) {
+      for (const table of ['kv', 'migrations', 'plugin_group_state', 'scheduled_tasks']) {
         db.prepare(`DELETE FROM ${table} WHERE plugin = ?`).run(owner)
       }
       for (const row of db.prepare('SELECT table_name FROM plugin_tables WHERE plugin = ?').all(owner)) {

@@ -5,6 +5,28 @@ export class ConfigError extends Error {
   }
 }
 
+export class UnsupportedError extends Error {
+  readonly platform: string
+  readonly operation: string
+
+  constructor(platform: string, operation: string) {
+    super(`${platform} 不支持 ${operation}`)
+    this.name = 'UnsupportedError'
+    this.platform = platform
+    this.operation = operation
+  }
+}
+
+export class SendBlockedError extends Error {
+  readonly plugin: string
+
+  constructor(plugin: string) {
+    super(`发送被插件 ${plugin} 拦截`)
+    this.name = 'SendBlockedError'
+    this.plugin = plugin
+  }
+}
+
 export class ApiTimeoutError extends Error {
   readonly action: string
   readonly timeout: number

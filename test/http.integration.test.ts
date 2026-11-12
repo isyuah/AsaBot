@@ -214,6 +214,8 @@ describe('HTTP service contract', () => {
     const plugins = await (await request(url, cookie, '/plugins')).json()
     expect(plugins.find((item: { name: string }) => item.name === 'panel-sample')).toMatchObject({
       state: 'active',
+      provides: [],
+      inject: [],
       config: { amount: 1 },
       commands: expect.arrayContaining([
         {

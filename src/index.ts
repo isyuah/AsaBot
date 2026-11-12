@@ -1,11 +1,23 @@
 export { z } from 'zod'
+export interface Services extends Record<never, never> {}
 export { createApp } from './bootstrap.ts'
-export type { Adapter, AdapterHost, BotInfo, UpgradeHandler } from './core/adapter.ts'
+export type {
+  Adapter,
+  AdapterHost,
+  BeforeSend,
+  BotInfo,
+  OutgoingMessage,
+  UpgradeHandler,
+} from './core/adapter.ts'
 export { App } from './core/app.ts'
 export type {
   Bot,
+  ForwardMessage,
+  ForwardNode,
   GroupInfo,
   GroupMemberInfo,
+  MessageInfo,
+  MessageTarget,
   SendResult,
   UserInfo,
 } from './core/bot.ts'
@@ -36,13 +48,16 @@ export {
   NotConnectedError,
   PluginConfigError,
   PluginError,
+  SendBlockedError,
   SendQueueFullError,
+  UnsupportedError,
 } from './core/errors.ts'
 export type {
   AnyEvent,
   BaseEvent,
   BotOfflineEvent,
   BotOnlineEvent,
+  DialogueOptions,
   EventMap,
   FriendRequestEvent,
   GroupInviteRequestEvent,
@@ -78,8 +93,9 @@ export {
   logger,
   subscribeLogs,
 } from './core/logger.ts'
-export type { Message, Segment, Sendable } from './core/message/index.ts'
+export type { KnownSegment, Message, Segment, Sendable, UnknownSegment } from './core/message/index.ts'
 export {
+  isSegment,
   normalizeSendable,
   plainText,
   seg,
@@ -89,6 +105,7 @@ export { perm } from './core/permission.ts'
 export { Context } from './core/plugin/context.ts'
 export { definePlugin, type PluginDefinition } from './core/plugin/definition.ts'
 export { PluginManager } from './core/plugin/manager.ts'
+export type { TaskHandle, TaskHandler, TaskOptions } from './core/plugin/tasks.ts'
 export type { PluginState, PluginStateEvent } from './core/plugin/types.ts'
 export type { CooldownScope } from './core/ratelimit.ts'
 export {

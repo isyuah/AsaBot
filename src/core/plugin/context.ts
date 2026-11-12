@@ -3,6 +3,8 @@ import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { Hono } from 'hono'
 import type { Logger } from 'pino'
+import type { Services } from '../../index.ts'
+import type { BeforeSend } from '../adapter.ts'
 import type { App } from '../app.ts'
 import type { Bot } from '../bot.ts'
 import type { CommandBuilder } from '../command/builder.ts'
@@ -18,6 +20,7 @@ import type {
 } from '../event/index.ts'
 import { Scheduler } from '../scheduler.ts'
 import type { KVStore } from '../storage/index.ts'
+import { PersistentTasks, type TaskHandle, type TaskHandler } from './tasks.ts'
 import type { PluginStateEvent } from './types.ts'
 
 type Listener = (event: AnyEvent | PluginStateEvent, signal: AbortSignal) => unknown | Promise<unknown>
@@ -33,18 +36,29 @@ export class Context<Config = undefined> {
   private readonly scope: Scope
   private readonly scheduler: Scheduler
   private readonly kv: KVStore
+  private readonly tasks: PersistentTasks
   private readonly cleanups: Cleanup[] = []
+  private readonly dependencies: readonly string[]
   private routeApp?: Hono
   private disposed = false
 
-  constructor(app: App, name: string, config: Config) {
+  constructor(app: App, name: string, config: Config, dependencies: readonly string[] = []) {
     this.app = app
     this.owner = name
     this.value = config
+    this.dependencies = dependencies
     this.childLogger = app.logger.child({ plugin: name })
     this.scope = { owner: name, signal: this.controller.signal }
     this.scheduler = new Scheduler(this.childLogger, this.controller.signal, app.config.timezone)
     this.kv = app.storage.store(name, () => this.assertActive())
+    this.tasks = new PersistentTasks(
+      app.storage,
+      name,
+      this.controller.signal,
+      this.childLogger,
+      app.tasks,
+      () => this.assertActive(),
+    )
   }
 
   get name(): string {
@@ -96,6 +110,22 @@ export class Context<Config = undefined> {
     this.app.storage.migrate(this.owner, steps)
   }
 
+  provide<K extends string>(name: K, service: K extends keyof Services ? Services[K] : unknown): Disposer {
+    this.assertActive()
+    const dispose = this.app.plugins.provide(this.owner, name, service)
+    this.controller.signal.addEventListener('abort', dispose, { once: true })
+    return () => {
+      this.controller.signal.removeEventListener('abort', dispose)
+      dispose()
+    }
+  }
+
+  inject<K extends string>(name: K): K extends keyof Services ? Services[K] : unknown {
+    this.assertActive()
+    if (!this.dependencies.includes(name)) throw new PluginError(`插件 "${this.owner}" 未声明服务 ${name}`)
+    return this.app.plugins.inject(name) as K extends keyof Services ? Services[K] : unknown
+  }
+
   on<K extends keyof KnownEventMap>(
     name: K,
     listener: (event: EventMap[K], signal: AbortSignal) => unknown | Promise<unknown>,
@@ -125,6 +155,15 @@ export class Context<Config = undefined> {
   middleware(fn: Middleware, options?: { priority?: number }): Disposer {
     this.assertActive()
     return this.app.dispatcher.middleware(this.scope, fn, options)
+  }
+  beforeSend(fn: BeforeSend, options: { priority?: number } = {}): Disposer {
+    this.assertActive()
+    const dispose = this.app.outgoing.add(this.owner, fn, options.priority ?? 0)
+    this.controller.signal.addEventListener('abort', dispose, { once: true })
+    return () => {
+      this.controller.signal.removeEventListener('abort', dispose)
+      dispose()
+    }
   }
   command<const Decl extends string>(declaration: Decl): CommandBuilder<Decl> {
     this.assertActive()
@@ -162,6 +201,14 @@ export class Context<Config = undefined> {
   timeout(duration: string | number, fn: (signal: AbortSignal) => unknown | Promise<unknown>): Disposer {
     this.assertActive()
     return this.scheduler.timeout(duration, fn)
+  }
+  task<T>(name: string, handler: TaskHandler<T>): TaskHandle<T> {
+    this.assertActive()
+    return this.tasks.register(name, handler)
+  }
+
+  warnUnregisteredTasks(): void {
+    this.tasks.warnUnregistered()
   }
   onDispose(fn: Cleanup): Disposer {
     this.assertActive()

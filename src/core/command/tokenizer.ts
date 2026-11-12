@@ -1,4 +1,5 @@
 import type { Message, Segment } from '../message/index.ts'
+import { isSegment } from '../message/index.ts'
 
 interface Unit {
   segment: number
@@ -20,8 +21,8 @@ export interface TokenizedMessage {
 export function tokenize(message: Message): TokenizedMessage {
   const units: Unit[] = []
   for (const [segment, part] of message.entries()) {
-    if (part.type === 'text') {
-      const text = String(part.data.text)
+    if (isSegment(part, 'text')) {
+      const text = part.data.text
       for (let offset = 0; offset < text.length; offset += 1) {
         units.push({ segment, offset, value: text[offset] as string })
       }
@@ -77,8 +78,8 @@ export function tokenize(message: Message): TokenizedMessage {
       if (unit === undefined) return []
       const result = message.slice(unit.segment)
       const first = result[0]
-      if (first?.type === 'text') {
-        result[0] = { type: 'text', data: { text: String(first.data.text).slice(unit.offset) } }
+      if (first && isSegment(first, 'text')) {
+        result[0] = { type: 'text', data: { text: first.data.text.slice(unit.offset) } }
       }
       return result
     },

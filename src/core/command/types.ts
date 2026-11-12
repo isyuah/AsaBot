@@ -1,12 +1,12 @@
 import type { Session } from '../event/index.ts'
-import type { Message, Segment, Sendable } from '../message/index.ts'
+import type { KnownSegment, Message, Sendable } from '../message/index.ts'
 
 export type ArgumentValue<T extends string> = T extends 'number' | 'integer' | 'duration'
   ? number
   : T extends 'boolean'
     ? boolean
     : T extends 'image'
-      ? Extract<Segment, { type: 'image' }>
+      ? Extract<KnownSegment, { type: 'image' }>
       : T extends 'rest'
         ? Message
         : string

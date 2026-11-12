@@ -1,4 +1,27 @@
-import type { Sendable } from './message/index.ts'
+import type { Message, Sendable } from './message/index.ts'
+
+export interface MessageInfo {
+  messageId: string
+  messageType: 'private' | 'group'
+  userId: string
+  groupId?: string
+  time: number
+  message: Message
+  sender: { userId: string; nickname: string; card?: string; role?: 'owner' | 'admin' | 'member' }
+}
+
+export interface ForwardNode {
+  userId: string
+  nickname: string
+  message: Sendable
+}
+export interface ForwardMessage {
+  userId: string
+  nickname: string
+  time?: number
+  message: Message
+}
+export type MessageTarget = { type: 'group' | 'private'; id: string }
 
 export interface SendResult {
   messageId: string
@@ -35,10 +58,17 @@ export interface Bot {
   readonly nickname?: string
   sendPrivate(userId: string, content: Sendable): Promise<SendResult>
   sendGroup(groupId: string, content: Sendable): Promise<SendResult>
+  sendForward(target: MessageTarget, nodes: ForwardNode[]): Promise<SendResult>
+  getForward(id: string): Promise<ForwardMessage[]>
   deleteMessage(messageId: string): Promise<void>
+  getMessage(messageId: string): Promise<MessageInfo>
   getSelf(): Promise<UserInfo>
   getGroupList(): Promise<GroupInfo[]>
   getGroupMember(groupId: string, userId: string): Promise<GroupMemberInfo>
+  getGroupMembers(groupId: string): Promise<GroupMemberInfo[]>
+  muteMember(groupId: string, userId: string, duration: number): Promise<void>
+  kickMember(groupId: string, userId: string, options?: { rejectRequest?: boolean }): Promise<void>
+  setMemberCard(groupId: string, userId: string, card: string): Promise<void>
   getFriendList(): Promise<UserInfo[]>
   call(action: string, params?: Record<string, unknown>): Promise<unknown>
   getAvatarUrl?(userId: string): string | undefined

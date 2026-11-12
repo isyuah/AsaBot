@@ -11,11 +11,38 @@ export function idNumber(value: string): number {
 export function incomingSegment(segment: { type: string; data: Record<string, unknown> }): Segment {
   const data = { ...segment.data }
   if (segment.type === 'at' && data.qq !== undefined) {
+    if (typeof data.qq !== 'string' && typeof data.qq !== 'number') throw new Error('Invalid OneBot at ID')
     data.id = String(data.qq)
     delete data.qq
   }
   if (['reply', 'face', 'forward'].includes(segment.type) && data.id !== undefined) {
+    if (typeof data.id !== 'string' && typeof data.id !== 'number')
+      throw new Error(`Invalid OneBot ${segment.type} ID`)
     data.id = String(data.id)
+  }
+  const required: Record<string, string> = {
+    text: 'text',
+    at: 'id',
+    face: 'id',
+    image: 'file',
+    record: 'file',
+    video: 'file',
+    file: 'file',
+    reply: 'id',
+    forward: 'id',
+  }
+  const field = required[segment.type]
+  if (field !== undefined && typeof data[field] !== 'string')
+    throw new Error(`Invalid OneBot ${segment.type} ${field}`)
+  const optional: Record<string, string[]> = {
+    image: ['url', 'summary'],
+    record: ['url'],
+    video: ['url'],
+    file: ['name'],
+  }
+  for (const key of optional[segment.type] ?? []) {
+    if (data[key] !== undefined && typeof data[key] !== 'string')
+      throw new Error(`Invalid OneBot ${segment.type} ${key}`)
   }
   return { type: segment.type === 'record' ? 'audio' : segment.type, data } as Segment
 }

@@ -1,10 +1,11 @@
 import type { AddressInfo } from 'node:net'
 import type { Hono } from 'hono'
 import type { Logger } from 'pino'
-import type { Adapter, AdapterHost, BotInfo, UpgradeHandler } from './adapter.ts'
+import type { Adapter, AdapterHost, BotInfo, OutgoingMessage, UpgradeHandler } from './adapter.ts'
 import { type Bot, BotRegistry } from './bot.ts'
 import type { Config } from './config/schema.ts'
 import { Dispatcher } from './dispatch/dispatcher.ts'
+import { OutgoingHooks } from './dispatch/outgoing.ts'
 import { MessageStats } from './dispatch/stats.ts'
 import type { DispatchEvent } from './dispatch/types.ts'
 import type {
@@ -19,8 +20,10 @@ import type {
   SessionServices,
 } from './event/index.ts'
 import { logger as defaultLogger } from './logger.ts'
+import type { Message } from './message/index.ts'
 import { PluginManager } from './plugin/manager.ts'
 import type { PackageOptions } from './plugin/packages.ts'
+import { TaskCoordinator } from './plugin/tasks.ts'
 import type { PluginStateEvent } from './plugin/types.ts'
 import { Storage } from './storage/index.ts'
 
@@ -71,6 +74,8 @@ export class App implements AdapterHost {
   readonly config: Config
   readonly logger: Logger
   readonly dispatcher: Dispatcher
+  readonly outgoing: OutgoingHooks
+  readonly tasks = new TaskCoordinator()
   readonly sessionServices: SessionServices
   readonly events: CoreEvents
   readonly bots = new BotRegistry()
@@ -99,6 +104,7 @@ export class App implements AdapterHost {
     this.logger = logger
     this.stats = new MessageStats(config.timezone)
     this.dispatcher = new Dispatcher(config, logger, this.shutdown.signal)
+    this.outgoing = new OutgoingHooks(logger)
     this.sessionServices = this.dispatcher
     this.events = new CoreEvents(this.dispatcher)
     this.storage = new Storage(config.dataDir, logger)
@@ -228,6 +234,10 @@ export class App implements AdapterHost {
 
   whenIdle(): Promise<void> {
     return this.dispatcher.whenIdle()
+  }
+
+  prepareOutgoing(input: OutgoingMessage): Promise<Message> {
+    return this.outgoing.prepare(input)
   }
 
   registerBot(bot: Bot): void {

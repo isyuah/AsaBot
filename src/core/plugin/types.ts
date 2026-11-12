@@ -10,6 +10,8 @@ export interface PluginState {
   state: 'loading' | 'active' | 'failed' | 'disabled'
   error?: string
   enabled: boolean
+  provides: string[]
+  inject: string[]
   configSchema?: Record<string, unknown>
 }
 

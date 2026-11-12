@@ -1,4 +1,5 @@
 import type { Message, Segment } from '../message/index.ts'
+import { isSegment } from '../message/index.ts'
 import { parseDuration } from '../utils/duration.ts'
 
 export type ArgumentType =
@@ -27,14 +28,14 @@ const types: ArgumentType[] = ['string', 'number', 'integer', 'boolean', 'user',
 
 export function parseValue(type: ArgumentType, value: string | Segment): unknown {
   if (type === 'image') {
-    if (typeof value !== 'string' && value.type === 'image' && typeof value.data.file === 'string')
+    if (typeof value !== 'string' && isSegment(value, 'image') && typeof value.data.file === 'string')
       return value
     throw new Error('图片')
   }
   if (type === 'user') {
     if (
       typeof value !== 'string' &&
-      value.type === 'at' &&
+      isSegment(value, 'at') &&
       typeof value.data.id === 'string' &&
       value.data.id
     ) {

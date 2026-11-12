@@ -52,6 +52,12 @@ function validateDefinition(value: unknown): PluginDefinition {
   ) {
     throw new PluginError(`Invalid dependencies for plugin "${value.name}"`)
   }
+  if (
+    'inject' in value &&
+    value.inject !== undefined &&
+    (!Array.isArray(value.inject) || !value.inject.every((item: unknown) => typeof item === 'string'))
+  )
+    throw new PluginError(`Invalid service dependencies for plugin "${value.name}"`)
   return value as PluginDefinition
 }
 
@@ -61,6 +67,7 @@ export class PluginManager {
   private readonly dirs: string[]
   readonly packages: PackageService
   private readonly entries = new Map<string, Entry>()
+  private readonly services = new Map<string, { plugin: string; value: unknown }>()
   private readonly files = new Map<string, Entry>()
   private readonly duplicates: Entry[] = []
   private readonly uninstalling = new Set<string>()
@@ -70,6 +77,7 @@ export class PluginManager {
   private releaseRoots?: () => void
   private queue: Promise<void> = Promise.resolve()
   private started = false
+  private reconciling = false
 
   constructor(app: App, configPath?: string, packageOptions?: PackageOptions) {
     this.app = app
@@ -132,6 +140,33 @@ export class PluginManager {
     return state && { ...state }
   }
 
+  provide(plugin: string, name: string, value: unknown): () => void {
+    const existing = this.services.get(name)
+    if (existing)
+      throw new PluginError(
+        `服务 ${name} 冲突：插件 "${existing.plugin}" 已提供，插件 "${plugin}" 无法重复提供`,
+      )
+    const service = { plugin, value }
+    this.services.set(name, service)
+    const entry = this.require(plugin)
+    entry.state.provides = [...entry.state.provides, name]
+    if (entry.state.state === 'active') this.publishState(entry)
+    this.requestReconcile()
+    return () => {
+      if (this.services.get(name) !== service) return
+      this.services.delete(name)
+      entry.state.provides = entry.state.provides.filter((item) => item !== name)
+      if (entry.state.state === 'active') this.publishState(entry)
+      this.requestReconcile()
+    }
+  }
+
+  inject(name: string): unknown {
+    const service = this.services.get(name)
+    if (!service) throw new PluginError(`服务 ${name} 不可用`)
+    return service.value
+  }
+
   getConfig(name: string): unknown {
     const entry = this.entries.get(name)
     const schema = entry?.definition?.config
@@ -168,6 +203,8 @@ export class PluginManager {
             source: 'package',
             state: 'failed',
             enabled: this.app.config.plugins[pluginName]?.enabled ?? true,
+            provides: [],
+            inject: [],
             error: errorMessage(error),
           }
           this.entries.set(pluginName, { state, manifest, files: new Set(), failure: 'import' })
@@ -212,6 +249,7 @@ export class PluginManager {
   async stop(): Promise<void> {
     await this.stopWatching()
     await this.packages.whenIdle()
+    this.started = false
     for (const entry of this.ordered().reverse()) {
       if (entry.context) await this.unload(entry)
       this.setState(entry, 'disabled')
@@ -411,6 +449,13 @@ export class PluginManager {
     return result
   }
 
+  private requestReconcile(): void {
+    if (!this.started || this.reconciling) return
+    void this.serial(() => this.reconcile()).catch((error: unknown) => {
+      this.app.logger.error({ err: error }, 'Service reconciliation failed')
+    })
+  }
+
   private require(name: string): Entry {
     const entry = this.entries.get(name)
     if (!entry) throw new PluginError(`Unknown plugin "${name}"`)
@@ -453,6 +498,8 @@ export class PluginManager {
       ...(path === undefined ? {} : { path }),
       state: 'disabled',
       enabled: this.app.config.plugins[name]?.enabled ?? true,
+      provides: [],
+      inject: [],
     }
     const entry: Entry = { state, definition, files, release }
     this.metadata(entry)
@@ -471,6 +518,7 @@ export class PluginManager {
     if (!definition) return
     entry.state.version = definition.version
     entry.state.description = definition.description
+    entry.state.inject = [...(definition.inject ?? [])]
     entry.state.configSchema = definition.config
       ? z.toJSONSchema(definition.config, { unrepresentable: 'any' })
       : undefined
@@ -520,6 +568,8 @@ export class PluginManager {
           path,
           state: 'failed',
           enabled: this.app.config.plugins[name]?.enabled ?? true,
+          provides: [],
+          inject: [],
           error: errorMessage(error),
         }
         const entry: Entry = { state, files: new Set([path]), failure: 'import' }
@@ -765,6 +815,11 @@ export class PluginManager {
         const target = this.entries.get(dependency)
         if (target) visit(target)
       }
+      for (const service of entry.definition?.inject ?? []) {
+        const provider = this.services.get(service)
+        const target = provider && this.entries.get(provider.plugin)
+        if (target) visit(target)
+      }
       result.push(entry)
     }
     for (const entry of this.entries.values()) visit(entry)
@@ -794,46 +849,78 @@ export class PluginManager {
   }
 
   private async reconcile(): Promise<void> {
-    const ordered = this.ordered()
-    const cycles = this.cycleNames()
-    // Unload dependents first, before deactivating their dependencies.
-    const unavailable = new Set<string>()
-    for (const entry of ordered) {
-      const name = entry.state.name
-      if (
-        !entry.state.enabled ||
-        cycles.has(name) ||
-        !entry.definition ||
-        (entry.failure !== undefined && entry.failure !== 'dependency') ||
-        entry.definition.depends?.some((dep) => !this.entries.has(dep) || unavailable.has(dep))
-      )
-        unavailable.add(name)
-    }
-    for (const entry of [...ordered].reverse()) {
-      if (entry.context && unavailable.has(entry.state.name)) await this.unload(entry)
-    }
-    for (const entry of ordered) {
-      if (!entry.state.enabled) {
-        entry.failure = undefined
-        this.setState(entry, 'disabled')
-        continue
+    this.reconciling = true
+    try {
+      while (true) {
+        const before = JSON.stringify([...this.entries.values()].map((entry) => [entry.state, entry.failure]))
+        const ordered = this.ordered()
+        const cycles = this.cycleNames()
+        const unavailable = new Set<string>()
+        for (const entry of ordered) {
+          if (
+            !entry.state.enabled ||
+            cycles.has(entry.state.name) ||
+            !entry.definition ||
+            (entry.failure !== undefined && entry.failure !== 'dependency')
+          )
+            unavailable.add(entry.state.name)
+        }
+        let changed = true
+        while (changed) {
+          changed = false
+          for (const entry of ordered) {
+            if (unavailable.has(entry.state.name)) continue
+            const badDependency = entry.definition?.depends?.some(
+              (dep) => !this.entries.has(dep) || unavailable.has(dep),
+            )
+            const badService = entry.definition?.inject?.some((name) => {
+              const provider = this.services.get(name)
+              return !provider || unavailable.has(provider.plugin)
+            })
+            if (badDependency || badService) {
+              unavailable.add(entry.state.name)
+              changed = true
+            }
+          }
+        }
+        for (const entry of [...ordered].reverse()) {
+          if (entry.context && unavailable.has(entry.state.name)) await this.unload(entry)
+        }
+        for (const entry of ordered) {
+          if (!entry.state.enabled) {
+            entry.failure = undefined
+            this.setState(entry, 'disabled')
+            continue
+          }
+          if (cycles.has(entry.state.name)) {
+            entry.failure = 'dependency'
+            this.setState(entry, 'failed', 'Dependency cycle detected')
+            continue
+          }
+          if (!entry.definition || (entry.failure && entry.failure !== 'dependency')) continue
+          const missing = entry.definition.depends?.find(
+            (name) => this.entries.get(name)?.state.state !== 'active',
+          )
+          if (missing) {
+            if (entry.context) await this.unload(entry)
+            entry.failure = 'dependency'
+            this.setState(entry, 'failed', `依赖 ${missing} 未激活`)
+            continue
+          }
+          const missingService = entry.definition.inject?.find((name) => !this.services.has(name))
+          if (missingService) {
+            if (entry.context) await this.unload(entry)
+            entry.failure = 'dependency'
+            this.setState(entry, 'failed', `服务 ${missingService} 不可用`)
+            continue
+          }
+          if (!entry.context) await this.load(entry)
+        }
+        const after = JSON.stringify([...this.entries.values()].map((entry) => [entry.state, entry.failure]))
+        if (before === after) break
       }
-      if (cycles.has(entry.state.name)) {
-        entry.failure = 'dependency'
-        this.setState(entry, 'failed', 'Dependency cycle detected')
-        continue
-      }
-      if (!entry.definition || (entry.failure && entry.failure !== 'dependency')) continue
-      const missing = entry.definition.depends?.find(
-        (name) => this.entries.get(name)?.state.state !== 'active',
-      )
-      if (missing) {
-        if (entry.context) await this.unload(entry)
-        entry.failure = 'dependency'
-        this.setState(entry, 'failed', `依赖 ${missing} 未激活`)
-        continue
-      }
-      if (!entry.context) await this.load(entry)
+    } finally {
+      this.reconciling = false
     }
   }
 
@@ -859,7 +946,7 @@ export class PluginManager {
       if (!entry.definition?.config && value !== undefined)
         this.app.logger.warn({ plugin: entry.state.name }, 'Plugin has configuration but no schema')
       const parsed = this.validateConfig(entry, value)
-      context = new Context(this.app, entry.state.name, parsed)
+      context = new Context(this.app, entry.state.name, parsed, entry.definition?.inject)
       let timedOut = false
       let timer: NodeJS.Timeout | undefined
       const setup = Promise.resolve().then(() => entry.definition?.setup(context as Context<unknown>))
@@ -882,6 +969,7 @@ export class PluginManager {
       }
       entry.context = context
       entry.failure = undefined
+      context.warnUnregisteredTasks()
       this.setState(entry, 'active')
     } catch (error) {
       await context?.dispose()
@@ -931,7 +1019,14 @@ export class PluginManager {
     while (changed) {
       changed = false
       for (const item of ordered) {
-        if (!affected.has(item.state.name) && item.definition?.depends?.some((dep) => affected.has(dep))) {
+        if (
+          !affected.has(item.state.name) &&
+          (item.definition?.depends?.some((dep) => affected.has(dep)) ||
+            item.definition?.inject?.some((service) => {
+              const provider = this.services.get(service)
+              return provider !== undefined && affected.has(provider.plugin)
+            }))
+        ) {
           affected.add(item.state.name)
           changed = true
         }
@@ -998,6 +1093,10 @@ export class PluginManager {
     if (entry.state.state === state && entry.state.error === error) return
     entry.state.state = state
     entry.state.error = error
+    this.publishState(entry)
+  }
+
+  private publishState(entry: Entry): void {
     const bot = this.app.bots.list().find((item) => item.status === 'online')
     this.app.emitPluginState({
       id: randomUUID(),

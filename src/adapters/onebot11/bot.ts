@@ -1,8 +1,10 @@
-import type { Bot, GroupInfo, GroupMemberInfo, SendResult, UserInfo } from '../../core/bot.ts'
+import type { Bot, ForwardMessage, GroupInfo, GroupMemberInfo, SendResult, UserInfo } from '../../core/bot.ts'
 import type { Message, Sendable } from '../../core/message/index.ts'
 
 export interface OneBotMessageInfo {
   messageId: string
+  messageType: 'private' | 'group'
+  userId: string
   realId?: string
   time: number
   sender: UserInfo
@@ -53,6 +55,7 @@ export interface OneBotApi {
   ): Promise<void>
   sendGroupForwardMsg(groupId: string, messages: OneBotForwardNode[]): Promise<SendResult>
   sendPrivateForwardMsg(userId: string, messages: OneBotForwardNode[]): Promise<SendResult>
+  getForwardMsg(id: string): Promise<ForwardMessage[]>
   groupPoke(groupId: string, userId: string): Promise<void>
   friendPoke(userId: string): Promise<void>
 }

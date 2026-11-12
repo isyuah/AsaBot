@@ -364,7 +364,7 @@ try {
   assert.deepEqual(await say('/package-answer'), [])
 
   const code = (answer: string) =>
-    `import { definePlugin } from 'asabot'; export default definePlugin({ name: 'data-test', setup(ctx) { ctx.store.set('key', 'value'); ctx.migrate(['CREATE TABLE p_data-test_wrong (x)']); ctx.command('data-test').action(() => '${answer}') } })`
+    `import { definePlugin } from 'asabot'; export default definePlugin({ name: 'data-test', setup(ctx) { ctx.store.set('key', 'value'); ctx.migrate(['CREATE TABLE p_data-test_wrong (x)']); ctx.task('later', () => {}).schedule({value: 1}, {delay: '1d', key: 'persisted'}); ctx.command('data-test').action(() => '${answer}') } })`
   const goodCode = (answer: string) => code(answer).replace('p_data-test_wrong', '"p_data-test_rows"')
   const upload = (filename: string, bytes: Uint8Array, overwrite = false) =>
     request('/plugins/upload', 'POST', {
@@ -431,11 +431,16 @@ try {
   await writeFile(join(dataDir, 'plugins', 'data-test', 'data'), 'stored')
   assert.equal((await request('/plugins/data-test/uninstall', 'POST', { purge: false })).status, 200)
   assert.equal(app.storage.store('data-test').get('key'), 'value')
+  assert.ok(app.storage.db.prepare("SELECT key FROM scheduled_tasks WHERE plugin = 'data-test'").get())
   assert.ok((await readFile(configPath, 'utf8')).includes('data-test:'))
   assert.equal(await readFile(join(dataDir, 'plugins', 'data-test', 'data'), 'utf8'), 'stored')
   assert.equal((await upload('data-test.js', Buffer.from(goodCode('three')))).status, 201)
   assert.equal((await request('/plugins/data-test/uninstall', 'POST', { purge: true })).status, 200)
   assert.equal(app.storage.store('data-test').get('key'), undefined)
+  assert.equal(
+    app.storage.db.prepare("SELECT key FROM scheduled_tasks WHERE plugin = 'data-test'").get(),
+    undefined,
+  )
   assert.equal(app.storage.listGroups('data-test').length, 0)
   assert.equal(
     app.storage.db.prepare("SELECT name FROM sqlite_master WHERE name = 'p_data-test_rows'").get(),

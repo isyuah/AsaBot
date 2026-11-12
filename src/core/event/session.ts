@@ -1,8 +1,79 @@
 import type { Bot, SendResult } from '../bot.ts'
 import type { Message, Sendable } from '../message/index.ts'
-import { normalizeSendable, plainText, seg } from '../message/index.ts'
+import { isSegment, normalizeSendable, plainText, seg } from '../message/index.ts'
 import type { LruSet } from '../utils/lru.ts'
-import type { PromptOptions, Session, SessionServices } from './types.ts'
+import type { DialogueOptions, PromptOptions, Session, SessionServices } from './types.ts'
+
+type Wait = (text?: Sendable, options?: PromptOptions) => Promise<Session | null>
+type RunDialogue = <T>(work: (wait: Wait) => Promise<T>) => Promise<T>
+
+export function dialogueMethods(run: RunDialogue): Pick<Session, 'prompt' | 'confirm' | 'choose'> {
+  const prompt = (text?: Sendable, options: PromptOptions = {}): Promise<Session | null> =>
+    run(async (wait) => {
+      let next = text
+      let retries = options.retries ?? 2
+      while (true) {
+        const reply = await wait(next, options)
+        if (reply === null || options.validate === undefined) return reply
+        if (/^(?:取消|cancel)$/i.test(reply.text.trim())) return null
+        const result = await options.validate(reply)
+        if (result === true) return reply
+        if (retries-- <= 0) return null
+        next = result
+      }
+    })
+
+  const confirm = (text: Sendable, options?: DialogueOptions): Promise<boolean | null> =>
+    run(async (wait) => {
+      let next: Sendable | undefined = text
+      let retries = options?.retries ?? 2
+      while (true) {
+        const reply = await wait(next, options)
+        if (reply === null) return null
+        const value = reply.text.trim().toLowerCase()
+        if (value === '取消' || value === 'cancel') return null
+        if (['是', '是的', '好', '好的', '确认', '确定', 'y', 'yes', 'ok'].includes(value)) return true
+        if (['否', '不', '不要', '不是', 'n', 'no'].includes(value)) return false
+        if (retries-- <= 0) return null
+        next = '请回复“是”或“否”'
+      }
+    })
+
+  function choose(text: Sendable, choices: string[], options?: DialogueOptions): Promise<string | null>
+  function choose<T>(
+    text: Sendable,
+    choices: { label: string; value: T }[],
+    options?: DialogueOptions,
+  ): Promise<T | null>
+  function choose<T>(
+    text: Sendable,
+    choices: (string | { label: string; value: T })[],
+    options?: DialogueOptions,
+  ): Promise<string | T | null> {
+    return run(async (wait) => {
+      const entries = choices.map((choice) =>
+        typeof choice === 'string' ? { label: choice, value: choice } : choice,
+      )
+      let next: Sendable = [
+        ...normalizeSendable(text),
+        seg.text(`\n${entries.map((item, index) => `${index + 1}. ${item.label}`).join('\n')}`),
+      ]
+      let retries = options?.retries ?? 2
+      while (true) {
+        const reply = await wait(next, options)
+        if (reply === null) return null
+        const value = reply.text.trim()
+        if (/^(?:取消|cancel)$/i.test(value)) return null
+        const byNumber = /^\d+$/.test(value) ? entries[Number(value) - 1] : undefined
+        const selected = byNumber ?? entries.find((item) => item.label === value)
+        if (selected !== undefined) return selected.value
+        if (retries-- <= 0) return null
+        next = `请回复 1-${entries.length} 的编号`
+      }
+    })
+  }
+  return { prompt, confirm, choose }
+}
 
 export function stripLeadingMention(message: Message, selfId: string): Message {
   const result = [...message]
@@ -11,8 +82,8 @@ export function stripLeadingMention(message: Message, selfId: string): Message {
   }
   while (result.length > 0) {
     const first = result[0]
-    if (first?.type === 'text') {
-      const originalText = String(first.data.text)
+    if (first && isSegment(first, 'text')) {
+      const originalText = first.data.text
       const text = originalText.replace(/^\s+/, '')
       if (text.length === 0) {
         result.shift()
@@ -23,7 +94,7 @@ export function stripLeadingMention(message: Message, selfId: string): Message {
       }
       break
     }
-    if (first?.type === 'at' && first.data.id === selfId) {
+    if (first && isSegment(first, 'at') && first.data.id === selfId) {
       result.shift()
       continue
     }
@@ -52,9 +123,11 @@ export type SessionInit = SessionFields &
 
 export function createSession(init: SessionInit, services: SessionServices): Session {
   const isReplyToSelf = init.message.some(
-    (segment) => segment.type === 'reply' && init.sentMessageIds?.has(String(segment.data.id)) === true,
+    (segment) => isSegment(segment, 'reply') && init.sentMessageIds?.has(segment.data.id) === true,
   )
-  const hasMention = init.message.some((segment) => segment.type === 'at' && segment.data.id === init.selfId)
+  const hasMention = init.message.some(
+    (segment) => isSegment(segment, 'at') && segment.data.id === init.selfId,
+  )
   const toMe = init.messageType === 'private' || hasMention || isReplyToSelf
   const session: Session = {
     id: init.id,
@@ -92,9 +165,13 @@ export function createSession(init: SessionInit, services: SessionServices): Ses
       }
       return session.send([...prefix, ...normalizeSendable(content)])
     },
-    prompt(text?: Sendable, options?: PromptOptions): Promise<Session | null> {
-      return services.prompt(session, text, options)
+    async sendForward(nodes) {
+      return init.bot.sendForward(
+        { type: init.messageType, id: init.messageType === 'group' ? init.groupId : init.userId },
+        nodes,
+      )
     },
+    ...dialogueMethods((work) => work((text, options) => services.prompt(session, text, options))),
   }
   return session
 }

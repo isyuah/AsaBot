@@ -1,11 +1,15 @@
-import type { Bot, SendResult } from '../bot.ts'
+import type { Bot, ForwardNode, SendResult } from '../bot.ts'
 import type { Message, Sendable } from '../message/index.ts'
 
 export interface PromptOptions {
   timeout?: string | number
   scope?: 'user' | 'channel'
   filter?: (session: Session) => boolean
+  validate?: (reply: Session) => true | string | Promise<true | string>
+  retries?: number
 }
+
+export type DialogueOptions = Pick<PromptOptions, 'timeout' | 'scope' | 'retries'>
 
 export interface SessionServices {
   prompt(
@@ -47,6 +51,14 @@ export interface Session extends BaseEvent {
   send(content: Sendable): Promise<SendResult>
   reply(content: Sendable, options?: { quote?: boolean; at?: boolean }): Promise<SendResult>
   prompt(text?: Sendable, options?: PromptOptions): Promise<Session | null>
+  confirm(text: Sendable, options?: DialogueOptions): Promise<boolean | null>
+  choose(text: Sendable, choices: string[], options?: DialogueOptions): Promise<string | null>
+  choose<T>(
+    text: Sendable,
+    choices: { label: string; value: T }[],
+    options?: DialogueOptions,
+  ): Promise<T | null>
+  sendForward(nodes: ForwardNode[]): Promise<SendResult>
 }
 
 export interface GroupSession extends Session {

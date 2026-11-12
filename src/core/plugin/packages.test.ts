@@ -36,7 +36,14 @@ describe('package operation contract', () => {
       latestFailed() {},
       subscriberFailed() {},
       async installPackage() {
-        return { name: 'example', source: 'package' as const, state: 'active' as const, enabled: true }
+        return {
+          name: 'example',
+          source: 'package' as const,
+          state: 'active' as const,
+          enabled: true,
+          provides: [],
+          inject: [],
+        }
       },
       async uninstallPackage() {},
     }
@@ -93,7 +100,14 @@ describe('package operation contract', () => {
         subscriberFailed() {},
         async installPackage(_manifest, _kind, log) {
           await service.runNpm(['install'], log)
-          return { name: 'example', source: 'package', state: 'active', enabled: true }
+          return {
+            name: 'example',
+            source: 'package',
+            state: 'active',
+            enabled: true,
+            provides: [],
+            inject: [],
+          }
         },
         async uninstallPackage() {},
       },

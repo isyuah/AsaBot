@@ -878,6 +878,7 @@ ctx.beforeSend(
   - 适配器必须在每条中立发送路径上调用一次：`sendPrivate`、`sendGroup`、Session 的 `send` 和 `reply`，以及 `sendForward` 的每个节点（任意一个节点被拦截，整条转发都不发送）。
   - OneBot 专属的 `bot.onebot.send*` 同样经过钩子。
   - `bot.call()` 透传不经过钩子，列入已知限制。
+  - OneBot 专属转发 API 中只带消息 ID 的引用式节点，引用的是平台上已有的消息，原样透传，不经过钩子。
 - **防止递归**：钩子内部发出的消息不再经过钩子，用 AsyncLocalStorage 标记。
 - `bot.message.sent` 中带的是经过钩子处理后的最终内容。
 

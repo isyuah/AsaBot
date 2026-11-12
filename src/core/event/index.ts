@@ -1,9 +1,10 @@
-export { createSession, type SessionInit, stripLeadingMention } from './session.ts'
+export { createSession, dialogueMethods, type SessionInit, stripLeadingMention } from './session.ts'
 export type {
   AnyEvent,
   BaseEvent,
   BotOfflineEvent,
   BotOnlineEvent,
+  DialogueOptions,
   EventMap,
   FriendRequestEvent,
   GroupInviteRequestEvent,

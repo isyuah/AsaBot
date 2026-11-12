@@ -57,6 +57,8 @@ export function pluginView(app: App, state: PluginState) {
   }
   return {
     ...state,
+    provides: [...state.provides],
+    inject: [...state.inject],
     removable: state.source !== 'builtin',
     ...(state.source === 'package' ? { package: app.plugins.packageInfo(state.name) } : {}),
     commands: app.dispatcher.registeredCommands(state.name).map((item) => commandView(app, item)),

@@ -42,6 +42,17 @@ export default definePlugin({
       })
 
     ctx
+      .command('猜数 清除')
+      .description('清除自己的猜数最佳成绩')
+      .action(async ({ session }) => {
+        const confirmed = await session.confirm('确定清除你的猜数最佳成绩吗？')
+        if (confirmed === null) return
+        if (!confirmed) return '已保留猜数成绩'
+        ctx.store.delete(`best:${session.platform}:${session.userId}`)
+        return '已清除猜数成绩'
+      })
+
+    ctx
       .command('猜数 排行')
       .description('查看猜数最佳成绩排行')
       .action(() => {

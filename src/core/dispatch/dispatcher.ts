@@ -3,7 +3,7 @@ import { CommandBuilder, type CommandDefinition, type CommandRegistration } from
 import { formatUsage, parseArguments } from '../command/parse.ts'
 import { tokenize } from '../command/tokenizer.ts'
 import type { Config } from '../config/schema.ts'
-import { CommandConflictError } from '../errors.ts'
+import { CommandConflictError, SendBlockedError } from '../errors.ts'
 import type {
   EventMap,
   KnownEventMap,
@@ -15,8 +15,9 @@ import type {
   Session,
   SessionServices,
 } from '../event/index.ts'
-import { stripLeadingMention } from '../event/index.ts'
+import { dialogueMethods, stripLeadingMention } from '../event/index.ts'
 import type { Message, Sendable } from '../message/index.ts'
+import { isSegment } from '../message/index.ts'
 import type { PluginStateEvent } from '../plugin/types.ts'
 import { RateLimiter } from '../ratelimit.ts'
 import { type Activity, ActivityTracker, trackPrompt } from './activity.ts'
@@ -278,7 +279,12 @@ export class Dispatcher implements SessionServices, CommandRegistration {
       const activity = this.activity.begin()
       pipeline = this.runMiddlewares(event, activity).finally(() => activity.finish())
     }
-    await Promise.all([observers, pipeline])
+    try {
+      await Promise.all([observers, pipeline])
+    } catch (error) {
+      if (!(error instanceof SendBlockedError)) throw error
+      this.logger.info({ err: error, event: event.name, eventId: event.id }, 'Message send blocked')
+    }
   }
 
   private async runObservers(event: DispatchEvent): Promise<void> {
@@ -366,7 +372,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
   private commandSource(session: Session): Message | undefined {
     const message = stripLeadingMention(session.message, session.selfId)
     const first = message[0]
-    const text = first?.type === 'text' ? String(first.data.text) : ''
+    const text = first && isSegment(first, 'text') ? first.data.text : ''
     const prefix = [...this.config.command.prefixes]
       .sort((a, b) => b.length - a.length)
       .find((item) => item.length > 0 && text.startsWith(item))
@@ -494,32 +500,34 @@ export class Dispatcher implements SessionServices, CommandRegistration {
   private bindSession(session: Session, signal: AbortSignal, activity?: Activity): Session {
     const view: Session = {
       ...session,
-      prompt: (text, options) => {
+      ...dialogueMethods((work) => {
         const combined = AbortSignal.any([signal, this.shutdown])
         let waiting = false
         let pending = false
-        const promise = this.prompts
-          .prompt(
-            view,
-            text,
-            combined,
-            options,
-            () => {
-              pending = true
-              if (waiting) activity?.pause()
-            },
-            () => {
-              pending = false
-              activity?.resume()
-            },
-          )
-          .then((answer) => (answer === null ? null : this.bindSession(answer, signal, activity)))
+        const promise = work((text, options) =>
+          this.prompts
+            .prompt(
+              view,
+              text,
+              combined,
+              options,
+              () => {
+                pending = true
+                if (waiting) activity?.pause()
+              },
+              () => {
+                pending = false
+                activity?.resume()
+              },
+            )
+            .then((answer) => (answer === null ? null : this.bindSession(answer, signal, activity))),
+        )
         if (!activity) return promise
         return trackPrompt(promise, () => {
           waiting = true
           if (pending) activity.pause()
         })
-      },
+      }),
     }
     return view
   }
@@ -555,7 +563,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
       if (signal.aborted) onAbort()
     })
     const logError = (error: unknown): void => {
-      this.logger.error(
+      this.logger[error instanceof SendBlockedError ? 'info' : 'error'](
         {
           err: error,
           plugin: scope.owner,
@@ -582,11 +590,11 @@ export class Dispatcher implements SessionServices, CommandRegistration {
           this.logger.warn({ plugin: scope.owner, event: event.name, eventId: event.id }, '处理器超时')
       } else {
         logError(error)
-        if (onError !== undefined) {
+        if (onError !== undefined && !(error instanceof SendBlockedError)) {
           try {
             await onError(view)
           } catch (replyError) {
-            this.logger.error(
+            this.logger[replyError instanceof SendBlockedError ? 'info' : 'error'](
               { err: replyError, plugin: scope.owner, event: event.name, eventId: event.id },
               'Failed to send error reply',
             )

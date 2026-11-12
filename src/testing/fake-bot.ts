@@ -1,4 +1,15 @@
-import type { Bot, GroupInfo, GroupMemberInfo, SendResult, UserInfo } from '../core/bot.ts'
+import type {
+  Bot,
+  ForwardMessage,
+  ForwardNode,
+  GroupInfo,
+  GroupMemberInfo,
+  MessageInfo,
+  MessageTarget,
+  SendResult,
+  UserInfo,
+} from '../core/bot.ts'
+import { UnsupportedError } from '../core/errors.ts'
 import type { Message, Sendable } from '../core/message/index.ts'
 import { normalizeSendable } from '../core/message/index.ts'
 
@@ -23,6 +34,26 @@ export class FakeBot implements Bot {
     this.sends.push({ type: 'group', target: groupId, message: normalizeSendable(content) })
     return { messageId: String(this.sends.length) }
   }
+
+  async sendForward(_target: MessageTarget, _nodes: ForwardNode[]): Promise<SendResult> {
+    throw new UnsupportedError(this.platform, 'sendForward')
+  }
+  async getForward(_id: string): Promise<ForwardMessage[]> {
+    throw new UnsupportedError(this.platform, 'getForward')
+  }
+  async getMessage(_id: string): Promise<MessageInfo> {
+    throw new UnsupportedError(this.platform, 'getMessage')
+  }
+  async getGroupMembers(_groupId: string): Promise<GroupMemberInfo[]> {
+    return []
+  }
+  async muteMember(_groupId: string, _userId: string, _duration: number): Promise<void> {}
+  async kickMember(
+    _groupId: string,
+    _userId: string,
+    _options?: { rejectRequest?: boolean },
+  ): Promise<void> {}
+  async setMemberCard(_groupId: string, _userId: string, _card: string): Promise<void> {}
 
   async deleteMessage(_messageId: string): Promise<void> {}
   async getSelf(): Promise<UserInfo> {

@@ -3,7 +3,16 @@ import type { Duplex } from 'node:stream'
 import type { Logger } from 'pino'
 import WebSocket, { type RawData, WebSocketServer } from 'ws'
 import type { Adapter, AdapterHost, BotInfo } from '../../core/adapter.ts'
-import type { GroupInfo, GroupMemberInfo, SendResult, UserInfo } from '../../core/bot.ts'
+import type {
+  ForwardMessage,
+  ForwardNode,
+  GroupInfo,
+  GroupMemberInfo,
+  MessageInfo,
+  MessageTarget,
+  SendResult,
+  UserInfo,
+} from '../../core/bot.ts'
 import { ApiTimeoutError, NotConnectedError } from '../../core/errors.ts'
 import type {
   BotOfflineEvent,
@@ -124,6 +133,7 @@ class OneBotBotImpl implements OneBotBot {
     this.sendQueue = new SendQueue(options.sendQueue, options.logger, selfId)
     this.onebot = new OneBotApiImpl((action, params) => this.connection.requestForBot(this, action, params), {
       assertOnline: () => this.connection.assertOnline(this),
+      prepareOutgoing: (target, message) => this.connection.prepareOutgoing(this, target, message),
       onMessageSent: (input) => {
         this.sentMessageIds.add(input.messageId)
         this.connection.emitMessageSent(this, input)
@@ -155,6 +165,39 @@ class OneBotBotImpl implements OneBotBot {
     return this.onebot.sendGroupMsg(groupId, content)
   }
 
+  sendForward(target: MessageTarget, nodes: ForwardNode[]): Promise<SendResult> {
+    const messages = nodes.map((node) => ({
+      type: 'node' as const,
+      data: { userId: node.userId, nickname: node.nickname, content: node.message },
+    }))
+    return target.type === 'group'
+      ? this.onebot.sendGroupForwardMsg(target.id, messages)
+      : this.onebot.sendPrivateForwardMsg(target.id, messages)
+  }
+
+  getForward(id: string): Promise<ForwardMessage[]> {
+    return this.onebot.getForwardMsg(id)
+  }
+
+  async getMessage(messageId: string): Promise<MessageInfo> {
+    const info = await this.onebot.getMsg(messageId)
+    const role = info.sender.role
+    return {
+      messageId: info.messageId,
+      messageType: info.messageType,
+      userId: info.userId,
+      ...(info.groupId === undefined ? {} : { groupId: info.groupId }),
+      time: info.time,
+      message: info.message,
+      sender: {
+        userId: info.sender.userId,
+        nickname: info.sender.nickname,
+        ...(typeof info.sender.card === 'string' ? { card: info.sender.card } : {}),
+        ...(role === 'owner' || role === 'admin' || role === 'member' ? { role } : {}),
+      },
+    }
+  }
+
   deleteMessage(messageId: string): Promise<void> {
     return this.onebot.deleteMsg(messageId)
   }
@@ -169,6 +212,22 @@ class OneBotBotImpl implements OneBotBot {
 
   getGroupMember(groupId: string, userId: string): Promise<GroupMemberInfo> {
     return this.onebot.getGroupMemberInfo(groupId, userId)
+  }
+
+  getGroupMembers(groupId: string): Promise<GroupMemberInfo[]> {
+    return this.onebot.getGroupMemberList(groupId)
+  }
+
+  muteMember(groupId: string, userId: string, duration: number): Promise<void> {
+    return this.onebot.setGroupBan(groupId, userId, Math.ceil(duration / 1_000))
+  }
+
+  kickMember(groupId: string, userId: string, options?: { rejectRequest?: boolean }): Promise<void> {
+    return this.onebot.setGroupKick(groupId, userId, options?.rejectRequest)
+  }
+
+  setMemberCard(groupId: string, userId: string, card: string): Promise<void> {
+    return this.onebot.setGroupCard(groupId, userId, card)
   }
 
   getFriendList(): Promise<UserInfo[]> {
@@ -266,6 +325,10 @@ class OneBotSession {
     this.assertOnline(bot)
     if (sendActions.has(action)) return bot.sendQueue.send(() => this.request(action, params))
     return this.request(action, params)
+  }
+
+  prepareOutgoing(bot: OneBotBotImpl, target: MessageTarget, message: Message): Promise<Message> {
+    return this.host.prepareOutgoing({ bot, target, message })
   }
 
   assertOnline(bot: OneBotBotImpl): void {

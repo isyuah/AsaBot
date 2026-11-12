@@ -7,6 +7,7 @@ export interface PluginDefinition<Schema extends z.ZodType | undefined = z.ZodTy
   description?: string
   config?: Schema
   depends?: string[]
+  inject?: string[]
   setup(ctx: Context<Schema extends z.ZodType ? z.output<Schema> : undefined>): void | Promise<void>
 }
 

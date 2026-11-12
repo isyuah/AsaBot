@@ -12,7 +12,8 @@ import { configSchema } from '../src/core/config/schema.ts'
 import { ApiTimeoutError, NotConnectedError } from '../src/core/errors.ts'
 import type { EventMap, NoticeEvent, RequestEvent, Session } from '../src/core/event/index.ts'
 import { createLogger } from '../src/core/logger.ts'
-import { seg } from '../src/core/message/index.ts'
+import { plainText, seg } from '../src/core/message/index.ts'
+import { definePlugin, type PluginDefinition } from '../src/core/plugin/definition.ts'
 
 const resources: Array<{ app: App; mock: MockOneBot }> = []
 const dataDirectories: string[] = []
@@ -34,7 +35,10 @@ afterEach(async () => {
   for (const directory of dataDirectories.splice(0)) await rm(directory, { recursive: true, force: true })
 })
 
-async function setup(options: ConstructorParameters<typeof MockOneBot>[0] = {}) {
+async function setup(
+  options: ConstructorParameters<typeof MockOneBot>[0] = {},
+  plugins: PluginDefinition[] = [],
+) {
   const mock = new MockOneBot(options)
   await mock.ready
   const config = configSchema.parse({
@@ -49,6 +53,7 @@ async function setup(options: ConstructorParameters<typeof MockOneBot>[0] = {}) 
     },
   })
   const app = createApp(config)
+  for (const plugin of plugins) app.plugins.register(plugin)
   resources.push({ app, mock })
   const online = waitForEvent(app, 'bot.online')
   await app.start()
@@ -639,5 +644,134 @@ describe('OneBot forward adapter', () => {
     expect(output).not.toContain('url-secret')
     expect(output).not.toContain('wrong-token')
     expect(output).toContain('other=ok')
+  })
+})
+
+describe('OneBot neutral management and forwarding', () => {
+  it('converts mute durations and fetched messages at the protocol boundary', async () => {
+    const { app, mock } = await setup({ token: 'test-token' })
+    const bot = app.bots.list()[0]
+    if (!bot) throw new Error('OneBot did not come online')
+    mock.onCall('get_msg', () => ({
+      message_id: 789,
+      time: 1234,
+      group_id: 200,
+      sender: { user_id: 300, nickname: 'Alice', card: 'A', role: 'admin' },
+      message: [
+        { type: 'at', data: { qq: 400 } },
+        { type: 'record', data: { file: 'voice-id' } },
+        { type: 'forward', data: { id: 'opaque-resid' } },
+      ],
+    }))
+    for (const duration of [0, 1, 1_000, 1_001]) await bot.muteMember('200', '300', duration)
+    expect(mock.calls.filter((call) => call.action === 'set_group_ban').map((call) => call.params)).toEqual([
+      { group_id: 200, user_id: 300, duration: 0 },
+      { group_id: 200, user_id: 300, duration: 1 },
+      { group_id: 200, user_id: 300, duration: 1 },
+      { group_id: 200, user_id: 300, duration: 2 },
+    ])
+    expect(await bot.getMessage('789')).toEqual({
+      messageId: '789',
+      messageType: 'group',
+      userId: '300',
+      groupId: '200',
+      time: 1_234_000,
+      sender: { userId: '300', nickname: 'Alice', card: 'A', role: 'admin' },
+      message: [seg.at('400'), seg.audio('voice-id'), seg.forward('opaque-resid')],
+    })
+  })
+
+  it('converts forward nodes in both directions and applies hooks to OneBot sends', async () => {
+    const filter = definePlugin({
+      name: 'send-filter',
+      setup(ctx) {
+        ctx.beforeSend(({ message }) => {
+          if (plainText(message) === 'blocked') return false
+          return [...message, seg.text('!')]
+        })
+      },
+    })
+    const { app, mock } = await setup({ token: 'test-token' }, [filter])
+    const bot = app.bots.list()[0]
+    if (!bot || !isOneBot(bot)) throw new Error('OneBot did not come online')
+    const sent: string[] = []
+    app.events.on('bot.message.sent', (event) => {
+      sent.push(JSON.stringify(event.message))
+    })
+    const result = await bot.sendForward({ type: 'group', id: '200' }, [
+      {
+        userId: '300',
+        nickname: 'Alice',
+        message: [seg.text('hello'), seg.at('400'), seg.forward('resid-abc')],
+      },
+    ])
+    expect((await mock.waitForCall('send_group_forward_msg')).params).toEqual({
+      group_id: 200,
+      messages: [
+        {
+          type: 'node',
+          data: {
+            user_id: 300,
+            nickname: 'Alice',
+            content: [
+              { type: 'text', data: { text: 'hello' } },
+              { type: 'at', data: { qq: 400 } },
+              { type: 'forward', data: { id: 'resid-abc' } },
+              { type: 'text', data: { text: '!' } },
+            ],
+          },
+        },
+      ],
+    })
+    await vi.waitFor(() => expect(sent).toContain(JSON.stringify([seg.forward(result.messageId)])))
+    mock.onCall('get_forward_msg', () => ({
+      messages: [
+        {
+          sender: { user_id: 300, nickname: 'Alice' },
+          time: 1234,
+          content: [
+            { type: 'record', data: { file: 'voice-id' } },
+            { type: 'at', data: { qq: 400 } },
+          ],
+        },
+      ],
+    }))
+    expect(await bot.getForward('resid-abc')).toEqual([
+      {
+        userId: '300',
+        nickname: 'Alice',
+        time: 1_234_000,
+        message: [seg.audio('voice-id'), seg.at('400')],
+      },
+    ])
+    expect((await mock.waitForCall('get_forward_msg')).params).toEqual({ id: 'resid-abc' })
+    await bot.onebot.sendPrivateMsg('300', 'direct')
+    expect((await mock.waitForCall('send_private_msg')).params.message).toEqual([
+      seg.text('direct'),
+      seg.text('!'),
+    ])
+    await bot.onebot.sendPrivateForwardMsg('300', [
+      { type: 'node', data: { userId: '400', nickname: 'Bob', content: 'direct' } },
+    ])
+    expect((await mock.waitForCall('send_private_forward_msg')).params.messages).toEqual([
+      {
+        type: 'node',
+        data: { user_id: 400, nickname: 'Bob', content: [seg.text('direct'), seg.text('!')] },
+      },
+    ])
+    const lookups = mock.calls.filter((call) => call.action === 'get_msg').length
+    await bot.onebot.sendPrivateForwardMsg('300', [{ type: 'node', data: { id: '456' } }])
+    expect(
+      mock.calls.filter((call) => call.action === 'send_private_forward_msg').at(-1)?.params.messages,
+    ).toEqual([{ type: 'node', data: { id: 456 } }])
+    // Reference nodes point at existing platform messages: no lookup, no hooks.
+    expect(mock.calls.filter((call) => call.action === 'get_msg')).toHaveLength(lookups)
+    const count = mock.calls.filter((call) => call.action === 'send_group_forward_msg').length
+    await expect(
+      bot.sendForward({ type: 'group', id: '200' }, [
+        { userId: '300', nickname: 'Alice', message: 'blocked' },
+      ]),
+    ).rejects.toMatchObject({ name: 'SendBlockedError', plugin: 'send-filter' })
+    expect(mock.calls.filter((call) => call.action === 'send_group_forward_msg')).toHaveLength(count)
   })
 })

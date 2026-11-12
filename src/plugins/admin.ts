@@ -1,7 +1,7 @@
 import type { App } from '../core/app.ts'
 import type { Session } from '../core/event/index.ts'
 import type { Message } from '../core/message/index.ts'
-import { plainText } from '../core/message/index.ts'
+import { isSegment, plainText } from '../core/message/index.ts'
 import { definePlugin } from '../core/plugin/definition.ts'
 import type { PackageOperation } from '../core/plugin/packages.ts'
 import type { AccessList, AccessSubject } from '../core/storage/index.ts'
@@ -26,11 +26,11 @@ function targetFromRest(subject: AccessSubject, target: Message | undefined, ses
   }
   if (!target) throw new Error('请指定目标用户')
   if (subject === 'user') {
-    const mentions = target.filter((segment) => segment.type === 'at')
+    const mentions = target.filter((segment) => isSegment(segment, 'at'))
     const mention = mentions[0]
     if (
       mentions.length === 1 &&
-      mention?.type === 'at' &&
+      mention !== undefined &&
       target.every((segment) => segment.type === 'at' || segment.type === 'text')
     ) {
       const id = mention.data.id
