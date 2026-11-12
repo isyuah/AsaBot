@@ -68,3 +68,26 @@ export const levelStyle: Record<string, string> = {
   error: 'text-danger bg-danger-soft',
   fatal: 'text-white bg-danger',
 }
+
+/** A config duration as written in YAML: strings pass through, milliseconds become e.g. `1h30m`, `30s`, `500ms`. */
+export function compactDuration(value: string | number): string {
+  if (typeof value === 'string') return value
+  if (value <= 0) return '0s'
+  const units: [string, number][] = [
+    ['d', 86_400_000],
+    ['h', 3_600_000],
+    ['m', 60_000],
+    ['s', 1000],
+    ['ms', 1],
+  ]
+  let rest = value
+  let text = ''
+  for (const [unit, size] of units) {
+    const count = Math.floor(rest / size)
+    if (count > 0) {
+      text += `${count}${unit}`
+      rest -= count * size
+    }
+  }
+  return text
+}

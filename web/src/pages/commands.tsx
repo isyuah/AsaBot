@@ -20,6 +20,7 @@ import { Badge, Card, EmptyState, ErrorState, PageHeader, Skeleton } from '../co
 import { Select } from '../components/ui/select.tsx'
 import { Switch } from '../components/ui/switch.tsx'
 import { ApiError, api } from '../lib/api.ts'
+import { compactDuration } from '../lib/format.ts'
 import { groupPath, parseGroupKey } from '../lib/groups.ts'
 import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
 import { Link, navigate } from '../lib/router.tsx'
@@ -53,7 +54,7 @@ function effective(command: CommandView) {
     cooldown:
       override.cooldown === undefined || override.cooldown === false
         ? undefined
-        : `${override.cooldown.duration} / ${scopeLabels[override.cooldown.scope ?? 'user']}`,
+        : `${compactDuration(override.cooldown.duration)} / ${scopeLabels[override.cooldown.scope ?? 'user']}`,
     modified: command.override !== undefined && Object.keys(command.override).length > 0,
   }
 }
@@ -320,7 +321,7 @@ function toDraft(command: CommandView): Draft {
     aliases: override.aliases ?? [],
     permission: override.permission ?? 'default',
     cooldownMode: cooldown === undefined ? 'default' : cooldown === false ? 'off' : 'custom',
-    cooldownDuration: cooldown ? String(cooldown.duration) : '10s',
+    cooldownDuration: cooldown ? compactDuration(cooldown.duration) : '10s',
     cooldownScope: cooldown ? (cooldown.scope ?? 'user') : 'user',
     hidden: override.hidden === undefined ? 'default' : override.hidden ? 'yes' : 'no',
   }
