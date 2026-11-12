@@ -1,0 +1,25 @@
+{
+  "name": "@asabot/create",
+  "version": "0.1.0",
+  "description": "创建 AsaBot 机器人项目或插件包：npm create @asabot@latest",
+  "type": "module",
+  "keywords": [
+    "asabot",
+    "create",
+    "scaffold"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "create-asabot": "./bin/create.js"
+  },
+  "files": [
+    "bin",
+    "templates"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT"
+}

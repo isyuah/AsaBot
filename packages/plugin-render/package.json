@@ -1,0 +1,48 @@
+{
+  "name": "@asabot/plugin-render",
+  "version": "0.1.0",
+  "description": "AsaBot 官方出图插件：把 HTML、Markdown、文本渲染成图片（satori + resvg，可选浏览器后端）",
+  "type": "module",
+  "keywords": [
+    "asabot-plugin",
+    "asabot",
+    "render",
+    "satori"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "fonts",
+    "README.md"
+  ],
+  "scripts": {},
+  "license": "MIT",
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "marked": "^18.2.0",
+    "puppeteer-core": "^25.17.0",
+    "satori": "^0.63.2",
+    "satori-html": "^0.3.2"
+  },
+  "devDependencies": {
+    "@asabot/core": "workspace:^",
+    "@fontsource/noto-sans-sc": "^5.3.1"
+  },
+  "peerDependencies": {
+    "@asabot/core": "workspace:^"
+  }
+}
