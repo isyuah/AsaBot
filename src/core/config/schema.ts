@@ -71,6 +71,15 @@ const pluginEntrySchema = z
   })
   .strict()
 
+const serverSchema = z
+  .object({
+    host: z.string().min(1).default('127.0.0.1'),
+    port: z.number().int().min(0).max(65_535).default(5140),
+    apiToken: z.string().default(''),
+    panelPassword: z.string().default(''),
+  })
+  .strict()
+
 export const configSchema = z
   .object({
     logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
@@ -81,7 +90,7 @@ export const configSchema = z
     onebot11: onebot11Schema.default(() => onebot11Schema.parse({})),
     pluginLoader: pluginLoaderSchema.default(() => pluginLoaderSchema.parse({})),
     plugins: z.record(z.string(), pluginEntrySchema).default({}),
-    // server configuration is reserved for M5.
+    server: serverSchema.default(() => serverSchema.parse({})),
   })
   .strict()
 

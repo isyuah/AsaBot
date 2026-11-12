@@ -549,7 +549,7 @@ t.app; t.mock; await t.dispose()
 
 ```ts
 type BotView = { platform: string; selfId: string; nickname?: string; status: 'connecting' | 'online' | 'offline'; connection: 'forward' | 'reverse'; url?: string }
-type PluginView = PluginState & { commands: CommandView[] }          // PluginState 见 12.1
+type PluginView = PluginState & { commands: CommandView[]; config?: unknown }   // PluginState 见 12.1；config 为当前生效的配置（经 schema 解析后，没有 schema 时省略）
 type CommandView = { owner: string; path: string; usage: string; description: string; aliases: string[]; options: { flags: string[]; description?: string; default?: unknown }[]; examples: string[]; permission: boolean; scope: 'all' | 'group' | 'private'; hidden: boolean }
 type StatsPoint = { t: number; received: number; sent: number }   // t：分钟起点的毫秒时间戳
 type LogRecord = { time: number; level: number; msg: string; plugin?: string; [key: string]: unknown }
@@ -593,7 +593,7 @@ type Target = { type: 'group' | 'private'; id: string }
 
 **插件路由** `ctx.route(app => ...)`：插件拿到一个 Hono 子应用，挂在 `/plugins/<name>/` 下，不需要面板登录。插件卸载后该前缀返回 404。实现方式是一个 `/plugins/:name/*` 总入口，按名字转发到当前注册的子应用，从而支持动态挂载和卸载。
 
-**静态托管**：面板启用时，`/` 提供 `web/dist` 的静态文件，未匹配的非 `/api`、非 `/plugins` 路径回退到 `index.html`（SPA）。`web/dist` 不存在时，`/` 返回一个提示页，说明需要先运行 `pnpm --filter web build`。
+**静态托管**：面板启用时，`/` 提供 `web/dist` 的静态文件，其余路径回退到 `index.html`（SPA）。属于后端的只有 `/api/*` 和插件路由 `/plugins/<name>/*`；面板自己的 `/plugins` 页面是精确路径，同样回退到 SPA，以保证深链接可用。`web/dist` 不存在时，`/` 返回一个提示页，说明需要先运行 `pnpm --filter web build`。
 
 ## 19. Web 面板（M6）
 

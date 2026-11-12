@@ -1,8 +1,11 @@
+import type { AddressInfo } from 'node:net'
+import type { Hono } from 'hono'
 import type { Logger } from 'pino'
 import type { Adapter, AdapterHost } from './adapter.ts'
 import { type Bot, BotRegistry } from './bot.ts'
 import type { Config } from './config/schema.ts'
 import { Dispatcher } from './dispatch/dispatcher.ts'
+import { MessageStats } from './dispatch/stats.ts'
 import type { DispatchEvent } from './dispatch/types.ts'
 import type {
   AnyEvent,
@@ -19,6 +22,15 @@ import type { PluginStateEvent } from './plugin/types.ts'
 import { Storage } from './storage/index.ts'
 
 type AppState = 'created' | 'running' | 'stopped'
+export interface ServerService {
+  start(): Promise<void>
+  stop(): Promise<void>
+  address(): AddressInfo | null
+}
+export interface BotConnectionInfo {
+  connection: 'forward' | 'reverse'
+  url?: string
+}
 type Listener = (event: DispatchEvent) => unknown | Promise<unknown>
 type PublicListener =
   | Listener
@@ -61,7 +73,13 @@ export class App implements AdapterHost {
   readonly bots = new BotRegistry()
   readonly storage: Storage
   readonly plugins: PluginManager
+  readonly stats = new MessageStats()
+  readonly startedAt = Date.now()
+  server?: ServerService
   private readonly adapters: Adapter[] = []
+  private readonly botConnections = new WeakMap<Bot, BotConnectionInfo>()
+  private readonly routes = new Map<string, Hono>()
+  private readonly dispatchSubscribers = new Set<(event: DispatchEvent) => void>()
   private readonly shutdown = new AbortController()
   private state: AppState = 'created'
 
@@ -75,6 +93,48 @@ export class App implements AdapterHost {
     this.plugins = new PluginManager(this, options.configPath)
     this.dispatcher.accessFilter = (event) => this.storage.allows(event)
     this.dispatcher.isEnabledFor = (owner, event) => this.plugins.isEnabledFor(owner, event)
+    this.dispatcher.onDispatch = (event) => {
+      if (event.platform !== 'playground') {
+        if (event.kind === 'message') this.stats.record('received')
+        else if (event.name === 'bot.message.sent') this.stats.record('sent')
+      }
+      for (const subscriber of this.dispatchSubscribers) {
+        try {
+          subscriber(event)
+        } catch {
+          this.logger.error('Dispatch subscriber failed')
+        }
+      }
+    }
+  }
+
+  useServer(server: ServerService): void {
+    if (this.state !== 'created' || this.server) throw new Error('Server must be configured before start')
+    this.server = server
+  }
+
+  subscribeDispatch(subscriber: (event: DispatchEvent) => void): () => void {
+    this.dispatchSubscribers.add(subscriber)
+    return () => this.dispatchSubscribers.delete(subscriber)
+  }
+
+  setBotConnection(bot: Bot, info: BotConnectionInfo): void {
+    this.botConnections.set(bot, info)
+  }
+
+  getBotConnection(bot: Bot): BotConnectionInfo | undefined {
+    return this.botConnections.get(bot)
+  }
+
+  setPluginRoute(name: string, route: Hono): () => void {
+    this.routes.set(name, route)
+    return () => {
+      if (this.routes.get(name) === route) this.routes.delete(name)
+    }
+  }
+
+  getPluginRoute(name: string): Hono | undefined {
+    return this.routes.get(name)
   }
 
   useAdapter(adapter: Adapter): void {
@@ -151,6 +211,7 @@ export class App implements AdapterHost {
       }
     }
     try {
+      await this.server?.start()
       await this.plugins.watch()
     } catch (error) {
       await this.stop()
@@ -166,6 +227,7 @@ export class App implements AdapterHost {
 
     this.state = 'stopped'
     await this.plugins.stopWatching()
+    await this.server?.stop()
     this.shutdown.abort(new DOMException('App stopped', 'AbortError'))
     await this.whenIdle()
     await this.plugins.stop()

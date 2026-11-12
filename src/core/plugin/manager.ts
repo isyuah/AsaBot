@@ -6,7 +6,7 @@ import { z } from 'zod'
 import type { App } from '../app.ts'
 import { writeConfigValue } from '../config/write.ts'
 import type { DispatchEvent } from '../dispatch/types.ts'
-import { PluginError } from '../errors.ts'
+import { PluginConfigError, PluginError } from '../errors.ts'
 import { Context } from './context.ts'
 import type { PluginDefinition } from './definition.ts'
 import { importPlugin, registerPluginRoots } from './loader.ts'
@@ -79,6 +79,16 @@ export class PluginManager {
   get(name: string): PluginState | undefined {
     const state = this.entries.get(name)?.state
     return state && { ...state }
+  }
+
+  getConfig(name: string): unknown {
+    const entry = this.entries.get(name)
+    const schema = entry?.definition?.config
+    if (!schema) return undefined
+    if (entry.context) return entry.context.config
+    const value = this.app.config.plugins[name]?.config
+    const result = schema.safeParse(value === undefined ? {} : value)
+    return result.success ? result.data : undefined
   }
 
   async start(): Promise<void> {
@@ -378,11 +388,11 @@ export class PluginManager {
     if (!schema) return undefined
     const result = schema.safeParse(value === undefined ? {} : value)
     if (!result.success) {
-      const issues = result.error.issues.map(
-        (issue) =>
-          `plugins.${entry.state.name}.config${issue.path.map((part) => (typeof part === 'number' ? `[${part}]` : `.${String(part)}`)).join('')}: ${issue.message}`,
-      )
-      throw new PluginError(issues.join('\n'))
+      const issues = result.error.issues.map((issue) => ({
+        path: `plugins.${entry.state.name}.config${issue.path.map((part) => (typeof part === 'number' ? `[${part}]` : `.${String(part)}`)).join('')}`,
+        message: issue.message,
+      }))
+      throw new PluginConfigError(issues)
     }
     return result.data
   }

@@ -52,6 +52,16 @@ export class PluginError extends Error {
   }
 }
 
+export class PluginConfigError extends PluginError {
+  readonly issues: { path: string; message: string }[]
+
+  constructor(issues: { path: string; message: string }[]) {
+    super(issues.map((issue) => `${issue.path}: ${issue.message}`).join('\n'))
+    this.name = 'PluginConfigError'
+    this.issues = issues
+  }
+}
+
 export class CommandConflictError extends Error {
   constructor(name: string, existingOwner: string, newOwner: string) {
     super(`Command or alias "${name}" conflicts between "${existingOwner}" and "${newOwner}"`)

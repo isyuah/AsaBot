@@ -49,6 +49,16 @@ pluginLoader:
   # auto 表示非 production 环境启用热重载，也可设为 true 或 false
   hotReload: auto
 
+server:
+  # 默认只允许本机访问；如需远程访问，请明确配置监听地址
+  host: 127.0.0.1
+  # HTTP 面板与对外 API 共用端口
+  port: 5140
+  # 面板密码为空时不启用面板和静态页面
+  panelPassword: ${ASABOT_PANEL_PASSWORD:-}
+  # API token 为空时不启用对外 API
+  apiToken: ${ASABOT_API_TOKEN:-}
+
 plugins:
   help:
     # 内置帮助命令

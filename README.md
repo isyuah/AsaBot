@@ -56,8 +56,24 @@ AsaBot 是一个使用 TypeScript 编写的 QQ 机器人框架。当前通过 On
 | `pluginLoader` | 插件目录和热重载开关；`auto` 在 `NODE_ENV` 不是 `production` 时开启 |
 | `plugins.<name>.enabled` | 插件全局开关，缺省为 `true` |
 | `plugins.<name>.config` | 对应插件的配置；示例 `echo` 支持 `maxLen` 和 `welcome` |
+| `server` | HTTP 监听地址和端口、面板密码、对外 API token；密码或 token 为空时分别关闭对应功能 |
 
 时长可以写毫秒数或 `10s`、`5m`、`1h30m` 等字符串。内置插件 `help`、`status`、`admin` 也使用 `plugins` 配置。通过管理命令修改全局插件开关时会写回配置文件；按群开关和访问控制保存在 SQLite 中。
+
+## 管理面板与对外 API
+
+通过环境变量或 `.env` 设置 `ASABOT_PANEL_PASSWORD` 以启用面板，设置 `ASABOT_API_TOKEN` 以启用对外 API。两者相互独立；都为空时不监听 HTTP 端口。默认地址为 `http://127.0.0.1:5140`。面板前端构建后访问该地址；在仓库根目录执行 `pnpm --filter web build` 可生成 `web/dist`。面板登录会创建 7 天有效的会话 cookie，进程重启后需要重新登录。
+
+对外 API 使用 `Authorization: Bearer <token>`。例如，在设置 `ASABOT_API_TOKEN` 的 shell 中：
+
+```sh
+curl -H "Authorization: Bearer $ASABOT_API_TOKEN" http://127.0.0.1:5140/api/v1/bots
+curl -X POST http://127.0.0.1:5140/api/v1/send \
+  -H "Authorization: Bearer $ASABOT_API_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"target":{"type":"group","id":"123456"},"message":"你好"}'
+```
+
+`target.type` 可为 `group` 或 `private`；可选传 `platform` 和 `selfId` 选择在线 Bot，不指定时使用第一个在线 Bot。`message` 接受纯文本字符串或消息段数组，成功时返回 `{ "messageId": "..." }`。插件可以通过 `ctx.route(app => ...)` 注册 Hono 路由，地址为 `/plugins/<插件名>/...`；这些路由不使用面板登录鉴权，插件卸载后立即失效。
 
 ## 内置命令
 
@@ -106,6 +122,7 @@ export default definePlugin({
 | `ctx.middleware(fn, { priority })` | 注册中间件；调用 `next()` 才继续处理 |
 | `ctx.command(declaration)` | 注册命令并链式设置选项、权限和 action |
 | `ctx.match(pattern, handler, options)` | 按字符串、正则或函数匹配消息 |
+| `ctx.route(app => ...)` | 注册插件的 Hono HTTP 路由，插件卸载时回收 |
 | `ctx.cron`、`ctx.interval`、`ctx.timeout` | 注册定时任务 |
 | `ctx.store`、`ctx.db`、`ctx.migrate(steps)` | 插件独立 KV、共享 SQLite 句柄、按插件版本管理的迁移 |
 | `ctx.bot(selfId?)`、`ctx.bots` | 查找在线 Bot、列出 Bot；找不到在线 Bot 时 `ctx.bot()` 抛错 |

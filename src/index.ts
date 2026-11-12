@@ -46,6 +46,7 @@ export {
   ConfigError,
   NoBotOnlineError,
   NotConnectedError,
+  PluginConfigError,
   PluginError,
 } from './core/errors.ts'
 export type {

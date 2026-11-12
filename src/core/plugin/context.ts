@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
+import { Hono } from 'hono'
 import type { Logger } from 'pino'
 import type { App } from '../app.ts'
 import type { Bot } from '../bot.ts'
@@ -26,6 +27,7 @@ export class Context<Config = undefined> {
   private readonly scheduler: Scheduler
   private readonly kv: KVStore
   private readonly cleanups: Cleanup[] = []
+  private routeApp?: Hono
   private disposed = false
 
   constructor(app: App, name: string, config: Config) {
@@ -128,6 +130,15 @@ export class Context<Config = undefined> {
   ): Disposer {
     this.assertActive()
     return this.app.dispatcher.match(this.scope, pattern, handler, options)
+  }
+  route(register: (app: Hono) => void): void {
+    this.assertActive()
+    if (!this.routeApp) {
+      this.routeApp = new Hono()
+      const remove = this.app.setPluginRoute(this.owner, this.routeApp)
+      this.controller.signal.addEventListener('abort', remove, { once: true })
+    }
+    register(this.routeApp)
   }
   cron(expression: string, fn: () => unknown | Promise<unknown>): Disposer {
     this.assertActive()

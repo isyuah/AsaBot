@@ -87,6 +87,7 @@ function matches(pattern: MatchPattern, session: Session): boolean {
 export class Dispatcher implements SessionServices, CommandRegistration {
   accessFilter: AccessFilter = () => true
   isEnabledFor: EnabledFilter = () => true
+  onDispatch: (event: DispatchEvent) => void = () => {}
   private readonly config: Config
   private readonly logger: Logger
   private readonly shutdown: AbortSignal
@@ -239,6 +240,10 @@ export class Dispatcher implements SessionServices, CommandRegistration {
     return result
   }
 
+  registeredCommands(owner?: string): CommandDefinition[] {
+    return [...this.commands].filter((command) => owner === undefined || command.owner === owner)
+  }
+
   prompt(
     session: Session,
     text?: Sendable,
@@ -255,6 +260,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
 
   async dispatch(event: DispatchEvent): Promise<void> {
     if (this.shutdown.aborted) return
+    this.onDispatch(event)
     if (
       ('userId' in event || 'groupId' in event) &&
       !(event.kind === 'message'

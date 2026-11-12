@@ -104,6 +104,7 @@ class OneBotBotImpl implements OneBotBot {
   readonly sentMessageIds = new LruSet<string>(1_000)
   private currentStatus: 'connecting' | 'online' | 'offline' = 'connecting'
   readonly selfId: string
+  nickname: string | undefined
   private readonly connection: OneBotConnection
 
   constructor(connection: OneBotConnection, selfId: string) {
@@ -368,6 +369,7 @@ class OneBotConnection {
       if (this.currentBot === undefined) {
         this.currentBot = new OneBotBotImpl(this, selfId)
       }
+      if (typeof login.nickname === 'string') this.currentBot.nickname = login.nickname
       const bot = this.currentBot
       this.host.registerBot(bot)
       bot.setStatus('online')

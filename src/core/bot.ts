@@ -50,6 +50,8 @@ export interface Bot {
   readonly platform: string
   readonly selfId: string
   readonly status: 'connecting' | 'online' | 'offline'
+  /** Display name of the bot account, known once it has logged in. */
+  readonly nickname?: string
   sendPrivate(userId: string, content: Sendable): Promise<SendResult>
   sendGroup(groupId: string, content: Sendable): Promise<SendResult>
   deleteMessage(messageId: string): Promise<void>

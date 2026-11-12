@@ -146,6 +146,13 @@ export class Storage {
     return this.groups.get(JSON.stringify([owner, groupKey])) !== false
   }
 
+  listGroups(owner: string): { groupKey: string; enabled: boolean }[] {
+    return this.db
+      .prepare('SELECT group_key, enabled FROM plugin_group_state WHERE plugin = ? ORDER BY group_key')
+      .all(owner)
+      .map((row) => ({ groupKey: String(row.group_key), enabled: row.enabled === 1 }))
+  }
+
   allows(event: DispatchEvent): boolean {
     const userId = 'userId' in event ? event.userId : undefined
     const groupId = 'groupId' in event ? event.groupId : undefined
