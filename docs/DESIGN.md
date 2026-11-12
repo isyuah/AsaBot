@@ -766,6 +766,8 @@ type PackageSearchItem = { name: string; version: string; description?: string; 
 
 **E1 数据表归属（修订 13、20.3）**：purge 不再按 `p_<name>_` 前缀匹配，因为插件名允许下划线，`foo` 会误删 `foo_bar` 的表。改为记录表的归属：`ctx.migrate()` 执行每一步迁移的前后各对比一次 sqlite_master，新出现的表记入 `plugin_tables(plugin, table_name)`，迁移中被删掉的表从记录里移除。purge 只 DROP 记录在该插件名下的表。直接用 `ctx.db.exec` 建的表不在记录里，文档说明建表应通过 migrate。
 
+**E2 接口不得读取本地文件（修订 18）**：面板的 `/send`、对外 API 的 `/api/v1/send`、调试台的 `message`，这些来自 HTTP 请求的消息段中，`image`、`audio`、`video`、`file` 的 `file` 字段不允许以 `file:` 开头（大小写不敏感），违反时返回 400 `BAD_REQUEST`，`issues` 指出具体的段。只有插件代码中的 `seg.image('/本地路径')` 这类受信任的调用才会让适配器读取本地文件。
+
 **E3 不吞异常（修订 14、18）**：HTTP 的 onError 在日志中带上 `err`、请求方法和路径；dispatch 订阅者等内部回调中不允许出现空 catch，异常一律带上下文记录 error 日志。
 
 **A5 时区（修订 4、12、18）**：
