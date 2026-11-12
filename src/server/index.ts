@@ -294,8 +294,16 @@ export class HttpServer implements ServerService {
     if (this.app.config.server.panelPassword) {
       const root = fileURLToPath(new URL('../../web/dist', import.meta.url))
       if (existsSync(root)) {
-        const staticFiles = serveStatic<Env>({ root })
-        const index = serveStatic<Env>({ root, path: 'index.html' })
+        // Built assets have content hashes in their names, so they can be cached forever. index.html must always be
+        // revalidated: a stale copy would reference asset files that no longer exist after an upgrade.
+        const cacheHeaders = (path: string, c: Context<Env>) => {
+          c.header(
+            'Cache-Control',
+            /[\\/]assets[\\/]/.test(path) ? 'public, max-age=31536000, immutable' : 'no-cache',
+          )
+        }
+        const staticFiles = serveStatic<Env>({ root, onFound: cacheHeaders })
+        const index = serveStatic<Env>({ root, path: 'index.html', onFound: cacheHeaders })
         routes.use('*', async (c, next) => {
           if (isBackendPath(c.req.path)) return next()
           return staticFiles(c, next)
