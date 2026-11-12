@@ -7,6 +7,7 @@ import type {
   LogEntry,
   LogRecord,
   Overview,
+  PackageOperation,
   PluginView,
   ServerFrame,
   StatsPoint,
@@ -25,6 +26,7 @@ interface Realtime {
   connection: Store<ConnectionState>
   logs: Store<LogEntry[]>
   messages: Store<LiveMessage[]>
+  operations: Store<PackageOperation[]>
 }
 
 const RealtimeContext = createContext<Realtime | null>(null)
@@ -84,6 +86,21 @@ function applyFrame(
         return [...rest, frame.point].sort((a, b) => a.t - b.t).slice(-60)
       })
       break
+    case 'package': {
+      const operation = frame.operation
+      realtime.operations.set((list) =>
+        [operation, ...list.filter((item) => item.id !== operation.id)]
+          .sort((a, b) => b.startedAt - a.startedAt)
+          .slice(0, 20),
+      )
+      if (operation.status === 'succeeded' || operation.status === 'failed') {
+        void client.invalidateQueries({ queryKey: ['plugins'] })
+        void client.invalidateQueries({ queryKey: ['overview'] })
+        void client.invalidateQueries({ queryKey: ['commands'] })
+        void client.invalidateQueries({ queryKey: ['packageSearch'] })
+      }
+      break
+    }
     case 'log':
       if (pendingLogs) pendingLogs.push(frame.record)
       else realtime.logs.set((list) => [...list, toEntry(frame.record)].slice(-maxLogs))
@@ -125,6 +142,10 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           .finally(() => {
             pendingLogs = null
           })
+        api
+          .packageOperations()
+          .then((list) => realtime.operations.set(list))
+          .catch(() => {})
         // Data fetched before the socket existed may be stale after a reconnect.
         void client.invalidateQueries()
       }
@@ -157,6 +178,7 @@ function useRealtimeStores(): Realtime {
     connection: createStore<ConnectionState>('connecting'),
     logs: createStore<LogEntry[]>([]),
     messages: createStore<LiveMessage[]>([]),
+    operations: createStore<PackageOperation[]>([]),
   }
   return stores
 }
@@ -174,6 +196,13 @@ function useStore<T>(store: Store<T>): T {
 export const useConnection = () => useStore(useRealtime().connection)
 export const useLiveLogs = () => useStore(useRealtime().logs)
 export const useLiveMessages = () => useStore(useRealtime().messages)
+export const usePackageOperations = () => useStore(useRealtime().operations)
+/** Seed operations started from this tab before their first push frame arrives. */
+export const useTrackOperation = () => {
+  const { operations } = useRealtime()
+  return (operation: PackageOperation) =>
+    operations.set((list) => [operation, ...list.filter((item) => item.id !== operation.id)].slice(0, 20))
+}
 export const useClearLogs = () => {
   const { logs } = useRealtime()
   return () => logs.set([])

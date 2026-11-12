@@ -85,6 +85,50 @@ export function Segmented<V extends string>({
   )
 }
 
+/** Page-level view switch: text tabs over a hairline, with a sliding underline. */
+export function PageTabs<V extends string>({
+  value,
+  onChange,
+  tabs,
+  className,
+}: {
+  value: V
+  onChange: (value: V) => void
+  tabs: { value: V; label: ReactNode }[]
+  className?: string
+}) {
+  const id = useId()
+  return (
+    <div role="tablist" className={cn('flex gap-5 border-b border-border', className)}>
+      {tabs.map((tab) => {
+        const active = tab.value === value
+        return (
+          <button
+            key={tab.value}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(tab.value)}
+            className={cn(
+              'relative -mb-px flex h-10 cursor-pointer items-center gap-1.5 text-[13.5px] font-medium transition-colors',
+              active ? 'text-fg' : 'text-fg-3 hover:text-fg-2',
+            )}
+          >
+            {tab.label}
+            {active && (
+              <motion.span
+                layoutId={`page-tab-${id}`}
+                transition={spring}
+                className="absolute inset-x-0 bottom-0 h-[2px] rounded-full bg-accent"
+              />
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 /** Tabs with an animated underline indicator. */
 export function Tabs<V extends string>({
   value,

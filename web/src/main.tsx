@@ -32,7 +32,7 @@ function ThemedToaster() {
   return (
     <Toaster
       theme={resolved}
-      position="bottom-right"
+      position="top-right"
       gap={10}
       toastOptions={{
         classNames: {

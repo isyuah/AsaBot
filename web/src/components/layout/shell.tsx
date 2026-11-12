@@ -19,6 +19,7 @@ import { OverviewPage } from '../../pages/overview.tsx'
 import { PlaygroundPage } from '../../pages/playground.tsx'
 import { PluginsPage } from '../../pages/plugins.tsx'
 import { CommandPalette } from '../command-palette.tsx'
+import { OperationsDock } from '../plugin-manage.tsx'
 import { Button } from '../ui/button.tsx'
 import { Tooltip } from '../ui/misc.tsx'
 import { Kbd, StatusDot } from '../ui/primitives.tsx'
@@ -114,6 +115,7 @@ export function Shell() {
         </main>
       </div>
       <CommandPalette />
+      <OperationsDock />
     </div>
   )
 }

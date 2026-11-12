@@ -1,25 +1,46 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
+  ArrowUpCircle,
+  FileUp,
   FlaskConical,
   MoreHorizontal,
   Package,
   Plus,
   Puzzle,
+  RefreshCw,
   RotateCw,
   Search,
   Settings2,
+  Store,
   TerminalSquare,
+  Trash2,
   Users,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useMemo, useState } from 'react'
 import { toast } from 'sonner'
+import {
+  hasUpdate,
+  PackageMarket,
+  UninstallDialog,
+  UpdateButton,
+  UploadDialog,
+} from '../components/plugin-manage.tsx'
 import { SchemaForm } from '../components/schema-form.tsx'
 import { Button } from '../components/ui/button.tsx'
 import { Sheet } from '../components/ui/dialog.tsx'
 import { Input } from '../components/ui/input.tsx'
-import { Menu, MenuItem, Segmented, TabPanel, Tabs, Tooltip } from '../components/ui/misc.tsx'
+import {
+  Menu,
+  MenuItem,
+  MenuSeparator,
+  PageTabs,
+  Segmented,
+  TabPanel,
+  Tabs,
+  Tooltip,
+} from '../components/ui/misc.tsx'
 import { Badge, Card, EmptyState, PageHeader, Skeleton, type Tone } from '../components/ui/primitives.tsx'
 import { Select } from '../components/ui/select.tsx'
 import { Switch } from '../components/ui/switch.tsx'
@@ -39,6 +60,12 @@ const stateMeta: Record<PluginStateName, { label: string; tone: Tone }> = {
 }
 
 type Filter = 'all' | 'active' | 'disabled' | 'failed'
+
+function sourceLabel(plugin: PluginView): string {
+  if (plugin.source === 'builtin') return '内置'
+  if (plugin.source === 'package') return `npm · ${plugin.package?.name ?? plugin.name}`
+  return '本地文件'
+}
 
 const skeletonKeys = ['a', 'b', 'c', 'd', 'e', 'f']
 
@@ -75,7 +102,28 @@ export function PluginsPage() {
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
+  const [view, setView] = useState<'installed' | 'market'>('installed')
+  const [uploading, setUploading] = useState(false)
+  const [removing, setRemoving] = useState<PluginView | null>(null)
   const { action } = usePluginMutations()
+  const client = useQueryClient()
+  const rescan = useMutation({
+    mutationFn: api.rescanPlugins,
+    onSuccess: ({ added, removed, plugins: next }) => {
+      client.setQueryData(['plugins'], next)
+      void client.invalidateQueries({ queryKey: ['commands'] })
+      toast.success(
+        added.length === 0 && removed.length === 0
+          ? '没有发现变化'
+          : [
+              added.length > 0 && `新增 ${added.join('、')}`,
+              removed.length > 0 && `移除 ${removed.join('、')}`,
+            ]
+              .filter(Boolean)
+              .join('；'),
+      )
+    },
+  })
 
   const list = useMemo(() => {
     const keyword = query.trim().toLowerCase()
@@ -109,95 +157,175 @@ export function PluginsPage() {
             ? `共 ${counts.all} 个插件，${counts.active} 个正在运行`
             : '管理插件的启停、配置和群开关'
         }
+        actions={
+          <>
+            <Tooltip content="发现插件目录中新增或删除的插件">
+              <Button loading={false} onClick={() => rescan.mutate()} disabled={rescan.isPending}>
+                <motion.span
+                  animate={rescan.isPending ? { rotate: 360 } : { rotate: 0 }}
+                  transition={
+                    rescan.isPending
+                      ? { duration: 0.9, repeat: Number.POSITIVE_INFINITY, ease: 'linear' }
+                      : softSpring
+                  }
+                  className="inline-flex"
+                >
+                  <RefreshCw className="size-3.5" />
+                </motion.span>
+                重新扫描
+              </Button>
+            </Tooltip>
+            <Button variant="primary" onClick={() => setUploading(true)}>
+              <FileUp className="size-3.5" />
+              上传插件
+            </Button>
+          </>
+        }
       />
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Segmented
-          value={filter}
-          onChange={setFilter}
-          options={[
-            {
-              value: 'all',
-              label: (
-                <>
-                  全部 <Count n={counts.all} />
-                </>
-              ),
-            },
-            {
-              value: 'active',
-              label: (
-                <>
-                  运行中 <Count n={counts.active} />
-                </>
-              ),
-            },
-            {
-              value: 'disabled',
-              label: (
-                <>
-                  已停用 <Count n={counts.disabled} />
-                </>
-              ),
-            },
-            {
-              value: 'failed',
-              label: (
-                <>
-                  失败 <Count n={counts.failed} />
-                </>
-              ),
-            },
-          ]}
-        />
-        <Input
-          icon={<Search />}
-          placeholder="搜索插件"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          className="ml-auto w-56"
-        />
-      </div>
+      <PageTabs
+        className="mb-5"
+        value={view}
+        onChange={setView}
+        tabs={[
+          {
+            value: 'installed',
+            label: (
+              <>
+                已安装 <Count n={counts.all} />
+              </>
+            ),
+          },
+          {
+            value: 'market',
+            label: (
+              <span className="inline-flex items-center gap-1.5">
+                <Store className="size-3.5" />
+                插件市场
+              </span>
+            ),
+          },
+        ]}
+      />
+      <AnimatePresence mode="wait" initial={false}>
+        {view === 'market' ? (
+          <motion.div
+            key="market"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={softSpring}
+          >
+            <PackageMarket />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="installed"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={softSpring}
+          >
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <Segmented
+                value={filter}
+                onChange={setFilter}
+                options={[
+                  {
+                    value: 'all',
+                    label: (
+                      <>
+                        全部 <Count n={counts.all} />
+                      </>
+                    ),
+                  },
+                  {
+                    value: 'active',
+                    label: (
+                      <>
+                        运行中 <Count n={counts.active} />
+                      </>
+                    ),
+                  },
+                  {
+                    value: 'disabled',
+                    label: (
+                      <>
+                        已停用 <Count n={counts.disabled} />
+                      </>
+                    ),
+                  },
+                  {
+                    value: 'failed',
+                    label: (
+                      <>
+                        失败 <Count n={counts.failed} />
+                      </>
+                    ),
+                  },
+                ]}
+              />
+              <Input
+                icon={<Search />}
+                placeholder="搜索插件"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                className="ml-auto w-56"
+              />
+            </div>
 
-      {!plugins.data ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {skeletonKeys.map((key) => (
-            <Skeleton key={key} className="h-[150px] rounded-xl" />
-          ))}
-        </div>
-      ) : list.length === 0 ? (
-        <Card>
-          <EmptyState
-            icon={<Puzzle />}
-            title={query || filter !== 'all' ? '没有符合条件的插件' : '还没有插件'}
-            description="把插件文件放进 plugins/ 目录，保存后会自动加载。"
-          />
-        </Card>
-      ) : (
-        <motion.div
-          key={filter}
-          variants={stagger}
-          initial="initial"
-          animate="animate"
-          className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3"
-        >
-          {list.map((plugin) => (
-            <PluginCard
-              key={plugin.name}
-              plugin={plugin}
-              onOpen={() => setSelected(plugin.name)}
-              onToggle={(enabled) =>
-                action.mutate({ name: plugin.name, action: enabled ? 'enable' : 'disable' })
-              }
-              onReload={() => action.mutate({ name: plugin.name, action: 'reload' })}
-            />
-          ))}
-        </motion.div>
-      )}
+            {!plugins.data ? (
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {skeletonKeys.map((key) => (
+                  <Skeleton key={key} className="h-[150px] rounded-xl" />
+                ))}
+              </div>
+            ) : list.length === 0 ? (
+              <Card>
+                <EmptyState
+                  icon={<Puzzle />}
+                  title={query || filter !== 'all' ? '没有符合条件的插件' : '还没有插件'}
+                  description="上传插件、从插件市场安装，或把插件文件放进插件目录后点“重新扫描”。"
+                />
+              </Card>
+            ) : (
+              <motion.div
+                key={filter}
+                variants={stagger}
+                initial="initial"
+                animate="animate"
+                className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3"
+              >
+                {list.map((plugin) => (
+                  <PluginCard
+                    key={plugin.name}
+                    plugin={plugin}
+                    onOpen={() => setSelected(plugin.name)}
+                    onToggle={(enabled) =>
+                      action.mutate({ name: plugin.name, action: enabled ? 'enable' : 'disable' })
+                    }
+                    onReload={() => action.mutate({ name: plugin.name, action: 'reload' })}
+                    onUninstall={() => setRemoving(plugin)}
+                  />
+                ))}
+              </motion.div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <PluginSheet
         plugin={current}
         open={current !== undefined}
         onOpenChange={(open) => !open && setSelected(null)}
+        onUninstall={(plugin) => setRemoving(plugin)}
+      />
+      <UploadDialog open={uploading} onOpenChange={setUploading} />
+      <UninstallDialog
+        plugin={removing}
+        onClose={() => {
+          if (removing && removing.name === selected) setSelected(null)
+          setRemoving(null)
+        }}
       />
     </>
   )
@@ -212,11 +340,13 @@ function PluginCard({
   onOpen,
   onToggle,
   onReload,
+  onUninstall,
 }: {
   plugin: PluginView
   onOpen: () => void
   onToggle: (enabled: boolean) => void
   onReload: () => void
+  onUninstall: () => void
 }) {
   const meta = stateMeta[plugin.state]
   const visibleCommands = plugin.commands.filter((command) => !command.hidden).length
@@ -245,7 +375,7 @@ function PluginCard({
               <span className="truncate text-[14px] font-semibold tracking-[-0.01em]">{plugin.name}</span>
               {plugin.version && <span className="font-mono text-[11px] text-fg-3">v{plugin.version}</span>}
             </div>
-            <div className="text-[11.5px] text-fg-3">{plugin.source === 'builtin' ? '内置' : '插件目录'}</div>
+            <div className="truncate text-[11.5px] text-fg-3">{sourceLabel(plugin)}</div>
           </div>
           {/* Clicks inside the controls must not open the drawer (see the card onClick). */}
           <div className="flex items-center gap-1" data-card-control>
@@ -267,6 +397,14 @@ function PluginCard({
               <MenuItem icon={<Settings2 />} onSelect={onOpen}>
                 详情与配置
               </MenuItem>
+              {plugin.removable && (
+                <>
+                  <MenuSeparator />
+                  <MenuItem icon={<Trash2 />} danger onSelect={onUninstall}>
+                    卸载
+                  </MenuItem>
+                </>
+              )}
             </Menu>
             <Switch aria-label={`启用 ${plugin.name}`} checked={plugin.enabled} onCheckedChange={onToggle} />
           </div>
@@ -304,6 +442,11 @@ function PluginCard({
             <TerminalSquare className="size-3.5" />
             {visibleCommands} 条命令
           </span>
+          {hasUpdate(plugin) && (
+            <span className="ml-auto inline-flex items-center gap-1 text-[12px] text-info">
+              <ArrowUpCircle className="size-3.5" />v{plugin.package?.latest}
+            </span>
+          )}
         </div>
       </Card>
     </motion.div>
@@ -316,10 +459,12 @@ function PluginSheet({
   plugin,
   open,
   onOpenChange,
+  onUninstall,
 }: {
   plugin: PluginView | undefined
   open: boolean
   onOpenChange: (open: boolean) => void
+  onUninstall: (plugin: PluginView) => void
 }) {
   const [tab, setTab] = useState<SheetTab>('overview')
   const { action } = usePluginMutations()
@@ -388,7 +533,9 @@ function PluginSheet({
               className="px-6 py-5"
             >
               <TabPanel value="overview" forceMount hidden={tab !== 'overview'}>
-                {tab === 'overview' && <OverviewTab plugin={plugin} />}
+                {tab === 'overview' && (
+                  <OverviewTab plugin={plugin} onUninstall={() => onUninstall(plugin)} />
+                )}
               </TabPanel>
               <TabPanel value="config" forceMount hidden={tab !== 'config'}>
                 {tab === 'config' && <ConfigTab plugin={plugin} />}
@@ -416,7 +563,7 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function OverviewTab({ plugin }: { plugin: PluginView }) {
+function OverviewTab({ plugin, onUninstall }: { plugin: PluginView; onUninstall: () => void }) {
   return (
     <div className="space-y-5">
       {plugin.state === 'failed' && plugin.error && (
@@ -434,7 +581,30 @@ function OverviewTab({ plugin }: { plugin: PluginView }) {
         <InfoRow label="版本">
           {plugin.version ? <span className="font-mono">v{plugin.version}</span> : '—'}
         </InfoRow>
-        <InfoRow label="来源">{plugin.source === 'builtin' ? '内置插件' : '插件目录'}</InfoRow>
+        <InfoRow label="来源">
+          {plugin.source === 'builtin' ? '内置插件' : plugin.source === 'package' ? 'npm 插件包' : '本地文件'}
+        </InfoRow>
+        {plugin.package && (
+          <>
+            <InfoRow label="包名">
+              <span className="font-mono">{plugin.package.name}</span>
+            </InfoRow>
+            <InfoRow label="已安装版本">
+              <span className="font-mono">v{plugin.package.version}</span>
+              {plugin.package.latest && plugin.package.latest !== plugin.package.version && (
+                <span className="ml-2 text-info">最新 v{plugin.package.latest}</span>
+              )}
+            </InfoRow>
+            {plugin.package.peerRange && (
+              <InfoRow label="要求框架版本">
+                <span className={cn('font-mono', !plugin.package.compatible && 'text-danger')}>
+                  {plugin.package.peerRange}
+                </span>
+                {!plugin.package.compatible && <span className="ml-2 text-danger">与当前版本不兼容</span>}
+              </InfoRow>
+            )}
+          </>
+        )}
         {plugin.path && (
           <InfoRow label="文件">
             <span className="font-mono text-[12px] text-fg-2">{plugin.path}</span>
@@ -443,6 +613,29 @@ function OverviewTab({ plugin }: { plugin: PluginView }) {
         <InfoRow label="命令">{plugin.commands.length} 条</InfoRow>
         <InfoRow label="可配置">{plugin.configSchema ? '是' : '否'}</InfoRow>
       </dl>
+      {hasUpdate(plugin) && (
+        <div className="flex items-center justify-between gap-3 rounded-xl bg-info-soft px-4 py-3">
+          <span className="text-[13px] text-info">有新版本 v{plugin.package?.latest} 可用</span>
+          <UpdateButton plugin={plugin} />
+        </div>
+      )}
+      {plugin.removable && (
+        <div className="rounded-xl border border-danger/25 px-4 py-3.5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-[13px] font-medium text-fg">卸载插件</div>
+              <p className="mt-0.5 text-[12px] text-fg-3">
+                {plugin.source === 'package' ? '通过 npm 卸载这个插件包。' : '删除插件目录中的插件文件。'}
+                可以选择同时清理数据。
+              </p>
+            </div>
+            <Button variant="danger-ghost" size="sm" onClick={onUninstall}>
+              <Trash2 className="size-3.5" />
+              卸载
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

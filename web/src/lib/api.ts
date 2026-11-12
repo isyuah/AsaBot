@@ -6,6 +6,8 @@ import type {
   GroupView,
   LogRecord,
   Overview,
+  PackageOperation,
+  PackageSearchItem,
   PlaygroundReply,
   PlaygroundRequest,
   PluginView,
@@ -91,6 +93,25 @@ export const api = {
     request<{ groupKey: string; enabled: boolean }[]>('GET', `/plugins/${encode(name)}/groups`),
   setPluginGroup: (name: string, groupKey: string, enabled: boolean) =>
     request<unknown>('PUT', `/plugins/${encode(name)}/groups/${encode(groupKey)}`, { enabled }),
+
+  rescanPlugins: () =>
+    request<{ added: string[]; removed: string[]; plugins: PluginView[] }>('POST', '/plugins/rescan', {}),
+  uploadPlugin: (input: { filename: string; content: string; overwrite?: boolean }) =>
+    request<PluginView>('POST', '/plugins/upload', input),
+  uninstallPlugin: (name: string, purge: boolean) =>
+    request<{ ok: true }>('POST', `/plugins/${encode(name)}/uninstall`, { purge }),
+
+  searchPackages: (q: string, from = 0) =>
+    request<{ total: number; items: PackageSearchItem[] }>(
+      'GET',
+      `/packages/search?q=${encode(q)}&from=${from}`,
+    ),
+  installPackage: (input: { name: string; version?: string; force?: boolean }) =>
+    request<PackageOperation>('POST', '/packages/install', input),
+  updatePackage: (name: string) => request<PackageOperation>('POST', '/packages/update', { name }),
+  uninstallPackage: (name: string, purge: boolean) =>
+    request<PackageOperation>('POST', '/packages/uninstall', { name, purge }),
+  packageOperations: () => request<PackageOperation[]>('GET', '/packages/operations'),
 
   commands: () => request<CommandView[]>('GET', '/commands'),
 

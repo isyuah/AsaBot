@@ -53,7 +53,10 @@ export interface PluginView {
   name: string
   version?: string
   description?: string
-  source: 'builtin' | 'file'
+  source: 'builtin' | 'file' | 'package'
+  /** file and package plugins can be uninstalled; builtin ones only disabled. */
+  removable: boolean
+  package?: PackageInfo
   path?: string
   state: PluginStateName
   error?: string
@@ -62,6 +65,37 @@ export interface PluginView {
   commands: CommandView[]
   /** Current effective config (parsed by the plugin schema); absent when the plugin has no schema. */
   config?: unknown
+}
+
+export interface PackageInfo {
+  name: string
+  version: string
+  latest?: string
+  peerRange?: string
+  compatible: boolean
+}
+
+export interface PackageOperation {
+  id: string
+  kind: 'install' | 'update' | 'uninstall'
+  name: string
+  status: 'queued' | 'running' | 'succeeded' | 'failed'
+  startedAt: number
+  finishedAt?: number
+  log: string[]
+  error?: string
+  plugin?: PluginView
+}
+
+export interface PackageSearchItem {
+  name: string
+  version: string
+  description?: string
+  author?: string
+  date?: string
+  links: { npm: string; homepage?: string; repository?: string }
+  installed: boolean
+  installedVersion?: string
 }
 
 export interface Overview {
@@ -147,6 +181,7 @@ export type ServerFrame =
   | { type: 'plugin'; plugin: PluginView }
   | ({ type: 'message' } & LiveMessage)
   | { type: 'stats'; point: StatsPoint }
+  | { type: 'package'; operation: PackageOperation }
 
 export interface ApiErrorBody {
   error: { code: string; message: string; issues?: { path: string; message: string }[] }
