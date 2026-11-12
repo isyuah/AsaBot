@@ -1,0 +1,210 @@
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+@import '@fontsource-variable/noto-sans-sc';
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Design tokens. Components only use these role names, so the light and dark themes are each defined in one place.
+ * The palette is soft and low-saturation; the accent is a muted violet. Chart series colors were checked with the
+ * dataviz palette validator against the card surface of each mode.
+ */
+:root {
+  --bg: #f6f6f8;
+  --bg-glow: rgb(109 94 245 / 0.09);
+  --surface: #ffffff;
+  --surface-2: #f4f4f7;
+  --surface-3: #ececf1;
+  --overlay: rgb(23 23 31 / 0.28);
+  --border: #e7e7ed;
+  --border-strong: #d9d9e1;
+  --fg: #17171f;
+  --fg-2: #5b5c6b;
+  --fg-3: #8a8b99;
+  --accent: #6d5ef5;
+  --accent-hover: #6051ee;
+  --accent-fg: #ffffff;
+  --accent-soft: #efedff;
+  --accent-soft-fg: #5245de;
+  --success: #12a07e;
+  --success-soft: #e2f5ef;
+  --warning: #c97f05;
+  --warning-soft: #fcf0d9;
+  --danger: #e5484d;
+  --danger-soft: #fdeced;
+  --info: #3a7fe6;
+  --info-soft: #e7effd;
+  --series-in: #6d5ef5;
+  --series-out: #13a589;
+  --ring: rgb(109 94 245 / 0.32);
+  --shadow-card: 0 1px 2px rgb(23 23 31 / 0.04), 0 1px 1px rgb(23 23 31 / 0.02);
+  --shadow-pop: 0 12px 32px -8px rgb(23 23 31 / 0.18), 0 2px 6px rgb(23 23 31 / 0.06);
+  --highlight: inset 0 1px 0 rgb(255 255 255 / 0.6);
+}
+
+.dark {
+  --bg: #0c0d11;
+  --bg-glow: rgb(139 127 250 / 0.1);
+  --surface: #15161c;
+  --surface-2: #1b1c23;
+  --surface-3: #23242c;
+  --overlay: rgb(4 4 8 / 0.6);
+  --border: #24252e;
+  --border-strong: #30313c;
+  --fg: #ececf1;
+  --fg-2: #a3a4b2;
+  --fg-3: #6e6f7d;
+  --accent: #7c6ff7;
+  --accent-hover: #8a7ef9;
+  --accent-fg: #ffffff;
+  --accent-soft: rgb(139 127 250 / 0.14);
+  --accent-soft-fg: #b4acff;
+  --success: #2bbd95;
+  --success-soft: rgb(43 189 149 / 0.13);
+  --warning: #e9a43a;
+  --warning-soft: rgb(233 164 58 / 0.13);
+  --danger: #f0585d;
+  --danger-soft: rgb(240 88 93 / 0.14);
+  --info: #5f9cf3;
+  --info-soft: rgb(95 156 243 / 0.14);
+  --series-in: #8b7ffa;
+  --series-out: #1aa182;
+  --ring: rgb(139 127 250 / 0.4);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-pop: 0 16px 40px -8px rgb(0 0 0 / 0.6), 0 2px 8px rgb(0 0 0 / 0.3);
+  --highlight: inset 0 1px 0 rgb(255 255 255 / 0.035);
+}
+
+@theme inline {
+  --font-sans: 'Geist Variable', 'Noto Sans SC Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Noto Sans SC Variable', ui-monospace, monospace;
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-overlay: var(--overlay);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-soft-fg: var(--accent-soft-fg);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-series-in: var(--series-in);
+  --color-series-out: var(--series-out);
+  --color-ring: var(--ring);
+
+  --shadow-card: var(--shadow-card);
+  --shadow-pop: var(--shadow-pop);
+
+  --radius-xl: 14px;
+  --radius-2xl: 18px;
+
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+  --animate-pulse-soft: pulse-soft 2.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(1.9);
+  }
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
+    color: var(--accent-soft-fg);
+  }
+
+  * {
+    border-color: var(--border);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-card), var(--highlight);
+  }
+
+  .skeleton {
+    border-radius: 8px;
+    background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
+    background-size: 400% 100%;
+    animation: var(--animate-shimmer);
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
