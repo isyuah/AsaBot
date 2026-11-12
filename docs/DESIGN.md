@@ -5,12 +5,19 @@
 ## 1. 目标与非目标
 
 **目标**
-- 平台无关的机器人框架核心，首个适配器为 OneBot 11（对接 NapCat）。
+- 协议无关的机器人框架。核心层不认识任何具体协议，协议通过适配器接入。首个适配器是 OneBot 11：任何实现了 OneBot 11 的服务（NapCat、Lagrange.OneBot、LLOneBot 等）都能接入，框架不针对某一个实现做绑定。以后接入 Satori、QQ 官方 Bot、Telegram 等协议时，只需新增适配器，不改核心。
 - 核心能力完整可靠：事件分发、命令系统、多轮会话、权限、插件（含热重载）、存储、定时任务、错误隔离、优雅退出、多账号。
 - 第二期：反向 WS、发送队列、对外 HTTP API、Web 管理面板、Docker 部署、终端沙盒。
 
 **非目标（v1）**
 - 外部进程插件协议；ORM；多实例集群；同群多 Bot 的消息去重。
+
+### 1.1 协议无关原则
+
+- `src/core/**`、`src/server/**`、`src/plugins/**`（内置插件）和 `web/` 不得出现任何协议专属的类型、字段名、文本格式或假设，例如 OneBot 的 action 名、CQ 码、`qq` 字段，或“用户 ID 是纯数字”这类假设。
+- 协议专属的能力只存在于对应的适配器目录中，以包的子路径导出：`import { isOneBot, parseCQ } from 'asabot/onebot11'`。插件确实需要平台专属能力时，显式从子路径导入，并用类型守卫判断。
+- 用户、群、消息的 ID 在框架内都是不透明的字符串，只有适配器知道它们的格式。
+- 面板和文档的措辞使用“用户 ID / 群 ID / 聊天平台 / OneBot 实现”，不写“QQ 号”或“NapCat”（介绍 OneBot 实现时，NapCat 只作为例子之一出现）。
 
 ## 2. 技术栈与硬性约束
 
@@ -69,6 +76,7 @@ docs/
 
 文件 `asabot.config.yaml`（git 忽略；仓库提交 `asabot.config.example.yaml`）。启动时自动加载 `.env`（若存在）。
 
+- `adapters` 段：核心 schema 只把它当作 `Record<string, unknown>`，每个适配器在注册表中提供自己的 zod schema 并校验自己那一段，错误路径带上 `adapters.<name>.` 前缀。出现未注册的适配器名时报错，并列出可用的适配器。
 - 字符串标量支持 `${VAR}` 与 `${VAR:-default}` 插值；变量缺失且无默认值 → 启动失败并指出变量名与配置路径。
 - 整体用 zod 校验；失败时输出可读的路径化错误，例如 `onebot11.connections[0].url: Invalid URL`。
 - 时长字段接受 `'10s' | '5m' | '1h30m' | '1d'` 或毫秒数。
@@ -92,16 +100,17 @@ dispatch:
   promptTimeout: 60s        # session.prompt 默认超时
   maxPromptTimeout: 30m
 
-onebot11:
-  apiTimeout: 30s
-  reconnect: { minDelay: 1s, maxDelay: 60s }
-  connections:
-    - type: forward
-      url: ws://127.0.0.1:3001
-      accessToken: ${NAPCAT_TOKEN:-}
-  reverse:                  # M5：配置了这一段才接受反向连接（NapCat 主动连 AsaBot），地址为 ws://<server>/onebot/v11/ws
-    accessToken: ${ONEBOT_REVERSE_TOKEN:-}
-  sendQueue: { interval: 500ms, jitter: 300ms, maxPending: 100 }   # M5
+adapters:                   # 每个键是一个已注册的适配器；配置结构由适配器自己的 schema 定义和校验
+  onebot11:
+    apiTimeout: 30s
+    reconnect: { minDelay: 1s, maxDelay: 60s }
+    connections:
+      - type: forward
+        url: ws://127.0.0.1:3001
+        accessToken: ${ONEBOT_TOKEN:-}
+    reverse:                  # 配置了这一段才接受反向连接（OneBot 实现主动连 AsaBot），地址为 ws://<server>/onebot/v11/ws
+      accessToken: ${ONEBOT_REVERSE_TOKEN:-}
+    sendQueue: { interval: 500ms, jitter: 300ms, maxPending: 100 }   # M5
 
 pluginLoader:
   dirs: [./plugins]
@@ -122,27 +131,28 @@ server:                     # M4
 ## 5. 消息模型
 
 ```ts
-type Segment =
+type Segment =                                       // 框架自己的消息模型，与任何协议无关
   | { type: 'text'; data: { text: string } }
-  | { type: 'at'; data: { qq: string } }            // qq 为 'all' 表示全体
-  | { type: 'face'; data: { id: string } }
-  | { type: 'image'; data: { file: string; url?: string; summary?: string; subType?: number } }
-  | { type: 'record'; data: { file: string; url?: string } }
+  | { type: 'at'; data: { id: string } }              // 提及某个用户；id 为 'all' 表示全体
+  | { type: 'face'; data: { id: string } }            // 平台表情（id 含义由平台决定）
+  | { type: 'image'; data: { file: string; url?: string; summary?: string } }
+  | { type: 'audio'; data: { file: string; url?: string } }
   | { type: 'video'; data: { file: string; url?: string } }
-  | { type: 'reply'; data: { id: string } }
   | { type: 'file'; data: { file: string; name?: string } }
-  | { type: 'json'; data: { data: string } }
-  | { type: 'forward'; data: { id: string } }
-  | { type: string; data: Record<string, unknown> }  // 未知类型原样保留
+  | { type: 'reply'; data: { id: string } }           // 引用某条消息
+  | { type: 'forward'; data: { id: string } }         // 平台的合并转发
+  | { type: string; data: Record<string, unknown> }   // 平台专属或未知类型，原样保留
 
 type Message = Segment[]
 type Sendable = string | Segment | Segment[]
 ```
 
 - **字符串一律视为纯文本**，不解析 CQ 码（防注入）。需要 CQ 码时显式调用 `parseCQ(str)`。
-- `seg.text / at / atAll / face / image / record / video / reply / file / json`。
-- `seg.image(src)`：`src` 可为 Buffer、本地路径、`file://`、`http(s)://` 或 `base64://`。Buffer 和本地路径默认转为 `base64://`，因为 NapCat 常跑在容器里，读不到宿主机路径。
-- `toCQ(message)` / `parseCQ(str)` 双向转换，需正确转义 `& [ ] ,`。
+- `seg.text / at / atAll / face / image / audio / video / reply / file / forward`。
+- 媒体段的 `file` 是框架约定的来源：`http(s)://`、`base64://`、`file://`，或平台自己的文件标识。适配器负责和协议格式互转（例如 OneBot 的 `record` 对应 `audio`，`at.qq` 对应 `at.id`，图片的 `sub_type` 这类平台字段作为额外字段保留在 `data` 中）。
+- 并不是所有平台都支持所有段类型；适配器遇到不支持的段时，按平台惯例降级（例如转成文本），并记 debug 日志。
+- `seg.image(src)`：`src` 可为 Buffer、本地路径、`file://`、`http(s)://` 或 `base64://`。Buffer 和本地路径默认转为 `base64://`，因为 OneBot 实现常跑在容器或另一台机器上，读不到 AsaBot 所在主机的路径。
+- CQ 码是 OneBot 的文本格式，编解码属于 OneBot 适配器：`import { toCQ, parseCQ } from 'asabot/onebot11'`。
 - `plainText(message)`：拼接所有 text 段。
 
 ## 6. 统一事件模型
@@ -233,6 +243,10 @@ interface AdapterHost {
 
 `start()` 只负责发起连接，不等待上线；连接失败不抛出，而是进入重连。
 
+**适配器注册表**：`src/adapters/index.ts` 导出 `adapters: Record<string, AdapterDefinition>`，其中 `AdapterDefinition = { configSchema: ZodType; create(config, host): Adapter }`。`bootstrap` 遍历 `config.adapters`，逐个查表、校验、创建。新增协议只需在注册表加一项。
+
+**AdapterHost 的服务能力**：除了 emit 和注册 Bot，host 还提供 `registerUpgrade(path, handler)`，供需要被动接受 WebSocket 连接的适配器（例如 OneBot 的反向 WS）注册路径。通用 HTTP 服务只负责把对应路径的 upgrade 交给 handler，本身不包含任何协议代码。只要有适配器注册了 upgrade 路径，HTTP 服务就会启动。连接方式等展示信息由适配器通过 `host.setBotInfo(bot, { connection, url? })` 提供，`connection` 是自由文本（如 `正向 WS`、`反向 WS`），面板原样展示。
+
 **组装位置**：`core` 不能导入适配器，所以由 `src/bootstrap.ts` 中的 `createApp(config, { logger? })` 负责组装：创建 App，再按配置实例化 OneBot 适配器并调用 `app.useAdapter(adapter)`；M3 起还负责注册内置插件。`main.ts` 和 `src/testing` 都通过 `createApp` 获取完整的 App。`AdapterHost` 由 App 实现，并额外提供 `isSuperuser(userId): boolean`，供适配器在构造 Session 时使用。
 
 **Bot 的生命周期**
@@ -246,7 +260,7 @@ interface AdapterHost {
 
 **出站媒体的规范化**
 - `seg.image(buffer)` 在构造时同步转成 `base64://`。
-- `seg.image('/abs/path')` 和 `seg.image('file:///...')` 先原样保存为 `file://` URL，由 OneBot 适配器在发送前异步读取文件并转成 `base64://`。原因是 NapCat 通常运行在容器里，读不到宿主机的路径。文件读取失败时，发送调用以带路径信息的错误 reject。
+- `seg.image('/abs/path')` 和 `seg.image('file:///...')` 先原样保存为 `file://` URL，由 OneBot 适配器在发送前异步读取文件并转成 `base64://`。原因是 OneBot 实现可能运行在容器或另一台机器上，读不到这台主机的路径。文件读取失败时，发送调用以带路径信息的错误 reject。
 - `http(s)://` 和 `base64://` 原样透传。
 - record、video、file 段与 image 规则相同。
 
@@ -270,18 +284,18 @@ interface AdapterHost {
 - 数字 ID 转字符串；发送时字符串转数字。
 - 发出的消息 ID 写入 toMe 缓存，并派发 `bot.message.sent` 内部事件。
 
-**OneBotApi 首批封装**：`sendPrivateMsg`、`sendGroupMsg`、`deleteMsg`、`getMsg`、`getLoginInfo`、`getVersionInfo`、`getStrangerInfo`、`getFriendList`、`getGroupInfo`、`getGroupList`、`getGroupMemberInfo`、`getGroupMemberList`、`setGroupBan`、`setGroupWholeBan`、`setGroupKick`、`setGroupCard`、`setGroupAdmin`、`setGroupSpecialTitle`、`setFriendAddRequest`、`setGroupAddRequest`、`sendGroupForwardMsg`、`sendPrivateForwardMsg`、`groupPoke`、`friendPoke`（NapCat 扩展）。
+**OneBotApi 首批封装**：`sendPrivateMsg`、`sendGroupMsg`、`deleteMsg`、`getMsg`、`getLoginInfo`、`getVersionInfo`、`getStrangerInfo`、`getFriendList`、`getGroupInfo`、`getGroupList`、`getGroupMemberInfo`、`getGroupMemberList`、`setGroupBan`、`setGroupWholeBan`、`setGroupKick`、`setGroupCard`、`setGroupAdmin`、`setGroupSpecialTitle`、`setFriendAddRequest`、`setGroupAddRequest`、`sendGroupForwardMsg`、`sendPrivateForwardMsg`、`groupPoke`、`friendPoke`（部分 OneBot 实现提供的扩展，例如 NapCat；实现不支持时以 ApiError 失败）。
 
 ### 8.1 反向 WS 与发送队列（M5）
 
-**会话与传输分离**：把现在 `OneBotConnection` 中与传输无关的部分抽成 `OneBotSession`，包括 API 的 echo 配对与超时、入站帧处理、事件转换、Bot 生命周期、活性检测（ping/pong 和 heartbeat）、发送队列。正向连接 = 客户端 socket + 退避重连 + 一个 OneBotSession；反向连接 = 服务端接受的 socket + 一个 OneBotSession，不负责重连（由 NapCat 负责）。两者行为一致，不允许出现两份重复的协议实现。
+**会话与传输分离**：把现在 `OneBotConnection` 中与传输无关的部分抽成 `OneBotSession`，包括 API 的 echo 配对与超时、入站帧处理、事件转换、Bot 生命周期、活性检测（ping/pong 和 heartbeat）、发送队列。正向连接 = 客户端 socket + 退避重连 + 一个 OneBotSession；反向连接 = 服务端接受的 socket + 一个 OneBotSession，不负责重连（由对端的 OneBot 实现负责）。两者行为一致，不允许出现两份重复的协议实现。
 
 **反向 WS**
 - 只要配置了 `onebot11.reverse`，HTTP 服务就会启动（即使面板和对外 API 都没开），并在 `/onebot/v11/ws` 接受升级。
 - 鉴权：`Authorization: Bearer <token>`，或查询参数 `access_token`（OneBot 11 规范允许）。`reverse.accessToken` 为空时不校验，同时在启动时记一条 warn：“反向 WS 未设置 token”。校验失败返回 401。
-- 账号识别：必须带 `X-Self-ID`（纯数字），缺失时返回 400。只支持 `X-Client-Role: Universal`（NapCat 默认）或不带这个头；`API` 和 `Event` 拆分连接返回 400，并写明原因。
+- 账号识别：必须带 `X-Self-ID`（纯数字），缺失时返回 400。只支持 `X-Client-Role: Universal`（主流实现的默认值）或不带这个头；`API` 和 `Event` 拆分连接返回 400，并写明原因。
 - 握手成功后照样调用 `get_login_info`。返回的 user_id 与 `X-Self-ID` 不一致时关闭连接（1008），记 warn。
-- 同一个 selfId 出现新的反向连接时，**新连接替换旧连接**：旧 socket 以 1000 `replaced` 关闭，挂起的请求以 NotConnectedError reject，Bot 实例保持不变，只派发一次 bot.offline/bot.online（或者不派发，由实现决定，但面板的 Bot 状态最终必须正确）。原因：反向模式下这种情况通常是 NapCat 重启了，而旧连接已经半死不活。
+- 同一个 selfId 出现新的反向连接时，**新连接替换旧连接**：旧 socket 以 1000 `replaced` 关闭，挂起的请求以 NotConnectedError reject，Bot 实例保持不变，只派发一次 bot.offline/bot.online（或者不派发，由实现决定，但面板的 Bot 状态最终必须正确）。原因：反向模式下这种情况通常是对端重启了，而旧连接已经半死不活。
 - 正向连接与反向连接同时登录同一个账号时，沿用第 7 节“先上线者占有”的规则。
 - `BotView.connection` 为 `reverse`；`url` 省略。
 
@@ -373,7 +387,7 @@ ctx.command('echo <text:rest>')
 
 - **声明语法**：参数之前的裸词构成命令路径，`'plugin reload <name>'` 的路径是 `['plugin', 'reload']`。匹配时取最长路径。`/help plugin` 会列出它的子命令。
 - **参数**：`<name:type>` 必填，`[name:type=default]` 可选；只有最后一个参数可以是 `rest`，它取剩余原文（保留非文本段）。
-- **类型**：`string`（默认）、`number`、`integer`、`boolean`、`user`（at 段或纯数字，结果为 userId 字符串）、`duration`（毫秒数）、`image`（image 段）、`rest`。
+- **类型**：`string`（默认）、`number`、`integer`、`boolean`、`user`（at 段或任意非空的单个 token，结果为 userId 字符串，不对 ID 格式做假设）、`duration`（毫秒数）、`image`（image 段）、`rest`。
 - **分词**：按空白切分，支持 `"..."` 和 `'...'` 引号；每个非文本段单独成为一个 token。
 - **类型推断**：`args` 和 `options` 的类型从声明字符串推断（模板字面量类型）。运行时必须做校验，类型推断只是开发体验上的增强。
 - **触发规则**：
@@ -476,13 +490,15 @@ export default definePlugin({
 
 **空闲判定**：App 记录正在分发中的事件。`app.whenIdle()` 在“所有分发都已结束，或者仅剩阻塞在 prompt 上的处理器”时 resolve。测试辅助的 `say()` 依靠它确定性地拿到机器人的回复，包括多轮对话中的回复。**已知限制（接受）**：处理器如果把 prompt 和其他异步任务并行等待（例如 `Promise.all([session.prompt(), fetch()])`），`whenIdle` 可能在那个异步任务完成前就 resolve。whenIdle 只用于测试辅助，生产路径不依赖它，所以不为此增加显式的活动登记 API。
 
-**`createTestApp`**（`asabot/testing`）：
+**虚拟适配器**（`src/adapters/virtual/`，platform 为 `virtual`）：一个完全在进程内运行的适配器，Bot 把“发送”的内容记录下来，而不是发到任何平台。调试台和 `createTestApp` 共用它，因此插件测试不依赖任何具体协议。
+
+**`createTestApp`**（`asabot/testing`，基于虚拟适配器，不走网络）：
 ```ts
 const t = await createTestApp({ plugins?: PluginDefinition[], pluginDirs?: string[], config?: DeepPartial<Config> })
 const replies = await t.say('/echo hi', { group?: '10', user?: '20', role?: 'admin', superuser?: boolean })  // 返回这条消息触发的发送内容（plainText 或段数组）
 t.app; t.mock; await t.dispose()
 ```
-- 底层走 MockOneBot 和真实的 WS，数据库用临时目录。
+- 底层是虚拟适配器，数据库用临时目录。OneBot 协议层的测试改用 `MockOneBot`（OneBot 专属测试工具，从 `asabot/onebot11/testing` 导出）。
 - `dispose` 时清理所有资源：app、mock 和临时目录。
 
 ## 13. 存储
@@ -549,8 +565,9 @@ t.app; t.mock; await t.dispose()
 | M3b | 内置插件 help、status、admin；示例插件 `plugins/echo.ts`、`plugins/guess.ts`；README（快速开始与插件开发指南）；端到端测试 | 用 createTestApp 加载示例插件的端到端测试通过；手动修改示例插件后自动重载生效 |
 | M4 | HTTP 服务（第 18 节）：Hono 单端口服务、面板认证、面板 API、实时推送 WS、消息统计、调试台、对外 API、`ctx.route`、静态托管面板 | 第 18 节的接口全部可用，面板契约测试通过 |
 | M5 | 反向 WS（多账号，挂在同一个 HTTP 服务上，校验 X-Self-ID 和 token）；每个账号独立的发送队列 | 多账号反向连接和发送限速测试通过 |
+| M5b | 协议无关化（第 1.1 节）：OneBot 专属内容移入适配器并以 `asabot/onebot11` 子路径导出；协议无关的消息模型；`adapters` 配置段和适配器注册表；通用 server 的 upgrade 注册接口；虚拟适配器（调试台和 createTestApp 共用）；去掉核心层、内置插件和面板中的纯数字 ID 假设和 QQ/NapCat 措辞 | `src/core`、`src/server`、`src/plugins`、`web/` 中搜索不到协议专属内容；全部测试通过 |
 | M6 | Web 面板（第 19 节，由主控 Agent 亲自编写） | 用真实后端走通所有页面 |
-| M7 | Dockerfile、包含 NapCat 的 compose、部署文档。原计划的终端沙盒由面板“调试台”取代，不再单独实现 | `docker compose up` 后面板可访问，能连上 NapCat |
+| M7 | Dockerfile、compose（只运行 AsaBot 本身，不包含任何 OneBot 实现）、部署文档。原计划的终端沙盒由面板“调试台”取代，不再单独实现 | `docker compose up` 后面板可访问，能通过正向或反向 WS 连上已有的 OneBot 服务 |
 
 ## 18. HTTP 服务（M4）
 
@@ -628,6 +645,6 @@ type Target = { type: 'group' | 'private'; id: string }
 
 - **取消是协作式的**：插件代码如果不理会 `signal`，被取消（超时、卸载、退出）后仍会继续执行；框架只是不再等待它，也不会自动发送它的返回值。
 - **热重载的内存代价**：Node 的 ESM 模块缓存无法清除，每次重载都会保留一份旧模块，长时间频繁重载后应重启进程。
-- **超大数字 ID**：OneBot JSON 中的数字按 JavaScript `Number` 解析，超过 2^53 的 ID 会丢失精度。QQ 号、群号和 NapCat 的 message_id（int32）都远小于这个范围，暂不处理。
+- **超大数字 ID**：OneBot JSON 中的数字按 JavaScript `Number` 解析，超过 2^53 的 ID 会丢失精度。QQ 号、群号和常见 OneBot 实现的 message_id（int32）都远小于这个范围，暂不处理。
 - **whenIdle**：见 12.1，处理器把 prompt 与其他异步任务并行等待时可能提前 resolve，只影响测试辅助。
 - **删除插件文件**：入口文件删除后插件会被卸载并从列表中移除；依赖它的插件进入 failed，入口恢复后自动恢复。
