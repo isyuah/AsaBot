@@ -1,4 +1,4 @@
-import { definePlugin } from 'asabot'
+import { definePlugin } from '@asabot/core'
 import { answer } from '#shared'
 import { suffix } from './relative.js'
 

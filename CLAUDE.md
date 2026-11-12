@@ -8,8 +8,9 @@ TypeScript QQ 机器人框架。核心层与平台无关，首个适配器为 On
 
 ```sh
 pnpm install
-pnpm dev          # node --watch src/main.ts（开发）
-pnpm start        # node src/main.ts
+pnpm dev          # node src/cli.ts dev（强制开启插件热重载）
+pnpm start        # node src/cli.ts start
+pnpm build        # 构建面板和发布用的 dist（JS + d.ts）
 pnpm typecheck    # tsc --noEmit
 pnpm lint         # biome check
 pnpm test         # vitest run
@@ -17,10 +18,10 @@ pnpm test         # vitest run
 
 ## 硬性约束
 
-- Node ≥ 24，直接运行 `.ts`（原生类型剥离），**没有构建步骤**。
+- Node ≥ 24，仓库内直接运行 `.ts`（原生类型剥离）。构建只用于发布 npm 包（`pnpm build`，产物在 dist/，见 DESIGN 24.12）。
   - 禁止 `enum`、`namespace`、构造函数参数属性、`import = require`。
   - 相对导入必须带 `.ts` 后缀；纯类型导入用 `import type`。
-- 插件通过 `import ... from 'asabot'` 导入框架（包自引用）。zod 从 `asabot` 再导出。
+- 框架包名是 `@asabot/core`，插件通过 `import ... from '@asabot/core'` 导入（包自引用）。zod 从 `@asabot/core` 再导出。
 - `src/core/**` 不得导入 `src/adapters/**`、`src/plugins/**`、`src/server/**`。
 - core 层的平台 ID 一律用 `string`；数字与字符串的转换由适配器负责。
 - 依赖只能通过 `pnpm add` 管理，不要手改 lockfile。

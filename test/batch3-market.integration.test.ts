@@ -27,7 +27,7 @@ describe('package market', () => {
         type: 'module',
         main: 'index.js',
         keywords: ['asabot-plugin'],
-        peerDependencies: { asabot: '^0.1.0' },
+        peerDependencies: { '@asabot/core': '^0.1.0' },
       }),
     )
     await writeFile(join(installedDir, 'index.js'), "export default { name: 'market-fixture', setup() {} }")
@@ -51,7 +51,7 @@ describe('package market', () => {
           name: 'asabot-market-001',
           version: `1.0.${index}`,
           keywords: ['asabot-plugin'],
-          peerDependencies: { asabot: index === 51 ? '^0.1.0' : '^9.0.0' },
+          peerDependencies: { '@asabot/core': index === 51 ? '^0.1.0' : '^9.0.0' },
           ...(index === 50 ? { deprecated: 'obsolete' } : {}),
         },
       ]),

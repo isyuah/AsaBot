@@ -10,9 +10,11 @@
       "web/src/**/*.ts",
       "package.json",
       "tsconfig.json",
+      "tsconfig.build.json",
       "biome.json",
       "vitest.config.ts",
-      "asabot.config.example.yaml"
+      "asabot.config.example.yaml",
+      "!dist"
     ]
   },
   "formatter": {

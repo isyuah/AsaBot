@@ -5,9 +5,9 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { parse, stringify } from 'yaml'
 import { createApp } from '../src/bootstrap.ts'
+import { loadMainConfig } from '../src/cli.ts'
 import type { App } from '../src/core/app.ts'
 import { createLogger, getRecentLogs } from '../src/core/logger.ts'
-import { loadMainConfig } from '../src/main.ts'
 
 interface RunningMain {
   app: App

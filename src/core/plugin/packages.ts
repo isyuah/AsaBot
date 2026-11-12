@@ -421,7 +421,7 @@ export class PackageService {
   }
 
   info(manifest: PackageManifest): PackageInfo {
-    const peerRange = manifest.peerDependencies?.asabot
+    const peerRange = manifest.peerDependencies?.['@asabot/core']
     const cached = this.latestCache.get(manifest.name)
     if (!cached || cached.expires <= Date.now()) void this.refreshLatest(manifest.name)
     return {
@@ -548,7 +548,7 @@ export class PackageService {
             deprecated: z.string().optional(),
           })
           .safeParse(data.versions[version])
-        const peerRange = value.success ? value.data.peerDependencies?.asabot : undefined
+        const peerRange = value.success ? value.data.peerDependencies?.['@asabot/core'] : undefined
         const deprecated = value.success ? value.data.deprecated : undefined
         const date = data.time?.[version]
         return {
@@ -599,11 +599,11 @@ export class PackageService {
     const manifest = result.data
     if (!manifest.keywords?.includes('asabot-plugin'))
       throw new ManagementError(400, 'Package is missing the asabot-plugin keyword')
-    const peer = manifest.peerDependencies?.asabot
+    const peer = manifest.peerDependencies?.['@asabot/core']
     if (!force && (!peer || !validRange(peer) || !satisfies(frameworkVersion, peer)))
       throw new ManagementError(
         409,
-        `Package requires asabot ${redact(peer ?? '(peer dependency missing)')}; current version is ${frameworkVersion}`,
+        `Package requires @asabot/core ${redact(peer ?? '(peer dependency missing)')}; current version is ${frameworkVersion}`,
       )
     return manifest
   }

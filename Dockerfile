@@ -11,7 +11,7 @@ COPY web/ ./web/
 RUN pnpm --filter web build
 
 FROM dependencies AS production-dependencies
-RUN pnpm install --prod --filter asabot --frozen-lockfile
+RUN pnpm install --prod --filter @asabot/core --frozen-lockfile
 
 FROM node:26-alpine AS runtime
 
@@ -35,4 +35,4 @@ EXPOSE 5140
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:5140/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["node", "src/main.ts"]
+CMD ["node", "src/cli.ts", "start"]

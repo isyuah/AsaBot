@@ -1,7 +1,6 @@
 {
-  "name": "asabot",
+  "name": "@asabot/core",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "engines": {
     "node": ">=24"
@@ -12,9 +11,44 @@
     "./onebot11": "./src/adapters/onebot11/index.ts",
     "./onebot11/testing": "./src/adapters/onebot11/testing.ts"
   },
+  "bin": {
+    "asabot": "./src/cli.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "default": "./dist/testing/index.js"
+      },
+      "./onebot11": {
+        "types": "./dist/adapters/onebot11/index.d.ts",
+        "default": "./dist/adapters/onebot11/index.js"
+      },
+      "./onebot11/testing": {
+        "types": "./dist/adapters/onebot11/testing.d.ts",
+        "default": "./dist/adapters/onebot11/testing.js"
+      }
+    },
+    "bin": {
+      "asabot": "./dist/cli.js"
+    }
+  },
+  "files": [
+    "dist",
+    "web/dist",
+    "README.md",
+    "asabot.config.example.yaml"
+  ],
   "scripts": {
-    "dev": "node --watch src/main.ts",
-    "start": "node src/main.ts",
+    "dev": "node src/cli.ts dev",
+    "start": "node src/cli.ts start",
+    "build": "pnpm --filter web build && pnpm build:lib",
+    "build:lib": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
@@ -26,6 +60,7 @@
     "fflate": "^0.8.3",
     "hono": "^4.13.17",
     "pino": "^10.4.0",
+    "pino-pretty": "^13.2.0",
     "semver": "^7.8.6",
     "ws": "^8.22.2",
     "yaml": "^2.9.1",
@@ -36,7 +71,6 @@
     "@types/node": "^26.6.6",
     "@types/semver": "^7.8.0",
     "@types/ws": "^8.18.2",
-    "pino-pretty": "^13.2.0",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"
   }

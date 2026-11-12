@@ -2,7 +2,7 @@ import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { definePlugin } from '../src/index.ts'
 import { createTestApp, type TestApp } from '../src/testing/index.ts'
 
-declare module 'asabot' {
+declare module '@asabot/core' {
   interface Services {
     coins: { balance: number }
   }

@@ -1,4 +1,4 @@
-import { definePlugin } from 'asabot'
+import { definePlugin } from '@asabot/core'
 
 // 每个用户的最好成绩，同时记下显示名，排行榜就不用展示内部 ID。
 interface Best {

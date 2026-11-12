@@ -26,7 +26,7 @@ describe('plugin package update information', () => {
         type: 'module',
         main: 'index.js',
         keywords: ['asabot-plugin'],
-        peerDependencies: { asabot: '^0.1.0' },
+        peerDependencies: { '@asabot/core': '^0.1.0' },
       }),
     )
     await writeFile(join(pluginDir, 'index.js'), `export default { name: 'latest', setup() {} }`)

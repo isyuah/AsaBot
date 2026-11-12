@@ -23,7 +23,7 @@
 
 | 项 | 选择 |
 |---|---|
-| 运行时 | Node.js ≥ 24，ESM（`"type": "module"`），**直接运行 .ts**（原生类型剥离），无构建步骤 |
+| 运行时 | Node.js ≥ 24，ESM（`"type": "module"`），仓库内**直接运行 .ts**（原生类型剥离）；只有发布 npm 包时才构建（24.12） |
 | 包管理 | pnpm（根为后端；第二期 `web/` 作为 workspace 包） |
 | WebSocket | `ws`（客户端与服务端统一使用；需要 ping/pong 控制） |
 | 校验 | `zod`（v4） |
@@ -37,7 +37,7 @@
 **代码约束（Node 类型剥离要求，必须遵守）**
 - 只用可擦除语法：禁止 `enum`、`namespace`、构造函数参数属性、`import x = require()`。tsconfig 开启 `erasableSyntaxOnly`、`verbatimModuleSyntax`。
 - 相对导入必须写 `.ts` 后缀；仅类型导入必须用 `import type`。
-- 用户插件通过包自引用导入框架：`import { definePlugin, z, seg } from 'asabot'`（`package.json` 的 `exports` 指向 `./src/index.ts`）。zod 必须从 `asabot` 再导出，保证单实例。
+- 用户插件通过包自引用导入框架：`import { definePlugin, z, seg } from '@asabot/core'`（仓库内 `package.json` 的 `exports` 指向 `./src/index.ts`，发布时指向 dist）。zod 必须从 `@asabot/core` 再导出，保证单实例。
 - 依赖通过 `pnpm add` 安装，不手写版本号、不手改 lockfile。
 
 ## 3. 目录结构
@@ -45,7 +45,7 @@
 ```
 src/
   index.ts                 # 公共 API 出口（插件作者唯一入口）
-  main.ts                  # 进程入口：加载配置 → 创建 App → 启动 → 信号处理
+  cli.ts                   # 命令行入口（asabot start / dev）：加载配置 → 创建 App → 启动 → 信号处理
   core/
     app.ts                 # App：组装与生命周期
     config/                # schema、加载、${ENV} 插值、注释保留写回

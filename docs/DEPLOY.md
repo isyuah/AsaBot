@@ -23,7 +23,7 @@ export NODE_ENV=production
 export ASABOT_PANEL_PASSWORD='填写强密码'
 export ASABOT_API_TOKEN='填写API令牌'
 export ONEBOT_TOKEN='填写正向连接令牌'
-node src/main.ts
+node src/cli.ts start
 ```
 
 PowerShell 可用 `$env:NODE_ENV = 'production'`、`$env:ASABOT_PANEL_PASSWORD = '填写强密码'` 等设置同名变量。也可在工作目录的 `.env` 中填写 `变量名=值`，启动时会自动加载；生产模式默认关闭插件热重载。`ASABOT_API_TOKEN` 为空时对外 API 关闭。`ASABOT_CONFIG` 可指定其他配置文件。

@@ -1,4 +1,4 @@
-import { definePlugin, plainText, seg, z } from 'asabot'
+import { definePlugin, plainText, seg, z } from '@asabot/core'
 
 export default definePlugin({
   name: 'echo',

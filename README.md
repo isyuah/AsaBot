@@ -35,7 +35,7 @@ AsaBot 是一个使用 TypeScript 编写的协议无关机器人框架，提供�
 
    ```powershell
    pnpm start
-   # 开发时也可以使用：pnpm dev
+   # 开发时强制开启插件热重载：pnpm dev
    ```
 
    在机器人所在的群或私聊中发送 `/help`、`/ping`、`/echo 你好` 或 `/猜数`。默认示例中 `/echo` 有两秒用户冷却；`-n` 选项需写在文本之前，例如 `/echo -n 2 你好`。
@@ -78,7 +78,7 @@ server:
 
 ## 配置参考
 
-完整配置及每项说明见 [asabot.config.example.yaml](asabot.config.example.yaml)。`asabot.config.yaml` 是默认配置文件，也可通过 `ASABOT_CONFIG` 环境变量指定其他路径。启动时从当前工作目录加载 `.env`；配置字符串支持 `${VAR}` 和 `${VAR:-默认值}`，未设置且没有默认值的变量会导致启动失败。
+完整配置及每项说明见 [asabot.config.example.yaml](asabot.config.example.yaml)。`asabot.config.yaml` 是默认配置文件，也可通过 `ASABOT_CONFIG` 环境变量或 `asabot start --config <path>` 指定其他路径，命令行参数优先。`asabot dev --config <path>` 强制开启插件热重载；`asabot --help` 显示用法，`asabot --version` 显示版本号。日志在 stdout 是终端时使用易读格式，重定向时输出 JSON。启动时从当前工作目录加载 `.env`；配置字符串支持 `${VAR}` 和 `${VAR:-默认值}`，未设置且没有默认值的变量会导致启动失败。
 
 | 配置项 | 用途 |
 | --- | --- |
@@ -144,11 +144,11 @@ curl -X POST http://127.0.0.1:5140/api/v1/send \
   "type": "module",
   "keywords": ["asabot-plugin"],
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
-  "peerDependencies": { "asabot": "^0.1.0" }
+  "peerDependencies": { "@asabot/core": "^0.1.0" }
 }
 ```
 
-发布前将 TypeScript 编译成 JS 并附带 `.d.ts`，因为 Node 不会剥离 `node_modules` 中的 TypeScript。插件入口使用 `import { definePlugin } from 'asabot'`；运行时会连接当前框架实例。`asabot` 尚未发布到 npm 时，可在插件项目的开发依赖中通过包管理器引用本地框架仓库（例如 `pnpm add -D asabot@file:../AsaBot`）获取类型，同时保留 `peerDependencies.asabot` 的版本范围；发布前移除本地路径开发依赖或改用发布后的版本。
+发布前将 TypeScript 编译成 JS 并附带 `.d.ts`，因为 Node 不会剥离 `node_modules` 中的 TypeScript。插件入口使用 `import { definePlugin } from '@asabot/core'`；运行时会连接当前框架实例。`@asabot/core` 尚未发布到 npm 时，可在插件项目的开发依赖中通过包管理器引用本地框架仓库（例如 `pnpm add -D @asabot/core@file:../AsaBot`）获取类型，同时保留 `peerDependencies['@asabot/core']` 的版本范围；发布前移除本地路径开发依赖或改用发布后的版本。
 
 ## 开发插件
 
@@ -157,7 +157,7 @@ curl -X POST http://127.0.0.1:5140/api/v1/send \
 在 `plugins/hello.ts` 中编写：
 
 ```ts
-import { definePlugin } from 'asabot'
+import { definePlugin } from '@asabot/core'
 
 export default definePlugin({
   name: 'hello',
@@ -170,7 +170,7 @@ export default definePlugin({
 })
 ```
 
-默认发现 `plugins/<name>.ts` 和 `plugins/<name>/index.ts`；文件默认导出 `definePlugin(...)` 的结果。顶层以 `_` 或 `.` 开头的文件和目录，以及 `*.test.*`、`*.spec.*`、`*.d.ts` 均被忽略。`name` 由小写英文字母、数字、`-` 和 `_` 组成且必须全局唯一，`core` 是保留名。插件可声明 `version`、`description`、`depends: ['其他插件名']` 和 zod 配置 schema；从 `asabot` 导入 `z`。例如 `plugins/echo.ts` 和 `plugins/guess.ts` 分别演示配置、观察者、命令和多轮游戏。
+默认发现 `plugins/<name>.ts` 和 `plugins/<name>/index.ts`；文件默认导出 `definePlugin(...)` 的结果。顶层以 `_` 或 `.` 开头的文件和目录，以及 `*.test.*`、`*.spec.*`、`*.d.ts` 均被忽略。`name` 由小写英文字母、数字、`-` 和 `_` 组成且必须全局唯一，`core` 是保留名。插件可声明 `version`、`description`、`depends: ['其他插件名']` 和 zod 配置 schema；从 `@asabot/core` 导入 `z`。例如 `plugins/echo.ts` 和 `plugins/guess.ts` 分别演示配置、观察者、命令和多轮游戏。
 
 ### Context 一览
 
@@ -236,7 +236,7 @@ ctx.command('repeat <text:rest>')
 `session.send(content)` 向当前会话发消息；`session.reply(content, { quote, at })` 默认引用原消息，可以关闭引用或在群内 @发送者。内容可为字符串、消息段或消息段数组，使用 `seg` 创建消息段。字符串按纯文本处理。
 
 ```ts
-import { definePlugin } from 'asabot'
+import { definePlugin } from '@asabot/core'
 
 export default definePlugin({
   name: 'greet',
@@ -281,10 +281,10 @@ ctx.db.prepare('INSERT OR REPLACE INTO p_scores_best (user_id, score) VALUES (?,
 
 ### 测试插件
 
-`asabot/testing` 的 `createTestApp` 使用进程内虚拟适配器和临时数据库，不连接网络。下面的测试对应上面的 `plugins/hello.ts`：
+`@asabot/core/testing` 的 `createTestApp` 使用进程内虚拟适配器和临时数据库，不连接网络。下面的测试对应上面的 `plugins/hello.ts`：
 
 ```ts
-import { createTestApp } from 'asabot/testing'
+import { createTestApp } from '@asabot/core/testing'
 import { expect, it } from 'vitest'
 import hello from '../plugins/hello.ts'
 
@@ -298,8 +298,8 @@ it('打招呼', async () => {
 })
 ```
 
-`say` 默认模拟群 `10` 中用户 `20` 的消息，可传 `{ group: 'room-a', user: 'user-a', role: 'admin' }`，或用 `{ group: null }` 模拟私聊。返回值是本次发送内容的数组；测试结束调用 `dispose()`。也可传 `pluginDirs` 加载目录、传 `config` 覆盖配置，使用 `t.app` 和虚拟适配器 `t.mock` 检查状态或模拟通知。测试 OneBot 协议时可从 `asabot/onebot11/testing` 导入 `MockOneBot`。
+`say` 默认模拟群 `10` 中用户 `20` 的消息，可传 `{ group: 'room-a', user: 'user-a', role: 'admin' }`，或用 `{ group: null }` 模拟私聊。返回值是本次发送内容的数组；测试结束调用 `dispose()`。也可传 `pluginDirs` 加载目录、传 `config` 覆盖配置，使用 `t.app` 和虚拟适配器 `t.mock` 检查状态或模拟通知。测试 OneBot 协议时可从 `@asabot/core/onebot11/testing` 导入 `MockOneBot`。
 
-消息段通过 `seg.at(id)`、`seg.audio(file)` 等构造，未知的平台消息段会保留。需要 OneBot 专属能力时，从 `asabot/onebot11` 导入 `isOneBot`、`parseCQ`、`toCQ`、`ApiError` 和相关类型；字符串始终作为纯文本发送。`createTestApp` 不接受外部适配器配置。
+消息段通过 `seg.at(id)`、`seg.audio(file)` 等构造，未知的平台消息段会保留。需要 OneBot 专属能力时，从 `@asabot/core/onebot11` 导入 `isOneBot`、`parseCQ`、`toCQ`、`ApiError` 和相关类型；字符串始终作为纯文本发送。`createTestApp` 不接受外部适配器配置。
 
 项目检查命令：`pnpm typecheck`、`pnpm lint`、`pnpm test`。

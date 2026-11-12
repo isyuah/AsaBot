@@ -1,8 +1,10 @@
+#!/usr/bin/env node
 import { randomBytes } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { existsSync, realpathSync } from 'node:fs'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { parseArgs } from 'node:util'
 import { stringify } from 'yaml'
 import { createApp } from './bootstrap.ts'
 import type { App } from './core/app.ts'
@@ -112,22 +114,76 @@ export async function loadMainConfig(configPath: string): Promise<{ config: Conf
   return { config, setupCode }
 }
 
-export async function runMain(): Promise<void> {
+async function start(configOption: string | undefined, dev: boolean): Promise<void> {
   const envPath = resolve('.env')
   if (existsSync(envPath)) {
     process.loadEnvFile(envPath)
   }
 
-  const configPath = process.env.ASABOT_CONFIG || './asabot.config.yaml'
+  const configPath = configOption ?? (process.env.ASABOT_CONFIG || './asabot.config.yaml')
   const { config, setupCode } = await loadMainConfig(configPath)
+  if (dev) config.pluginLoader.hotReload = true
   const app = createApp(config, { configPath, setupCode })
   installProcessHandlers(app)
   app.logger.info({ configPath }, 'Starting AsaBot')
   await app.start()
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  void runMain().catch((error: unknown) => {
+function printUsage(): void {
+  process.stdout.write(`Usage: asabot <start|dev> [--config <path>]
+       asabot --version | -v
+       asabot --help
+`)
+}
+
+async function runCli(): Promise<void> {
+  const parsed = (() => {
+    try {
+      return parseArgs({
+        allowPositionals: true,
+        options: {
+          help: { type: 'boolean' },
+          version: { type: 'boolean', short: 'v' },
+          config: { type: 'string' },
+        },
+      })
+    } catch (error) {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+      printUsage()
+      process.exitCode = 1
+      return undefined
+    }
+  })()
+  if (!parsed) return
+
+  const { values, positionals } = parsed
+  const command = positionals[0]
+  if (positionals.length > 1 || (command !== undefined && command !== 'start' && command !== 'dev')) {
+    printUsage()
+    process.exitCode = 1
+    return
+  }
+  if (values.help) {
+    printUsage()
+    return
+  }
+  if (values.version && command === undefined && values.config === undefined) {
+    const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as {
+      version: string
+    }
+    process.stdout.write(`${manifest.version}\n`)
+    return
+  }
+  if (command === undefined || values.version) {
+    printUsage()
+    if (values.config !== undefined || values.version) process.exitCode = 1
+    return
+  }
+  await start(values.config, command === 'dev')
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+  void runCli().catch((error: unknown) => {
     if (error instanceof ConfigError) {
       // Configuration problems are user-actionable: print the readable message, not a stack trace.
       process.stderr.write(`AsaBot failed to start: ${error.message}

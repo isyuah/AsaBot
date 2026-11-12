@@ -1,4 +1,4 @@
-import { createTestApp } from 'asabot/testing'
+import { createTestApp } from '@asabot/core/testing'
 import { expect, it } from 'vitest'
 import greet from './fixtures/readme-greet.ts'
 import hello from './fixtures/readme-hello.ts'

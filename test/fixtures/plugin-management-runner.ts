@@ -63,7 +63,7 @@ type Manifest = {
   name: string
   version: string
   keywords: string[]
-  peerDependencies: { asabot: string }
+  peerDependencies: { '@asabot/core': string }
   dist?: { tarball: string; shasum: string; integrity: string }
 }
 const versions = new Map<string, Map<string, { manifest: Manifest; bytes: Buffer }>>()
@@ -80,7 +80,7 @@ async function pack(
   if (changes) {
     manifest.name = changes.name
     if (changes.keywords) manifest.keywords = changes.keywords
-    if (changes.peer) manifest.peerDependencies.asabot = changes.peer
+    if (changes.peer) manifest.peerDependencies['@asabot/core'] = changes.peer
     if (changes.pluginName) {
       const code = await readFile(join(working, 'index.js'), 'utf8')
       await writeFile(
@@ -268,7 +268,7 @@ try {
   const queuedUpload = request('/plugins/upload', 'POST', {
     filename: 'queued.js',
     content: Buffer.from(
-      `import { definePlugin, z } from 'asabot'; export default definePlugin({ name: 'queued', config: z.object({ label: z.string().default('initial') }), setup() {} })`,
+      `import { definePlugin, z } from '@asabot/core'; export default definePlugin({ name: 'queued', config: z.object({ label: z.string().default('initial') }), setup() {} })`,
     ).toString('base64'),
   })
   try {
@@ -364,7 +364,7 @@ try {
   assert.deepEqual(await say('/package-answer'), [])
 
   const code = (answer: string) =>
-    `import { definePlugin } from 'asabot'; export default definePlugin({ name: 'data-test', setup(ctx) { ctx.store.set('key', 'value'); ctx.migrate(['CREATE TABLE p_data-test_wrong (x)']); ctx.task('later', () => {}).schedule({value: 1}, {delay: '1d', key: 'persisted'}); ctx.command('data-test').action(() => '${answer}') } })`
+    `import { definePlugin } from '@asabot/core'; export default definePlugin({ name: 'data-test', setup(ctx) { ctx.store.set('key', 'value'); ctx.migrate(['CREATE TABLE p_data-test_wrong (x)']); ctx.task('later', () => {}).schedule({value: 1}, {delay: '1d', key: 'persisted'}); ctx.command('data-test').action(() => '${answer}') } })`
   const goodCode = (answer: string) => code(answer).replace('p_data-test_wrong', '"p_data-test_rows"')
   const upload = (filename: string, bytes: Uint8Array, overwrite = false) =>
     request('/plugins/upload', 'POST', {

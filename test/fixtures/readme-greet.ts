@@ -1,4 +1,4 @@
-import { definePlugin } from 'asabot'
+import { definePlugin } from '@asabot/core'
 
 export default definePlugin({
   name: 'greet',

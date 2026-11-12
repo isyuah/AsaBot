@@ -6,7 +6,19 @@ const roots = new Map<string, number>()
 const dependencies = new Map<string, Set<string>>()
 let registered = false
 let nextVersion = 0
-const frameworkUrl = import.meta.resolve('asabot')
+const frameworkRoot = new URL('../../', import.meta.url)
+const sourceRoot = new URL('../../../src/', import.meta.url)
+const builtRoot = new URL('../../../dist/', import.meta.url)
+
+function resolveFramework(specifier: string): string {
+  const url = import.meta.resolve(specifier)
+  // In the repository, self-references point to src even when this loader runs from dist.
+  if (frameworkRoot.href === builtRoot.href && url.startsWith(sourceRoot.href))
+    return new URL(url.slice(sourceRoot.href.length).replace(/\.ts$/, '.js'), builtRoot).href
+  return url
+}
+
+const frameworkUrl = resolveFramework('@asabot/core')
 
 function inside(root: string, path: string): boolean {
   const rel = relative(root, path)
@@ -34,13 +46,13 @@ export function registerPluginRoots(dirs: string[]): () => void {
       },
       resolve(specifier, context, nextResolve) {
         if (
-          (specifier === 'asabot' || specifier.startsWith('asabot/')) &&
+          (specifier === '@asabot/core' || specifier.startsWith('@asabot/core/')) &&
           context.parentURL?.startsWith('file:')
         ) {
           const parent = new URL(context.parentURL)
           if ([...roots.keys()].some((root) => inside(root, fileURLToPath(parent)))) {
             return {
-              url: specifier === 'asabot' ? frameworkUrl : import.meta.resolve(specifier),
+              url: specifier === '@asabot/core' ? frameworkUrl : resolveFramework(specifier),
               shortCircuit: true,
             }
           }

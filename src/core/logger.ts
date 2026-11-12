@@ -144,7 +144,7 @@ class RotatingFile {
 
 export function createLogger(options: CreateLoggerOptions = {}): Logger {
   const destination = options.destination ?? process.stdout
-  const pretty = options.pretty ?? (process.env.NODE_ENV !== 'production' && process.stdout.isTTY === true)
+  const pretty = options.pretty ?? process.stdout.isTTY === true
   let output: DestinationStream = destination
   if (pretty) {
     const pinoPretty: typeof import('pino-pretty') = createRequire(import.meta.url)('pino-pretty')

@@ -18,7 +18,7 @@ for (const name of ['_hidden', '.private', 'example.test.dir']) {
 }
 await writeFile(
   entry,
-  `import { definePlugin } from 'asabot'
+  `import { definePlugin } from '@asabot/core'
 import { answer } from './shared.test.ts'
 export default definePlugin({ name: 'hello', setup(ctx) { ctx.command('hello').action(() => answer) } })\n`,
 )
@@ -55,7 +55,7 @@ try {
   active = nextState('hello', 'active')
   await writeFile(
     entry,
-    `import { definePlugin } from 'asabot'
+    `import { definePlugin } from '@asabot/core'
 import { answer } from './shared.test.ts'
 export default definePlugin({ name: 'hello', setup(ctx) { ctx.command('hello').action(() => answer + '!') } })\n`,
   )
@@ -82,7 +82,7 @@ export default definePlugin({ name: 'hello', setup(ctx) { ctx.command('hello').a
   active = nextState('hello', 'active')
   await writeFile(
     entry,
-    `import { definePlugin } from 'asabot'
+    `import { definePlugin } from '@asabot/core'
 export default definePlugin({ name: 'hello', setup(ctx) { ctx.command('hello').action(() => 'fixed') } })\n`,
   )
   await active
@@ -90,7 +90,7 @@ export default definePlugin({ name: 'hello', setup(ctx) { ctx.command('hello').a
   const setupFailed = nextState('hello', 'failed')
   await writeFile(
     entry,
-    `import { definePlugin } from 'asabot'
+    `import { definePlugin } from '@asabot/core'
 export default definePlugin({ name: 'hello', setup(ctx) { ctx.command('leaked'); throw new Error('new setup failed') } })\n`,
   )
   await setupFailed
@@ -100,7 +100,7 @@ export default definePlugin({ name: 'hello', setup(ctx) { ctx.command('leaked');
   active = nextState('hello', 'active')
   await writeFile(
     entry,
-    `import { definePlugin } from 'asabot'
+    `import { definePlugin } from '@asabot/core'
 export default definePlugin({ name: 'hello', setup(ctx) { ctx.command('hello').action(() => 'recovered') } })\n`,
   )
   await active
@@ -110,7 +110,7 @@ export default definePlugin({ name: 'hello', setup(ctx) { ctx.command('hello').a
   active = nextState('hello', 'active')
   await writeFile(
     entry,
-    `import { definePlugin } from 'asabot'
+    `import { definePlugin } from '@asabot/core'
 export default definePlugin({ name: 'hello', setup(ctx) { ctx.command('hello').action(async () => (await import('./dynamic.ts')).answer) } })\n`,
   )
   await active
@@ -122,7 +122,7 @@ export default definePlugin({ name: 'hello', setup(ctx) { ctx.command('hello').a
   active = nextState('new-plugin', 'active')
   await writeFile(
     join(dir, 'new-plugin.ts'),
-    `import { definePlugin } from 'asabot'
+    `import { definePlugin } from '@asabot/core'
 export default definePlugin({ name: 'new-plugin', setup(ctx) { ctx.command('new').action(() => 'new') } })\n`,
   )
   await active
@@ -131,7 +131,7 @@ export default definePlugin({ name: 'new-plugin', setup(ctx) { ctx.command('new'
   active = nextState('consumer', 'active')
   await writeFile(
     join(dir, 'consumer.ts'),
-    `import { definePlugin } from 'asabot'
+    `import { definePlugin } from '@asabot/core'
 export default definePlugin({ name: 'consumer', depends: ['hello'], setup(ctx) { ctx.command('consumer').action(() => 'ready') } })\n`,
   )
   await active
@@ -149,7 +149,7 @@ export default definePlugin({ name: 'consumer', depends: ['hello'], setup(ctx) {
   const dependentActive = nextState('consumer', 'active')
   await writeFile(
     entry,
-    `import { definePlugin } from 'asabot'
+    `import { definePlugin } from '@asabot/core'
 export default definePlugin({ name: 'hello', setup(ctx) { ctx.command('hello').action(() => 'returned') } })\n`,
   )
   await Promise.all([active, dependentActive])
