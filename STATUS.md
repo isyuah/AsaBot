@@ -1,12 +1,12 @@
 # STATUS
 
-最后更新：2026-11-11
+最后更新：2026-11-12
 
 ## 里程碑
 
 | # | 内容 | 状态 | 证据 |
 |---|---|---|---|
-| M0 | 脚手架、配置、日志、main 骨架 | 未开始 | — |
+| M0 | 脚手架、配置、日志、main 骨架 | runnable | `pnpm typecheck`、`pnpm lint`、`pnpm test` 通过（17 tests）；示例配置下 `node src/main.ts` 能启动；`process.emit('SIGINT')` 模拟信号可优雅退出（exit 0）；错误配置输出路径化信息（`dispatch.handlerTimeout: Invalid duration`、`onebot11.connections[0].url: Invalid URL`），exit 1。主控审查后修正：退出时显式 `process.exit`；ConfigError 改为打印可读信息、不输出堆栈；vitest 增加 `test/**`。Windows 上的真实 Ctrl+C 未验证 |
 | M1 | 消息/事件模型、OneBot 正向 WS、MockOneBot | 未开始 | — |
 | M2 | 分发管线、命令、prompt、权限、冷却 | 未开始 | — |
 | M3 | 插件系统、热重载、存储、定时任务、内置插件、端到端测试 | 未开始 | — |
@@ -23,8 +23,8 @@
 
 ## 待决问题
 
-（无）
+- （无）
 
 ## 已知问题
 
-（无）
+- （无）

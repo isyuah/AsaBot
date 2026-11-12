@@ -1,0 +1,34 @@
+logLevel: info
+dataDir: ./data
+superusers: ["10001"]
+
+command:
+  prefixes: ["/"]
+  mentionAsPrefix: true
+  privateRequirePrefix: false
+  replyOnError: true
+  replyOnDenied: true
+
+dispatch:
+  handlerTimeout: 10m
+  ignoreSelf: true
+  promptTimeout: 60s
+  maxPromptTimeout: 30m
+
+onebot11:
+  connections:
+    - type: forward
+      url: ws://127.0.0.1:3001
+      accessToken: ${NAPCAT_TOKEN:-}
+
+pluginLoader:
+  dirs: [./plugins]
+  hotReload: auto
+
+plugins:
+  echo:
+    enabled: true
+    config:
+      maxLen: 200
+
+# server configuration is reserved for M5.
