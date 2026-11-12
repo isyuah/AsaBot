@@ -108,11 +108,27 @@ function applyFrame(
       }
       break
     }
+    case 'plugin-event':
+      for (const listener of pluginEventListeners) listener(frame)
+      break
     case 'log':
       if (pendingLogs) pendingLogs.push(frame.record)
       else realtime.logs.set((list) => [...list, toEntry(frame.record)].slice(-maxLogs))
       break
   }
+}
+
+export interface PluginEvent {
+  plugin: string
+  topic: string
+  data: unknown
+}
+const pluginEventListeners = new Set<(event: PluginEvent) => void>()
+
+/** Events plugins push to their panel pages (ctx.panel.push). Returns an unsubscribe function. */
+export function subscribePluginEvents(listener: (event: PluginEvent) => void): () => void {
+  pluginEventListeners.add(listener)
+  return () => pluginEventListeners.delete(listener)
 }
 
 export function RealtimeProvider({ children }: { children: ReactNode }) {

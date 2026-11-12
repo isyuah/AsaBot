@@ -28,9 +28,15 @@ function typeOf(schema: JsonSchema): string | undefined {
 }
 
 /** Whether every field of this schema can be rendered as a form control (otherwise fall back to JSON). */
+/** Labelled choices: the standard JSON Schema idiom `oneOf: [{ const, title }]`. */
+function labelledChoices(schema: JsonSchema): { value: unknown; label: string }[] | undefined {
+  if (!schema.oneOf?.length || !schema.oneOf.every((option) => option.const !== undefined)) return undefined
+  return schema.oneOf.map((option) => ({ value: option.const, label: option.title ?? String(option.const) }))
+}
+
 function isSupported(schema: JsonSchema): boolean {
   const type = typeOf(schema)
-  if (schema.enum || schema.const !== undefined) return true
+  if (schema.enum || schema.const !== undefined || labelledChoices(schema)) return true
   if (type === 'scalar' || primitives.has(type ?? '')) return true
   if (type === 'array') {
     const item = schema.items ? typeOf(schema.items) : undefined
@@ -381,6 +387,20 @@ function PrimitiveControl({
           onChange(text === '' ? undefined : numeric && /^-?\d+(?:\.\d+)?$/.test(text) ? Number(text) : text)
         }}
         className="font-mono"
+      />
+    )
+  }
+  const choices = labelledChoices(schema)
+  if (choices) {
+    return (
+      <Select
+        aria-label={id}
+        className="w-full"
+        value={value === undefined ? undefined : String(value)}
+        onValueChange={(next) =>
+          onChange(choices.find((option) => String(option.value) === next)?.value as Value)
+        }
+        options={choices.map((option) => ({ value: String(option.value), label: option.label }))}
       />
     )
   }

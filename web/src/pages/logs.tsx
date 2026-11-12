@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, Eraser, Pause, Play, ScrollText, Search } from 'lucide-react'
+import { ArrowDown, Eraser, Pause, Play, ScrollText, Search, Workflow, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -9,22 +9,13 @@ import { Segmented } from '../components/ui/misc.tsx'
 import { Card, EmptyState, PageHeader } from '../components/ui/primitives.tsx'
 import { Select } from '../components/ui/select.tsx'
 import { api } from '../lib/api.ts'
-import { formatClock, levelName } from '../lib/format.ts'
+import { formatClock, levelName, levelStyle } from '../lib/format.ts'
 import { softSpring } from '../lib/motion.ts'
 import { useClearLogs, useLiveLogs } from '../lib/realtime.tsx'
 import type { LogEntry, LogLevel } from '../lib/types.ts'
 import { cn } from '../lib/utils.ts'
 
 type LevelFilter = '10' | '30' | '40' | '50'
-
-const levelStyle: Record<string, string> = {
-  trace: 'text-fg-3 bg-surface-2',
-  debug: 'text-fg-3 bg-surface-2',
-  info: 'text-info bg-info-soft',
-  warn: 'text-warning bg-warning-soft',
-  error: 'text-danger bg-danger-soft',
-  fatal: 'text-white bg-danger',
-}
 
 const recordLevels: { value: LogLevel; label: string }[] = [
   { value: 'trace', label: 'Trace' },
@@ -34,7 +25,7 @@ const recordLevels: { value: LogLevel; label: string }[] = [
   { value: 'error', label: 'Error' },
 ]
 
-const hiddenKeys = new Set(['time', 'level', 'msg', 'plugin', 'pid', 'hostname', 'seq'])
+const hiddenKeys = new Set(['time', 'level', 'msg', 'plugin', 'eventId', 'pid', 'hostname', 'seq'])
 const maxRendered = 600
 
 export function LogsPage() {
@@ -43,6 +34,8 @@ export function LogsPage() {
   const [level, setLevel] = useState<LevelFilter>('10')
   const [plugin, setPlugin] = useState('*')
   const [query, setQuery] = useState('')
+  // Logs written while handling one dispatched event (records carry eventId, DESIGN §24.8).
+  const [eventId, setEventId] = useState<string | null>(null)
   const [paused, setPaused] = useState(false)
   const [snapshot, setSnapshot] = useState<LogEntry[] | null>(null)
   const [stick, setStick] = useState(true)
@@ -64,13 +57,14 @@ export function LogsPage() {
       .filter(
         (record) =>
           record.level >= min &&
+          (eventId === null || record.eventId === eventId) &&
           (plugin === '*' || (plugin === '-' ? !record.plugin : record.plugin === plugin)) &&
           (!keyword ||
             record.msg.toLowerCase().includes(keyword) ||
             JSON.stringify(record).toLowerCase().includes(keyword)),
       )
       .slice(-maxRendered)
-  }, [source, level, plugin, query])
+  }, [source, level, plugin, query, eventId])
 
   // Keep the view pinned to the newest entry unless the user scrolled up to read.
   useEffect(() => {
@@ -124,6 +118,20 @@ export function LogsPage() {
             ...plugins.map((name) => ({ value: name, label: name })),
           ]}
         />
+        {eventId !== null && (
+          <span className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent-soft py-0 pr-1 pl-2.5 text-[12.5px] text-accent-soft-fg">
+            <Workflow className="size-3.5" />
+            只看事件 <span className="font-mono">{eventId.slice(0, 8)}</span>
+            <button
+              type="button"
+              aria-label="取消按事件过滤"
+              onClick={() => setEventId(null)}
+              className="flex size-6 cursor-pointer items-center justify-center rounded-md hover:bg-accent/10"
+            >
+              <X className="size-3.5" />
+            </button>
+          </span>
+        )}
         <Input
           icon={<Search />}
           placeholder="搜索日志内容"
@@ -149,7 +157,7 @@ export function LogsPage() {
               className="h-full"
             />
           ) : (
-            rows.map((record) => <LogRow key={record.seq} record={record} />)
+            rows.map((record) => <LogRow key={record.seq} record={record} onEvent={setEventId} />)
           )}
         </div>
         <AnimatePresence>
@@ -215,7 +223,13 @@ function RecordLevel() {
   )
 }
 
-const LogRow = memo(function LogRow({ record }: { record: LogEntry }) {
+const LogRow = memo(function LogRow({
+  record,
+  onEvent,
+}: {
+  record: LogEntry
+  onEvent: (eventId: string) => void
+}) {
   const [open, setOpen] = useState(false)
   const name = levelName(record.level)
   const extra = Object.fromEntries(Object.entries(record).filter(([key]) => !hiddenKeys.has(key)))
@@ -223,7 +237,7 @@ const LogRow = memo(function LogRow({ record }: { record: LogEntry }) {
   return (
     <div
       className={cn(
-        '[content-visibility:auto] [contain-intrinsic-size:auto_28px]',
+        'group relative [content-visibility:auto] [contain-intrinsic-size:auto_28px]',
         open && 'bg-surface-2/60',
       )}
     >
@@ -258,6 +272,16 @@ const LogRow = memo(function LogRow({ record }: { record: LogEntry }) {
           {record.msg}
         </span>
       </button>
+      {record.eventId && (
+        <button
+          type="button"
+          title="只看这次事件处理产生的日志"
+          onClick={() => onEvent(record.eventId as string)}
+          className="absolute top-[5px] right-4 cursor-pointer rounded bg-surface-2 px-1.5 font-mono text-[11px] leading-[18px] text-fg-3 opacity-0 transition-opacity group-hover:opacity-100 hover:text-fg-2 focus-visible:opacity-100"
+        >
+          事件 {record.eventId.slice(0, 8)}
+        </button>
+      )}
       <AnimatePresence initial={false}>
         {open && (
           <motion.pre

@@ -11,6 +11,17 @@ export interface BotView {
   connection: string
   url?: string
   avatar?: string
+  capabilities: BotCapabilities
+}
+
+export type TextStyle = 'bold' | 'italic' | 'underline' | 'strike' | 'code' | 'spoiler'
+
+export interface BotCapabilities {
+  /** Segment types the platform sends natively; '<platform>:*' covers a whole platform namespace. */
+  segments: string[]
+  textStyles: TextStyle[]
+  /** Supported Bot methods, e.g. 'sendForward', 'muteMember'. */
+  actions: string[]
 }
 
 export type PluginStateName = 'loading' | 'active' | 'failed' | 'disabled'
@@ -47,6 +58,25 @@ export interface CommandView {
   permission: boolean
   scope: 'all' | 'group' | 'private'
   hidden: boolean
+  override?: CommandOverride
+  /** Group keys where the command is turned off. */
+  disabledGroups: string[]
+  /** Problems applying the override, e.g. an alias that conflicts with another command. */
+  overrideIssues: string[]
+}
+
+export type CommandPermission = 'everyone' | 'superuser' | 'group.admin' | 'group.owner'
+export type CooldownScope = 'user' | 'group' | 'global'
+
+export interface CommandOverride {
+  enabled?: boolean
+  /** Extra aliases (full paths) appended after the plugin's own. */
+  aliases?: string[]
+  /** Replaces the plugin's permission; 'everyone' removes it. */
+  permission?: CommandPermission
+  /** `false` removes the plugin's cooldown. */
+  cooldown?: { duration: string | number; scope?: CooldownScope } | false
+  hidden?: boolean
 }
 
 export interface PluginView {
@@ -67,8 +97,10 @@ export interface PluginView {
   config?: unknown
   /** Services this plugin provides to others (ctx.provide). */
   provides: string[]
-  /** Services this plugin requires (definePlugin inject); it only loads while all are available. */
-  inject: string[]
+  /** Services this plugin uses (definePlugin inject); it only loads while all required ones are available. */
+  inject: { name: string; optional: boolean }[]
+  /** A page the plugin adds to the panel (ctx.panel.page), shown in a sandboxed iframe. */
+  page?: { title: string; icon?: string }
 }
 
 export interface PackageInfo {
@@ -121,6 +153,8 @@ export interface CommandSettings {
   privateRequirePrefix: boolean
   replyOnError: boolean
   replyOnDenied: boolean
+  /** Reply "did you mean /x?" for near-miss commands: off, only in private chats / when mentioned, or always. */
+  suggest: 'off' | 'direct' | 'always'
 }
 
 export interface Settings {
@@ -188,21 +222,89 @@ export interface LogRecord {
   level: number
   msg: string
   plugin?: string
+  /** The dispatched event this record was logged while handling. */
+  eventId?: string
   [key: string]: unknown
 }
 
 /** A log record as held by the panel, with a client-side sequence number used as a stable list key. */
 export type LogEntry = LogRecord & { seq: number }
 
-export interface Target {
+/** A conversation on a bot (bot-level target). */
+export interface ChannelTarget {
   type: 'group' | 'private'
   id: string
 }
 
-export interface GroupView {
+/** A serializable send target; without selfId the first online bot of the platform is used. */
+export interface Target extends ChannelTarget {
+  platform: string
+  selfId?: string
+}
+
+/** A group in one bot's group list (GET /bots/:platform/:selfId/groups). */
+export interface BotGroup {
   groupId: string
   groupName: string
   memberCount?: number
+}
+
+/** A group known to the panel: from online bots' group lists or from any per-group rule. */
+export interface GroupView {
+  groupKey: string
+  platform: string
+  groupId: string
+  name?: string
+  /** Bots (selfIds) that are in this group. */
+  bots: string[]
+  rules: { plugins: number; configs: number; commands: number }
+  access?: AccessList
+}
+
+export interface GroupDetail {
+  group: GroupView
+  plugins: { name: string; enabled: boolean; configurable: boolean; override?: Record<string, unknown> }[]
+  commands: { path: string; owner: string; enabled: boolean }[]
+}
+
+export interface PluginGroupSetting {
+  groupKey: string
+  enabled?: boolean
+  config?: Record<string, unknown>
+}
+
+export type TraceStage = 'filter' | 'observer' | 'middleware' | 'prompt' | 'command' | 'matcher' | 'suggest'
+export type TraceOutcome =
+  | 'handled'
+  | 'passed'
+  | 'blocked'
+  | 'denied'
+  | 'cooldown'
+  | 'invalid'
+  | 'error'
+  | 'timeout'
+
+export interface TraceStep {
+  stage: TraceStage
+  plugin?: string
+  command?: string
+  outcome: TraceOutcome
+  duration: number
+  error?: string
+}
+
+export interface DispatchTrace {
+  eventId: string
+  name: string
+  platform: string
+  selfId: string
+  channel?: string
+  userId?: string
+  time: number
+  duration: number
+  steps: TraceStep[]
+  /** Message IDs sent while handling the event. */
+  sent: string[]
 }
 
 export type AccessList = 'block' | 'allow'
@@ -219,23 +321,60 @@ export interface Segment {
   data: Record<string, unknown>
 }
 
+export interface PlaygroundUser {
+  id: string
+  nickname?: string
+  role?: 'owner' | 'admin' | 'member'
+  superuser?: boolean
+}
+
 export interface PlaygroundRequest {
   text?: string
   message?: Segment[]
-  user: { id: string; nickname?: string; role?: 'owner' | 'admin' | 'member'; superuser?: boolean }
+  user: PlaygroundUser
   group?: string | null
+  capabilities?: Partial<BotCapabilities>
+}
+
+export type PlaygroundEventName =
+  | 'notice.member.join'
+  | 'notice.member.leave'
+  | 'notice.member.mute'
+  | 'notice.poke'
+  | 'notice.message.recall'
+  | 'request.friend'
+  | 'request.group.join'
+  | 'request.group.invite'
+
+export interface PlaygroundEventRequest {
+  name: PlaygroundEventName
+  user: PlaygroundUser
+  group?: string | null
+  fields?: Record<string, unknown>
+  capabilities?: Partial<BotCapabilities>
 }
 
 export interface PlaygroundReply {
+  messageId: string
   message: Segment[]
   text: string
+}
+
+export interface PlaygroundResult {
+  /** Present for message requests: the ID the simulated incoming message got (it can be quoted). */
+  incoming?: { messageId: string }
+  replies: PlaygroundReply[]
+  /** Group management and request handling the virtual bot recorded, e.g. approve / muteMember. */
+  actions: { action: string; params: Record<string, unknown> }[]
+  traces: DispatchTrace[]
+  logs: LogRecord[]
 }
 
 export interface LiveMessage {
   direction: 'in' | 'out'
   platform: string
   selfId: string
-  channel: Target
+  channel: ChannelTarget
   userId?: string
   nickname?: string
   avatar?: string
@@ -251,6 +390,7 @@ export type ServerFrame =
   | ({ type: 'message' } & LiveMessage)
   | { type: 'stats'; point: StatsPoint }
   | { type: 'package'; operation: PackageOperation }
+  | { type: 'plugin-event'; plugin: string; topic: string; data: unknown }
 
 export interface ApiErrorBody {
   error: { code: string; message: string; issues?: { path: string; message: string }[] }

@@ -1,8 +1,11 @@
 import type {
   AccessEntry,
   ApiErrorBody,
+  BotGroup,
   BotView,
+  CommandOverride,
   CommandView,
+  GroupDetail,
   GroupView,
   LogLevel,
   LogRecord,
@@ -11,8 +14,10 @@ import type {
   PackageOperation,
   PackageSearchItem,
   PackageSort,
-  PlaygroundReply,
+  PlaygroundEventRequest,
   PlaygroundRequest,
+  PlaygroundResult,
+  PluginGroupSetting,
   PluginView,
   Segment,
   Session,
@@ -88,20 +93,26 @@ export const api = {
   stats: (range: '1h' | '24h') => request<StatsPoint[]>('GET', `/stats/messages?range=${range}`),
 
   bots: () => request<BotView[]>('GET', '/bots'),
-  groups: (bot: Pick<BotView, 'platform' | 'selfId'>) =>
-    request<GroupView[]>('GET', `/bots/${encode(bot.platform)}/${encode(bot.selfId)}/groups`),
-  send: (input: { platform?: string; selfId?: string; target: Target; message: string | Segment[] }) =>
+  botGroups: (bot: Pick<BotView, 'platform' | 'selfId'>) =>
+    request<BotGroup[]>('GET', `/bots/${encode(bot.platform)}/${encode(bot.selfId)}/groups`),
+  send: (input: { target: Target | string; message: string | Segment[] }) =>
     request<{ messageId: string }>('POST', '/send', input),
+
+  groups: (refresh = false) => request<GroupView[]>('GET', `/groups${refresh ? '?refresh=1' : ''}`),
+  group: (groupKey: string) => request<GroupDetail>('GET', `/groups/${encode(groupKey)}`),
 
   plugins: () => request<PluginView[]>('GET', '/plugins'),
   pluginAction: (name: string, action: 'enable' | 'disable' | 'reload') =>
     request<PluginView>('POST', `/plugins/${encode(name)}/${action}`, {}),
   pluginConfig: (name: string, config: unknown) =>
     request<PluginView>('PUT', `/plugins/${encode(name)}/config`, { config }),
-  pluginGroups: (name: string) =>
-    request<{ groupKey: string; enabled: boolean }[]>('GET', `/plugins/${encode(name)}/groups`),
-  setPluginGroup: (name: string, groupKey: string, enabled: boolean) =>
-    request<unknown>('PUT', `/plugins/${encode(name)}/groups/${encode(groupKey)}`, { enabled }),
+  pluginGroups: (name: string) => request<PluginGroupSetting[]>('GET', `/plugins/${encode(name)}/groups`),
+  /** `config: null` removes the group's config override. */
+  setPluginGroup: (
+    name: string,
+    groupKey: string,
+    input: { enabled?: boolean; config?: Record<string, unknown> | null },
+  ) => request<unknown>('PUT', `/plugins/${encode(name)}/groups/${encode(groupKey)}`, input),
 
   rescanPlugins: () =>
     request<{ added: string[]; removed: string[]; plugins: PluginView[] }>('POST', '/plugins/rescan', {}),
@@ -124,6 +135,11 @@ export const api = {
   packageOperations: () => request<PackageOperation[]>('GET', '/packages/operations'),
 
   commands: () => request<CommandView[]>('GET', '/commands'),
+  /** `override: null` clears it. The path goes in the body because it may contain spaces. */
+  setCommandOverride: (path: string, override: CommandOverride | null) =>
+    request<CommandView>('PUT', '/commands/override', { path, override }),
+  setCommandGroup: (path: string, groupKey: string, enabled: boolean) =>
+    request<unknown>('PUT', '/commands/groups', { path, groupKey, enabled }),
 
   acl: () => request<AccessEntry[]>('GET', '/acl'),
   addAcl: (entry: AccessEntry) => request<unknown>('POST', '/acl', entry),
@@ -132,10 +148,19 @@ export const api = {
   settings: () => request<Settings>('GET', '/settings'),
   updateSettings: (input: SettingsUpdate) => request<Settings>('PUT', '/settings', input),
 
-  logs: (limit = 500) => request<LogRecord[]>('GET', `/logs?limit=${limit}&level=10`),
+  logs: (limit = 500, eventId?: string) =>
+    request<LogRecord[]>(
+      'GET',
+      `/logs?limit=${limit}&level=10${eventId === undefined ? '' : `&eventId=${encode(eventId)}`}`,
+    ),
   logLevel: () => request<{ level: LogLevel }>('GET', '/logs/level'),
   setLogLevel: (level: LogLevel) => request<{ level: LogLevel }>('PUT', '/logs/level', { level }),
 
-  playground: (input: PlaygroundRequest) =>
-    request<{ replies: PlaygroundReply[] }>('POST', '/playground', input),
+  playground: (input: PlaygroundRequest) => request<PlaygroundResult>('POST', '/playground', input),
+  playgroundEvent: (input: PlaygroundEventRequest) =>
+    request<PlaygroundResult>('POST', '/playground/event', input),
+
+  /** A plugin's own panel routes (ctx.panel.route), mounted at /api/panel/ext/<name>. */
+  ext: <T>(plugin: string, method: string, path: string, body?: unknown) =>
+    request<T>(method, `/ext/${encode(plugin)}${path}`, body),
 }

@@ -51,6 +51,16 @@ const commandSchema: JsonSchema = {
     },
     replyOnError: { type: 'boolean', title: '出错时回复', description: '命令处理出错时回复一条简短提示' },
     replyOnDenied: { type: 'boolean', title: '拒绝时回复', description: '权限不足或冷却中时回复提示' },
+    suggest: {
+      type: 'string',
+      title: '相似命令提示',
+      description: '命令写错时回复“你是不是想用 /xxx？”，只提示不执行',
+      oneOf: [
+        { const: 'direct', title: '私聊和 @机器人 时' },
+        { const: 'always', title: '所有带前缀的消息' },
+        { const: 'off', title: '关闭' },
+      ],
+    },
   },
 }
 

@@ -58,3 +58,13 @@ export const logLevels = [
 export function levelName(level: number): string {
   return [...logLevels].reverse().find((item) => level >= item.value)?.name ?? 'trace'
 }
+
+/** Badge colours of a log level name (see levelName). */
+export const levelStyle: Record<string, string> = {
+  trace: 'text-fg-3 bg-surface-2',
+  debug: 'text-fg-3 bg-surface-2',
+  info: 'text-info bg-info-soft',
+  warn: 'text-warning bg-warning-soft',
+  error: 'text-danger bg-danger-soft',
+  fatal: 'text-white bg-danger',
+}

@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { ChevronDown, Link2, Radio, Search, Send, Users } from 'lucide-react'
+import { Check, ChevronDown, Link2, Minus, Radio, Search, Send, Sparkles, Users } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type FormEvent, useMemo, useState } from 'react'
 import { toast } from 'sonner'
@@ -10,10 +10,12 @@ import { Field, Input, Textarea } from '../components/ui/input.tsx'
 import { Segmented } from '../components/ui/misc.tsx'
 import { Badge, Card, EmptyState, ErrorState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
 import { api } from '../lib/api.ts'
+import { type CapabilityRow, capabilityRows } from '../lib/capabilities.ts'
 import { formatNumber } from '../lib/format.ts'
 import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
 import { isValidId } from '../lib/platform.ts'
-import type { BotView, Target } from '../lib/types.ts'
+import type { BotView, ChannelTarget } from '../lib/types.ts'
+import { cn } from '../lib/utils.ts'
 
 const statusMeta = {
   online: { label: '在线', tone: 'success' },
@@ -23,7 +25,7 @@ const statusMeta = {
 
 export function BotsPage() {
   const bots = useQuery({ queryKey: ['bots'], queryFn: api.bots })
-  const [sendTo, setSendTo] = useState<{ bot: BotView; target?: Target } | null>(null)
+  const [sendTo, setSendTo] = useState<{ bot: BotView; target?: ChannelTarget } | null>(null)
 
   return (
     <>
@@ -56,8 +58,9 @@ export function BotsPage() {
   )
 }
 
-function BotCard({ bot, onSend }: { bot: BotView; onSend: (target?: Target) => void }) {
-  const [expanded, setExpanded] = useState(false)
+function BotCard({ bot, onSend }: { bot: BotView; onSend: (target?: ChannelTarget) => void }) {
+  const [panel, setPanel] = useState<'groups' | 'capabilities' | null>(null)
+  const toggle = (next: 'groups' | 'capabilities') => setPanel(panel === next ? null : next)
   const meta = statusMeta[bot.status]
   return (
     <Card className="overflow-hidden">
@@ -92,25 +95,37 @@ function BotCard({ bot, onSend }: { bot: BotView; onSend: (target?: Target) => v
             <Send className="size-3.5" />
             发消息
           </Button>
-          <Button variant="ghost" disabled={bot.status !== 'online'} onClick={() => setExpanded(!expanded)}>
+          <Button variant="ghost" disabled={bot.status !== 'online'} onClick={() => toggle('groups')}>
             <Users className="size-3.5" />
             群列表
-            <motion.span animate={{ rotate: expanded ? 180 : 0 }} transition={softSpring}>
+            <motion.span animate={{ rotate: panel === 'groups' ? 180 : 0 }} transition={softSpring}>
+              <ChevronDown className="size-3.5" />
+            </motion.span>
+          </Button>
+          <Button variant="ghost" onClick={() => toggle('capabilities')}>
+            <Sparkles className="size-3.5" />
+            能力
+            <motion.span animate={{ rotate: panel === 'capabilities' ? 180 : 0 }} transition={softSpring}>
               <ChevronDown className="size-3.5" />
             </motion.span>
           </Button>
         </div>
       </div>
-      <AnimatePresence initial={false}>
-        {expanded && (
+      <AnimatePresence initial={false} mode="wait">
+        {panel !== null && (
           <motion.div
+            key={panel}
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={softSpring}
             className="overflow-hidden"
           >
-            <GroupList bot={bot} onSend={(groupId) => onSend({ type: 'group', id: groupId })} />
+            {panel === 'groups' ? (
+              <GroupList bot={bot} onSend={(groupId) => onSend({ type: 'group', id: groupId })} />
+            ) : (
+              <CapabilityPanel bot={bot} />
+            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -118,8 +133,55 @@ function BotCard({ bot, onSend }: { bot: BotView; onSend: (target?: Target) => v
   )
 }
 
+function CapabilityPanel({ bot }: { bot: BotView }) {
+  const { segments, styles, actions } = capabilityRows(bot.capabilities)
+  return (
+    <div className="space-y-4 border-t border-border bg-surface-2/40 px-5 py-4">
+      <p className="text-[12.5px] leading-relaxed text-fg-3">
+        平台不支持的消息内容会在发送前自动降级，例如图片变成“[图片]”、Markdown 变成纯文本；插件可以用{' '}
+        <code className="font-mono text-[12px]">supports(bot, …)</code> 提前判断。
+      </p>
+      <CapabilityGroup title="消息内容" rows={segments} />
+      <CapabilityGroup title="文本样式" rows={styles} />
+      <CapabilityGroup title="操作" rows={actions} />
+    </div>
+  )
+}
+
+function CapabilityGroup({ title, rows }: { title: string; rows: CapabilityRow[] }) {
+  return (
+    <div>
+      <div className="mb-2 text-[12px] font-medium text-fg-2">{title}</div>
+      <ul className="flex flex-wrap gap-1.5">
+        {rows.map((row) => (
+          <li
+            key={row.key}
+            title={row.key}
+            className={cn(
+              'flex items-center gap-1 rounded-md border px-2 py-0.5 text-[12px]',
+              row.supported
+                ? 'border-border bg-surface text-fg'
+                : 'border-dashed border-border text-fg-3 line-through decoration-fg-3/50',
+            )}
+          >
+            {row.supported ? (
+              <Check className="size-3 text-success" />
+            ) : (
+              <Minus className="size-3 text-fg-3" />
+            )}
+            {row.label}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function GroupList({ bot, onSend }: { bot: BotView; onSend: (groupId: string) => void }) {
-  const groups = useQuery({ queryKey: ['groups', bot.platform, bot.selfId], queryFn: () => api.groups(bot) })
+  const groups = useQuery({
+    queryKey: ['bot-groups', bot.platform, bot.selfId],
+    queryFn: () => api.botGroups(bot),
+  })
   const [query, setQuery] = useState('')
   const filtered = useMemo(() => {
     const keyword = query.trim().toLowerCase()
@@ -194,10 +256,10 @@ function SendDialog({
   state,
   onClose,
 }: {
-  state: { bot: BotView; target?: Target } | null
+  state: { bot: BotView; target?: ChannelTarget } | null
   onClose: () => void
 }) {
-  const [type, setType] = useState<Target['type']>('group')
+  const [type, setType] = useState<ChannelTarget['type']>('group')
   const [id, setId] = useState('')
   const [text, setText] = useState('')
   const [lastState, setLastState] = useState(state)
@@ -222,9 +284,7 @@ function SendDialog({
     event?.preventDefault()
     if (!state || !valid) return
     send.mutate({
-      platform: state.bot.platform,
-      selfId: state.bot.selfId,
-      target: { type, id: id.trim() },
+      target: { platform: state.bot.platform, selfId: state.bot.selfId, type, id: id.trim() },
       message: text,
     })
   }
@@ -258,7 +318,6 @@ function SendDialog({
         <Field label={type === 'group' ? '群 ID' : '用户 ID'} htmlFor="send-id">
           <Input
             id="send-id"
-            inputMode="numeric"
             value={id}
             onChange={(event) => setId(event.target.value)}
             className="font-mono"

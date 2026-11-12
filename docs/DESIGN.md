@@ -1240,11 +1240,25 @@ type DispatchTrace = {
 - **服务 `history`**：
   - `query({ channel?, userId?, before?, limit?, q? })` 返回按时间倒序的消息；
   - `trace(eventId)` 返回对应的追踪记录。
-- **面板接口**（通过 F10 的 `ctx.panel.route`，需要登录）：
-  - `GET /channels`：最近有消息的会话，带最后一条消息的预览；
-  - `GET /messages?channel=&before=&limit=&q=`；
-  - `GET /traces/:eventId`；
-  - `GET /export?channel=`：导出 JSONL。
+- **面板接口**（通过 F10 的 `ctx.panel.route`，即 `/api/panel/ext/history/*`，需要登录）：
+  ```ts
+  type HistoryMessage = {
+    id: number; eventId?: string; direction: 'in' | 'out'
+    platform: string; selfId: string; channel: string    // channelKey
+    userId?: string; nickname?: string; messageId?: string
+    message: Segment[]; text: string; time: number
+  }
+  type HistoryChannel = { channel: string; platform: string; selfId: string; type: 'group' | 'private'; id: string; count: number; last: HistoryMessage }
+  ```
+  - `GET /channels` → `HistoryChannel[]`：按最后一条消息的时间倒序，最多 200 个；
+  - `GET /messages?channel=&before=&limit=&q=` → `{ items: HistoryMessage[]; more: boolean }`：
+    - 按 id 倒序；
+    - `before` 是上一页最后一条的 id；
+    - `limit` 默认 50，最大 200；
+    - `q` 对 text 做包含匹配；
+    - 省略 channel 时查全部会话；
+  - `GET /traces/:eventId` → `DispatchTrace`，没有记录时返回 404；
+  - `GET /export?channel=` → `application/x-ndjson`，每行一条 `HistoryMessage`，按时间正序。
 - **面板**：原生页面“消息记录”，由我编写，插件处于 active 时显示。左侧是会话列表，右侧是消息流；点击收到的消息可以展开查看它的处理链，以及这次处理产生的日志。
 
 ### 24.9 F10 插件面板页（修订 12、18、19）
@@ -1264,13 +1278,16 @@ ctx.panel.push(topic: string, data: unknown)        // 通过面板实时推送�
   - `PluginView` 新增 `page?: { title: string; icon?: string }`。
 - **桥接协议**（postMessage；宿主只处理 `event.source` 是该 iframe 的消息）：
   - 页面 → 宿主：
-    - `{ asabot: 1, id, kind: 'fetch', path, method, body? }`：宿主带 cookie 请求 `/api/panel/ext/<name><path>`，然后回复 `{ asabot: 1, id, status, body }`；
+    - `{ asabot: 1, kind: 'ready' }`：SDK 加载后立即发送，宿主收到后回复一次 theme；
+    - `{ asabot: 1, id, kind: 'fetch', path, method, body? }`：宿主带 cookie 请求 `/api/panel/ext/<name><path>`，然后回复 `{ asabot: 1, id, status, body }`。网络失败时 `status` 为 0；
     - `{ asabot: 1, kind: 'toast', text, level? }`：在面板中显示提示。
   - 宿主 → 页面：
-    - `{ asabot: 1, kind: 'theme', mode, tokens }`：加载完成和主题切换时发送；
+    - `{ asabot: 1, kind: 'theme', mode, tokens }`：收到 ready 时和主题切换时发送；
     - `{ asabot: 1, kind: 'event', topic, data }`：转发该插件的 `plugin-event`。
-- **客户端 SDK**：框架在 `/plugin-pages/_sdk.js` 提供，包含：
-  - `asabot.fetch(path, init)`、`asabot.on(topic, fn)`、`asabot.toast(text)`；
+- **客户端 SDK**：
+  - SDK 是面板的一部分，源文件为 `web/public/plugin-pages/_sdk.js`，随面板构建进入 `web/dist`，由现有的面板静态托管在 `/plugin-pages/_sdk.js` 提供。`/plugin-pages/:name/*` 路由只处理合法的插件名，以 `_` 开头的路径交给面板静态托管。
+  - 插件页面用普通 `<script src="/plugin-pages/_sdk.js">` 加载 SDK。
+  - 提供 `asabot.fetch(path, init)`、`asabot.json(path, init)`、`asabot.on(topic, fn)`、`asabot.toast(text, level?)`、`asabot.theme`。
   - 自动把主题变量写到 `:root`，插件页面直接使用面板的配色。
 - 内置插件（例如 history）的页面由面板原生实现，但数据接口同样走 `ctx.panel.route`。
 

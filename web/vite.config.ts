@@ -11,6 +11,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': { target: backend, changeOrigin: false, ws: true },
+      // Plugin page files come from the backend; `_`-prefixed paths (the page SDK) are the panel's own public files.
+      '^/plugin-pages/[^_]': { target: backend, changeOrigin: false },
     },
   },
   build: { outDir: 'dist', emptyOutDir: true, chunkSizeWarningLimit: 900 },

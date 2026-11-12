@@ -13,10 +13,13 @@ import { cn } from '../../lib/utils.ts'
 import { AclPage } from '../../pages/acl.tsx'
 import { BotsPage } from '../../pages/bots.tsx'
 import { CommandsPage } from '../../pages/commands.tsx'
+import { GroupsPage } from '../../pages/groups.tsx'
+import { HistoryPage } from '../../pages/history.tsx'
 import { LogsPage } from '../../pages/logs.tsx'
 import { NotFoundPage } from '../../pages/not-found.tsx'
 import { OverviewPage } from '../../pages/overview.tsx'
 import { PlaygroundPage } from '../../pages/playground.tsx'
+import { PluginPageHost } from '../../pages/plugin-page.tsx'
 import { PluginsPage } from '../../pages/plugins.tsx'
 import { SettingsPage } from '../../pages/settings.tsx'
 import { CommandPalette } from '../command-palette.tsx'
@@ -25,12 +28,14 @@ import { Button } from '../ui/button.tsx'
 import { Tooltip } from '../ui/misc.tsx'
 import { Kbd, StatusDot } from '../ui/primitives.tsx'
 import { Logo } from './logo.tsx'
-import { type NavItem, navGroups } from './nav.ts'
+import { builtinPluginPages, type NavItem, navGroups, pluginPageItems } from './nav.ts'
 
 const pages: Record<string, ComponentType> = {
   '/': OverviewPage,
   '/plugins': PluginsPage,
   '/commands': CommandsPage,
+  '/groups': GroupsPage,
+  '/history': HistoryPage,
   '/bots': BotsPage,
   '/playground': PlaygroundPage,
   '/logs': LogsPage,
@@ -38,13 +43,40 @@ const pages: Record<string, ComponentType> = {
   '/settings': SettingsPage,
 }
 
-const allItems = navGroups.flatMap((group) => group.items)
+/** The page for a path; `key` drives the page transition, so in-page sub-routes (a group's sheet) don't re-animate. */
+function resolveRoute(path: string): { key: string; Page: ComponentType } {
+  const page = pages[path]
+  if (page) return { key: path, Page: page }
+  if (path.startsWith('/groups/')) return { key: '/groups', Page: GroupsPage }
+  if (path.startsWith('/pages/')) return { key: path, Page: PluginPageHost }
+  return { key: path, Page: NotFoundPage }
+}
+
+/** Static navigation plus entries that depend on which plugins are active. */
+function useNavGroups(): { label: string; items: NavItem[] }[] {
+  const plugins = useQuery({ queryKey: ['plugins'], queryFn: api.plugins })
+  const active = new Set(
+    (plugins.data ?? []).filter((plugin) => plugin.state === 'active').map((p) => p.name),
+  )
+  const pages = pluginPageItems(plugins.data ?? [])
+  return [
+    ...navGroups.map((group) => ({
+      ...group,
+      items: [
+        ...group.items,
+        ...builtinPluginPages.filter((item) => item.group === group.label && active.has(item.plugin)),
+      ],
+    })),
+    ...(pages.length > 0 ? [{ label: '插件页面', items: pages }] : []),
+  ]
+}
 
 export function Shell() {
   const path = usePath()
   const [mobileOpen, setMobileOpen] = useState(false)
-  const current = allItems.find((item) => item.to === path)
-  const Page = pages[path] ?? NotFoundPage
+  const groups = useNavGroups()
+  const { key, Page } = resolveRoute(path)
+  const current = groups.flatMap((group) => group.items).find((item) => item.to === key)
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -67,7 +99,7 @@ export function Shell() {
       <div className="pointer-events-none fixed inset-x-0 top-0 h-[420px] bg-[radial-gradient(ellipse_70%_60%_at_60%_-10%,var(--bg-glow),transparent_70%)]" />
 
       <aside className="relative z-10 hidden w-[236px] shrink-0 lg:block">
-        <Sidebar path={path} />
+        <Sidebar path={key} groups={groups} />
       </aside>
 
       <AnimatePresence>
@@ -87,7 +119,7 @@ export function Shell() {
               exit={{ x: -280 }}
               transition={softSpring}
             >
-              <Sidebar path={path} onNavigate={() => setMobileOpen(false)} />
+              <Sidebar path={key} groups={groups} onNavigate={() => setMobileOpen(false)} />
             </motion.aside>
           </>
         )}
@@ -104,7 +136,7 @@ export function Shell() {
         <main className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
-              key={path}
+              key={key}
               initial={{ opacity: 0, y: 10, filter: 'blur(3px)' }}
               animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
               exit={{ opacity: 0, y: -6, filter: 'blur(2px)', transition: { duration: 0.12 } }}
@@ -122,7 +154,15 @@ export function Shell() {
   )
 }
 
-function Sidebar({ path, onNavigate }: { path: string; onNavigate?: () => void }) {
+function Sidebar({
+  path,
+  groups,
+  onNavigate,
+}: {
+  path: string
+  groups: { label: string; items: NavItem[] }[]
+  onNavigate?: () => void
+}) {
   const overview = useQuery({ queryKey: ['overview'], queryFn: api.overview })
   return (
     <div className="flex h-full flex-col px-3 pt-4 pb-3">
@@ -148,7 +188,7 @@ function Sidebar({ path, onNavigate }: { path: string; onNavigate?: () => void }
       </button>
 
       <nav className="flex-1 space-y-5 overflow-y-auto">
-        {navGroups.map((group) => (
+        {groups.map((group) => (
           <div key={group.label}>
             <div className="mb-1 px-2.5 text-[11px] font-medium tracking-wide text-fg-3">{group.label}</div>
             <ul className="space-y-0.5">

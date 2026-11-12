@@ -317,6 +317,26 @@
     margin: 1.5em 0;
     border-color: var(--border);
   }
+  /* Markdown inside a chat bubble: inherit the bubble's size and colour, tighter spacing. */
+  .markdown-compact {
+    font-size: inherit;
+    line-height: 1.6;
+    color: inherit;
+    /* Bubbles use pre-wrap for plain text; the newlines react-markdown leaves between elements must not show. */
+    white-space: normal;
+  }
+  .markdown-compact :where(h1, h2, h3, h4) {
+    margin: 0.6em 0 0.3em;
+    border-bottom: 0;
+    padding-bottom: 0;
+    font-size: 1em;
+  }
+  .markdown-compact :where(p, ul, ol, pre, blockquote, table) {
+    margin: 0.35em 0;
+  }
+  .markdown-compact > :last-child {
+    margin-bottom: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -48,10 +48,11 @@ import {
 import { Select } from '../components/ui/select.tsx'
 import { Switch } from '../components/ui/switch.tsx'
 import { ApiError, api } from '../lib/api.ts'
+import { groupPath } from '../lib/groups.ts'
 import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
 import { isValidId, usePlatforms } from '../lib/platform.ts'
-import { navigate } from '../lib/router.tsx'
-import type { PluginStateName, PluginView } from '../lib/types.ts'
+import { Link, navigate } from '../lib/router.tsx'
+import type { PluginGroupSetting, PluginStateName, PluginView } from '../lib/types.ts'
 import { playgroundDraft } from '../lib/ui-state.ts'
 import { cn } from '../lib/utils.ts'
 
@@ -625,12 +626,12 @@ function OverviewTab({ plugin, onUninstall }: { plugin: PluginView; onUninstall:
         <InfoRow label="可配置">{plugin.configSchema ? '是' : '否'}</InfoRow>
         {plugin.provides.length > 0 && (
           <InfoRow label="提供服务">
-            <ServiceList names={plugin.provides} />
+            <ServiceList services={plugin.provides.map((name) => ({ name, optional: false }))} />
           </InfoRow>
         )}
         {plugin.inject.length > 0 && (
           <InfoRow label="依赖服务">
-            <ServiceList names={plugin.inject} />
+            <ServiceList services={plugin.inject} />
           </InfoRow>
         )}
       </dl>
@@ -706,13 +707,16 @@ function ConfigTab({ plugin }: { plugin: PluginView }) {
   )
 }
 
-function ServiceList({ names }: { names: string[] }) {
+function ServiceList({ services }: { services: { name: string; optional: boolean }[] }) {
   return (
     <span className="inline-flex flex-wrap justify-end gap-1.5">
-      {names.map((name) => (
-        <Badge key={name} className="font-mono">
-          {name}
-        </Badge>
+      {services.map(({ name, optional }) => (
+        <span key={name} title={optional ? '可选：缺失时插件照常运行' : undefined}>
+          <Badge className="font-mono">
+            {name}
+            {optional && <span className="font-sans text-fg-3">可选</span>}
+          </Badge>
+        </span>
       ))}
     </span>
   )
@@ -771,23 +775,25 @@ function GroupsTab({ plugin }: { plugin: PluginView }) {
   const effectivePlatform = platform || platforms[0] || ''
   const set = useMutation({
     mutationFn: ({ groupKey, enabled }: { groupKey: string; enabled: boolean }) =>
-      api.setPluginGroup(plugin.name, groupKey, enabled),
+      api.setPluginGroup(plugin.name, groupKey, { enabled }),
     onMutate: ({ groupKey, enabled }) => {
-      client.setQueryData<{ groupKey: string; enabled: boolean }[]>(
-        ['pluginGroups', plugin.name],
-        (list = []) =>
-          list.some((item) => item.groupKey === groupKey)
-            ? list.map((item) => (item.groupKey === groupKey ? { groupKey, enabled } : item))
-            : [...list, { groupKey, enabled }],
+      client.setQueryData<PluginGroupSetting[]>(['pluginGroups', plugin.name], (list = []) =>
+        list.some((item) => item.groupKey === groupKey)
+          ? list.map((item) => (item.groupKey === groupKey ? { ...item, enabled } : item))
+          : [...list, { groupKey, enabled }],
       )
     },
-    onSettled: () => void client.invalidateQueries({ queryKey: ['pluginGroups', plugin.name] }),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ['pluginGroups', plugin.name] })
+      void client.invalidateQueries({ queryKey: ['groups'] })
+    },
   })
 
   return (
     <div className="space-y-5">
       <p className="text-[13px] leading-relaxed text-fg-3">
         默认在所有群生效。在这里关闭后，插件在该群的命令、监听器和中间件都会被跳过；私聊不受影响。
+        {plugin.configSchema && '按群覆盖配置请到“群组”页面中打开对应的群。'}
       </p>
       <form
         className="flex gap-2"
@@ -849,19 +855,28 @@ function GroupsTab({ plugin }: { plugin: PluginView }) {
                 transition={softSpring}
                 className="flex items-center justify-between px-4 py-3"
               >
-                <div>
-                  <div className="font-mono text-[13px] text-fg">
-                    {item.groupKey.split(':').slice(1).join(':')}
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[13px] text-fg">
+                      {item.groupKey.split(':').slice(1).join(':')}
+                    </span>
+                    {item.config !== undefined && (
+                      <Link to={groupPath(item.groupKey)}>
+                        <Badge tone="accent">配置已覆盖</Badge>
+                      </Link>
+                    )}
                   </div>
                   <div className="text-[11.5px] text-fg-3">{item.groupKey.split(':')[0]}</div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className={cn('text-[12.5px]', item.enabled ? 'text-success' : 'text-fg-3')}>
-                    {item.enabled ? '已开启' : '已关闭'}
+                  <span
+                    className={cn('text-[12.5px]', item.enabled !== false ? 'text-success' : 'text-fg-3')}
+                  >
+                    {item.enabled !== false ? '已开启' : '已关闭'}
                   </span>
                   <Switch
                     aria-label={`${item.groupKey} 开关`}
-                    checked={item.enabled}
+                    checked={item.enabled !== false}
                     onCheckedChange={(enabled) => set.mutate({ groupKey: item.groupKey, enabled })}
                   />
                 </div>
