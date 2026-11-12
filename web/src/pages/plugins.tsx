@@ -623,6 +623,16 @@ function OverviewTab({ plugin, onUninstall }: { plugin: PluginView; onUninstall:
         )}
         <InfoRow label="命令">{plugin.commands.length} 条</InfoRow>
         <InfoRow label="可配置">{plugin.configSchema ? '是' : '否'}</InfoRow>
+        {plugin.provides.length > 0 && (
+          <InfoRow label="提供服务">
+            <ServiceList names={plugin.provides} />
+          </InfoRow>
+        )}
+        {plugin.inject.length > 0 && (
+          <InfoRow label="依赖服务">
+            <ServiceList names={plugin.inject} />
+          </InfoRow>
+        )}
       </dl>
       {hasUpdate(plugin) && (
         <div className="flex items-center justify-between gap-3 rounded-xl bg-info-soft px-4 py-3">
@@ -693,6 +703,18 @@ function ConfigTab({ plugin }: { plugin: PluginView }) {
       saving={save.isPending}
       onSubmit={(value) => save.mutate(value)}
     />
+  )
+}
+
+function ServiceList({ names }: { names: string[] }) {
+  return (
+    <span className="inline-flex flex-wrap justify-end gap-1.5">
+      {names.map((name) => (
+        <Badge key={name} className="font-mono">
+          {name}
+        </Badge>
+      ))}
+    </span>
   )
 }
 

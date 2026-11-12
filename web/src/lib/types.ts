@@ -65,6 +65,10 @@ export interface PluginView {
   commands: CommandView[]
   /** Current effective config (parsed by the plugin schema); absent when the plugin has no schema. */
   config?: unknown
+  /** Services this plugin provides to others (ctx.provide). */
+  provides: string[]
+  /** Services this plugin requires (definePlugin inject); it only loads while all are available. */
+  inject: string[]
 }
 
 export interface PackageInfo {
