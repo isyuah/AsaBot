@@ -11,7 +11,7 @@ import {
   ShieldAlert,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { ApiError, api } from '../lib/api.ts'
 import { formatRelative } from '../lib/format.ts'
@@ -19,7 +19,6 @@ import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
 import { useTrackOperation } from '../lib/realtime.tsx'
 import type { PackageDetail, PackageSearchItem, PackageSort, PackageVersion } from '../lib/types.ts'
 import { cn } from '../lib/utils.ts'
-import { Markdown } from './markdown.tsx'
 import { Button } from './ui/button.tsx'
 import { Dialog, Sheet } from './ui/dialog.tsx'
 import { Input } from './ui/input.tsx'
@@ -27,6 +26,9 @@ import { Segmented } from './ui/misc.tsx'
 import { Badge, Card, EmptyState, ErrorState, Skeleton } from './ui/primitives.tsx'
 import { Select } from './ui/select.tsx'
 import { Switch } from './ui/switch.tsx'
+
+// react-markdown and remark-gfm are only needed once a package's details are opened.
+const Markdown = lazy(() => import('./markdown.tsx').then((module) => ({ default: module.Markdown })))
 
 interface InstallTarget {
   name: string
@@ -396,7 +398,17 @@ function PackageSheet({
             </div>
           </div>
           {detail.readme?.trim() ? (
-            <Markdown className="px-6 py-5">{detail.readme}</Markdown>
+            <Suspense
+              fallback={
+                <div className="space-y-2.5 px-6 py-5">
+                  <Skeleton className="h-5 w-1/2" />
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-5/6" />
+                </div>
+              }
+            >
+              <Markdown className="px-6 py-5">{detail.readme}</Markdown>
+            </Suspense>
           ) : (
             <EmptyState icon={<BookOpen />} title="没有 README" description="这个插件包没有提供说明文档。" />
           )}
