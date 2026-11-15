@@ -1,10 +1,12 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { setTimeout as delay } from 'node:timers/promises'
 import pino from 'pino'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { configSchema } from '../src/core/config/schema.ts'
+import { Storage } from '../src/core/storage/index.ts'
 import { type Context, createApp, definePlugin, type TaskHandle } from '../src/index.ts'
 
 const cleanup: (() => Promise<void>)[] = []
@@ -28,6 +30,133 @@ async function fixture(setup: (ctx: Context) => void | Promise<void>, tasks = {}
 }
 
 describe('task reliability', () => {
+  it('retries persisting results without rerunning callbacks or releasing concurrency', async () => {
+    let task!: TaskHandle<number>
+    const calls: number[] = []
+    const app = await fixture(
+      (ctx) => {
+        task = ctx.task('durable-result', (value) => {
+          calls.push(value)
+        })
+      },
+      { maxConcurrent: 1 },
+    )
+    const db = app.storage.db
+    const original = db.prepare.bind(db)
+    let fail = true
+    const spy = vi.spyOn(db, 'prepare').mockImplementation((sql) => {
+      if (fail && sql.startsWith('UPDATE task_attempts SET outcome = ?')) {
+        fail = false
+        throw new Error('database is busy')
+      }
+      return original(sql)
+    })
+    try {
+      task.schedule(1, { delay: 0, key: 'first' })
+      task.schedule(2, { delay: 0, key: 'second' })
+      await vi.waitFor(() => expect(calls).toEqual([1]))
+      expect(task.get('first')?.state).toBe('running')
+      await vi.waitFor(() => expect(task.get('second')?.state).toBe('succeeded'), { timeout: 2500 })
+      expect(calls).toEqual([1, 2])
+      expect(task.get('first')).toMatchObject({ state: 'succeeded', attempt: 1 })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('activates tasks registered after setup and blocks work from a failed setup', async () => {
+    let context!: Context
+    let fail = true
+    let runs = 0
+    const app = await fixture((ctx) => {
+      context = ctx
+      ctx
+        .task('setup', () => {
+          runs++
+        })
+        .schedule(null, { delay: 0, key: 'a' })
+      if (fail) throw new Error('setup failed')
+    })
+    await delay(20)
+    expect(runs).toBe(0)
+    expect(app.tasks.query().items[0]).toMatchObject({ state: 'pending', blockedReason: '任务处理器未激活' })
+    fail = false
+    await app.plugins.reload('jobs')
+    await vi.waitFor(() => expect(runs).toBe(1))
+    const dynamic = context.task('dynamic', () => {
+      runs++
+    })
+    dynamic.schedule(null, { delay: 0, key: 'b' })
+    await vi.waitFor(() => expect(runs).toBe(2))
+  })
+
+  it('migrates legacy schedules and recovers interrupted attempts without consuming retries', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'asabot-task-migrate-'))
+    const storage = new Storage(dataDir)
+    storage.open()
+    storage.close()
+    const db = new DatabaseSync(join(dataDir, 'asabot.db'))
+    db.exec(
+      "DROP TABLE task_attempts; DROP TABLE tasks; DELETE FROM plugin_tables WHERE table_name IN ('tasks', 'task_attempts'); CREATE TABLE scheduled_tasks (plugin TEXT, name TEXT, key TEXT, run_at INTEGER, payload TEXT, PRIMARY KEY (plugin,name,key)); INSERT INTO plugin_tables VALUES ('core', 'scheduled_tasks'); UPDATE migrations SET version = 4 WHERE plugin = 'core';",
+    )
+    db.prepare('INSERT INTO scheduled_tasks VALUES (?, ?, ?, ?, ?)').run(
+      'jobs',
+      'legacy',
+      'one',
+      Date.now() + 60_000,
+      'null',
+    )
+    db.close()
+    let task!: TaskHandle<null>
+    const app = createApp(configSchema.parse({ dataDir, pluginLoader: { dirs: [], hotReload: false } }), {
+      logger: pino({ level: 'silent' }),
+    })
+    app.plugins.register(
+      definePlugin({
+        name: 'jobs',
+        setup(ctx) {
+          task = ctx.task('legacy', () => {})
+        },
+      }),
+    )
+    cleanup.push(async () => {
+      await app.stop()
+      await rm(dataDir, { recursive: true, force: true })
+    })
+    await app.start()
+    expect(task.get('one')).toMatchObject({ state: 'pending', attempt: 0, policy: { maxRetries: 0 } })
+    expect(
+      app.storage.db.prepare("SELECT name FROM sqlite_master WHERE name = 'scheduled_tasks'").get(),
+    ).toBeUndefined()
+    await app.stop()
+    const crashed = new DatabaseSync(join(dataDir, 'asabot.db'))
+    const id = String(crashed.prepare('SELECT id FROM tasks').get()?.id)
+    crashed.prepare("UPDATE tasks SET state = 'running', attempt = 1 WHERE id = ?").run(id)
+    crashed
+      .prepare(
+        "INSERT INTO task_attempts (id,task_id,plugin,attempt,started_at,outcome) VALUES ('interrupted',?,'jobs',1,?,'running')",
+      )
+      .run(id, Date.now())
+    crashed.close()
+    const resumed = createApp(configSchema.parse({ dataDir, pluginLoader: { dirs: [], hotReload: false } }), {
+      logger: pino({ level: 'silent' }),
+    })
+    resumed.plugins.register(
+      definePlugin({
+        name: 'jobs',
+        setup(ctx) {
+          task = ctx.task('legacy', () => {})
+        },
+      }),
+    )
+    cleanup.push(async () => {
+      await resumed.stop()
+    })
+    await resumed.start()
+    await vi.waitFor(() => expect(task.get('one')?.state).toBe('succeeded'))
+    expect(task.get('one')).toMatchObject({ attempt: 2, failures: 0 })
+    expect(task.attempts('one').map((a) => a.outcome)).toEqual(['succeeded', 'interrupted'])
+  })
   it('keeps failed attempts and only retries automatically when opted in', async () => {
     let once!: TaskHandle<null>
     let retry!: TaskHandle<null>

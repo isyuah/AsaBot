@@ -111,6 +111,7 @@ interface Execution {
   registration: Registration
   controller: AbortController
   cancelTimeout?: () => void
+  releasePersistence?: () => void
   reason?: 'user' | 'superseded' | 'timeout' | 'interrupted'
   detached: boolean
 }
@@ -227,6 +228,7 @@ export class TaskService {
       if (execution.registration !== registration || execution.detached) continue
       execution.detached = true
       execution.cancelTimeout?.()
+      execution.releasePersistence?.()
       const now = Date.now()
       const cancelled = execution.reason === 'user' || execution.reason === 'superseded'
       this.storage.db
@@ -528,12 +530,19 @@ export class TaskService {
         () => {
           if (!this.alive || execution.detached || execution.reason) return
           execution.reason = 'timeout'
-          this.storage.db
-            .prepare(
-              "UPDATE tasks SET state = 'cancelling', cancel_reason = 'timeout', updated_at = ? WHERE id = ?",
-            )
-            .run(Date.now(), task.id)
           execution.controller.abort(new DOMException('Task timed out', 'TimeoutError'))
+          try {
+            this.storage.db
+              .prepare(
+                "UPDATE tasks SET state = 'cancelling', cancel_reason = 'timeout', updated_at = ? WHERE id = ?",
+              )
+              .run(Date.now(), task.id)
+          } catch (error) {
+            this.logger.error(
+              { taskId: task.id, error: this.errorText(error) },
+              'Failed to persist task timeout',
+            )
+          }
           this.changed(task.id)
         },
         true,
@@ -550,8 +559,8 @@ export class TaskService {
         }),
       )
       .then(
-        () => this.finish(execution),
-        (error: unknown) => this.finish(execution, { error }),
+        () => this.persistResult(execution),
+        (error: unknown) => this.persistResult(execution, { error }),
       )
       .catch((error: unknown) => {
         this.logger.error({ taskId: task.id, error: this.errorText(error) }, 'Failed to persist task result')
@@ -562,6 +571,29 @@ export class TaskService {
         this.locks.delete(lock)
         this.changed(task.id)
       })
+  }
+
+  private async persistResult(execution: Execution, failure?: { error: unknown }): Promise<void> {
+    execution.cancelTimeout?.()
+    while (this.alive && !execution.detached) {
+      try {
+        this.finish(execution, failure)
+        return
+      } catch (error) {
+        this.logger.error(
+          { taskId: execution.task.id, error: this.errorText(error) },
+          'Task result persistence failed; retaining execution lock',
+        )
+        await new Promise<void>((resolve) => {
+          const cancel = scheduleTimeout(1000, resolve, true)
+          execution.releasePersistence = () => {
+            cancel()
+            resolve()
+          }
+        })
+        execution.releasePersistence = undefined
+      }
+    }
   }
 
   private finish(execution: Execution, failure?: { error: unknown }): void {
@@ -608,6 +640,7 @@ export class TaskService {
 
 /** 插件级入口，注册在 setup 成功后激活，卸载时解除注册。 */
 export class PersistentTasks {
+  private activated = false
   private readonly registrations: Registration[] = []
   private readonly service: TaskService
   private readonly owner: string
@@ -630,6 +663,7 @@ export class PersistentTasks {
     this.assertActive()
     const registration = this.service.register(this.owner, name, handler as TaskHandler<unknown>, options)
     this.registrations.push(registration)
+    if (this.activated) this.service.activate([registration])
     const get = (key: string): TaskRecord<T> | undefined => {
       this.assertActive()
       return this.service.latest(this.owner, name, key) as TaskRecord<T> | undefined
@@ -662,6 +696,7 @@ export class PersistentTasks {
   }
 
   activate(): void {
+    this.activated = true
     this.service.activate(this.registrations)
   }
 }
