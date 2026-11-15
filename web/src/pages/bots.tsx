@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Check, ChevronRight, Minus, Plus, Radio, Search, Send } from 'lucide-react'
-import { motion } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 import { type FormEvent, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Avatar } from '../components/avatar.tsx'
@@ -14,7 +14,7 @@ import { type CapabilityRow, capabilityRows } from '../lib/capabilities.ts'
 import { formatNumber } from '../lib/format.ts'
 import { groupPath } from '../lib/groups.ts'
 import { botPath } from '../lib/management.ts'
-import { stagger, staggerItem } from '../lib/motion.ts'
+import { stagger, staggerItem, useFadeUp } from '../lib/motion.ts'
 import { isValidId } from '../lib/platform.ts'
 import { Link, navigate, usePath } from '../lib/router.tsx'
 import type { BotView, ChannelTarget } from '../lib/types.ts'
@@ -24,13 +24,27 @@ import { ConnectionsPage, RobotTabs } from './connections.tsx'
 
 export function BotsPage() {
   const path = usePath()
-  if (path.startsWith('/bots/connections')) return <ConnectionsPage />
-  if (path !== '/bots') return <BotDetailPage key={path.split('/').slice(0, 4).join('/')} />
-  return <BotList />
+  const fadeUp = useFadeUp()
+  const isList = path === '/bots' || path === '/bots/connections'
+  const isConnection = path.startsWith('/bots/connections/')
+  const pageKey = isList ? '/bots' : isConnection ? path : path.split('/').slice(0, 4).join('/')
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div key={pageKey} {...fadeUp}>
+        {isList ? (
+          <BotOverview view={path === '/bots' ? 'bots' : 'connections'} />
+        ) : isConnection ? (
+          <ConnectionsPage path={path} />
+        ) : (
+          <BotDetailPage path={path} />
+        )}
+      </motion.div>
+    </AnimatePresence>
+  )
 }
 
-function BotList() {
-  const bots = useQuery({ queryKey: ['bots'], queryFn: api.bots })
+function BotOverview({ view }: { view: 'bots' | 'connections' }) {
+  const fadeUp = useFadeUp()
   return (
     <>
       <PageHeader
@@ -43,52 +57,57 @@ function BotList() {
           </Button>
         }
       />
-      <RobotTabs view="bots" />
-      {bots.error ? (
-        <ErrorState error={bots.error} onRetry={() => void bots.refetch()} />
-      ) : !bots.data ? (
-        <Skeleton className="h-48 rounded-xl" />
-      ) : !bots.data.length ? (
-        <Card>
-          <EmptyState
-            icon={<Radio />}
-            title="还没有机器人"
-            description="添加平台连接后，成功登录的机器人会显示在这里。连接失败时可以在“连接”中查看原因。"
-            action={<Button onClick={() => navigate('/bots/connections')}>查看连接</Button>}
-          />
-        </Card>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {bots.data.map((bot) => (
-            <Link to={botPath(bot)} key={`${bot.platform}:${bot.selfId}`} className="block">
-              <Card className="flex items-center gap-4 p-5 transition-colors hover:border-border-strong">
-                <Avatar id={bot.selfId} name={bot.nickname} src={bot.avatar} size={48} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate text-[15px] font-semibold">{bot.nickname || bot.selfId}</span>
-                    <Badge
-                      tone={
-                        bot.status === 'online'
-                          ? 'success'
-                          : bot.status === 'connecting'
-                            ? 'warning'
-                            : 'neutral'
-                      }
-                      dot
-                    >
-                      {bot.status === 'online' ? '在线' : bot.status === 'connecting' ? '连接中' : '离线'}
-                    </Badge>
-                  </div>
-                  <p className="mt-1 text-[12px] text-fg-3">{bot.platform}</p>
-                  <p className="mt-0.5 truncate font-mono text-[12px] text-fg-3">{bot.selfId}</p>
-                </div>
-                <ChevronRight className="size-4 shrink-0 text-fg-3" />
-              </Card>
-            </Link>
-          ))}
-        </div>
-      )}
+      <RobotTabs view={view} />
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div key={view} {...fadeUp}>
+          {view === 'bots' ? <BotList /> : <ConnectionsPage path="/bots/connections" />}
+        </motion.div>
+      </AnimatePresence>
     </>
+  )
+}
+
+function BotList() {
+  const bots = useQuery({ queryKey: ['bots'], queryFn: api.bots })
+  return bots.error ? (
+    <ErrorState error={bots.error} onRetry={() => void bots.refetch()} />
+  ) : !bots.data ? (
+    <Skeleton className="h-48 rounded-xl" />
+  ) : !bots.data.length ? (
+    <Card>
+      <EmptyState
+        icon={<Radio />}
+        title="还没有机器人"
+        description="添加平台连接后，成功登录的机器人会显示在这里。连接失败时可以在“连接”中查看原因。"
+        action={<Button onClick={() => navigate('/bots/connections')}>查看连接</Button>}
+      />
+    </Card>
+  ) : (
+    <div className="grid gap-4 md:grid-cols-2">
+      {bots.data.map((bot) => (
+        <Link to={botPath(bot)} key={`${bot.platform}:${bot.selfId}`} className="block">
+          <Card className="flex items-center gap-4 p-5 transition-colors hover:border-border-strong">
+            <Avatar id={bot.selfId} name={bot.nickname} src={bot.avatar} size={48} />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="truncate text-[15px] font-semibold">{bot.nickname || bot.selfId}</span>
+                <Badge
+                  tone={
+                    bot.status === 'online' ? 'success' : bot.status === 'connecting' ? 'warning' : 'neutral'
+                  }
+                  dot
+                >
+                  {bot.status === 'online' ? '在线' : bot.status === 'connecting' ? '连接中' : '离线'}
+                </Badge>
+              </div>
+              <p className="mt-1 text-[12px] text-fg-3">{bot.platform}</p>
+              <p className="mt-0.5 truncate font-mono text-[12px] text-fg-3">{bot.selfId}</p>
+            </div>
+            <ChevronRight className="size-4 shrink-0 text-fg-3" />
+          </Card>
+        </Link>
+      ))}
+    </div>
   )
 }
 

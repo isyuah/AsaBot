@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Cable, ChevronRight, Plus, Radio } from 'lucide-react'
+import { AnimatePresence, motion } from 'motion/react'
 import { Button } from '../components/ui/button.tsx'
 import { Badge, Card, EmptyState, ErrorState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
 import { api } from '../lib/api.ts'
 import { adapterPath, botPath, connectionPath } from '../lib/management.ts'
+import { useFadeUp } from '../lib/motion.ts'
 import { Link, navigate, usePath } from '../lib/router.tsx'
 import type { AdapterView, JsonSchema } from '../lib/types.ts'
 import { CapabilityPanel } from './bots.tsx'
@@ -33,6 +35,17 @@ function SchemaFields({ schema }: { schema: JsonSchema }) {
 }
 export function AdaptersPage() {
   const id = usePath().split('/')[2]
+  const fadeUp = useFadeUp()
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div key={id ?? '/adapters'} {...fadeUp}>
+        <AdapterContent id={id} />
+      </motion.div>
+    </AnimatePresence>
+  )
+}
+
+function AdapterContent({ id }: { id?: string }) {
   const adapters = useQuery({ queryKey: ['adapters'], queryFn: api.adapters })
   const connections = useQuery({ queryKey: ['connections'], queryFn: api.connections })
   const bots = useQuery({ queryKey: ['bots'], queryFn: api.bots })
@@ -107,7 +120,7 @@ export function AdaptersPage() {
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="space-y-5">
           <Card className="overflow-hidden">
-            <div className="px-5 pt-5">
+            <div className="px-5 py-4">
               <h2 className="text-sm font-semibold">适配器实现能力</h2>
             </div>
             <CapabilityPanel capabilities={adapter.capabilities} adapter />

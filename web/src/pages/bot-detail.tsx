@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Cable, Radio, Send } from 'lucide-react'
+import { AnimatePresence, motion } from 'motion/react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Avatar } from '../components/avatar.tsx'
@@ -10,7 +11,8 @@ import { PageTabs } from '../components/ui/misc.tsx'
 import { Badge, Card, EmptyState, ErrorState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
 import { api } from '../lib/api.ts'
 import { botPath, connectionPath, invalidatePolicies, timeText } from '../lib/management.ts'
-import { Link, navigate, usePath } from '../lib/router.tsx'
+import { useFadeUp } from '../lib/motion.ts'
+import { Link, navigate } from '../lib/router.tsx'
 import type { BotView, ChannelTarget, JsonSchema } from '../lib/types.ts'
 import { CapabilityPanel, GroupList, SendDialog } from './bots.tsx'
 import { ConnectionStatus } from './connections.tsx'
@@ -33,8 +35,9 @@ const tabs = [
   { value: 'settings', label: '设置' },
 ]
 
-export function BotDetailPage() {
-  const parts = usePath().split('/').filter(Boolean).map(decodeURIComponent)
+export function BotDetailPage({ path }: { path: string }) {
+  const fadeUp = useFadeUp()
+  const parts = path.split('/').filter(Boolean).map(decodeURIComponent)
   const identity = { platform: parts[1] ?? '', selfId: parts[2] ?? '' }
   const tab = parts[3] ?? 'overview'
   const client = useQueryClient()
@@ -86,94 +89,99 @@ export function BotDetailPage() {
         tabs={tabs}
         className="mb-5"
       />
-      {tab === 'overview' && (
-        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
-          <Card className="overflow-hidden">
-            <div className="px-5 pt-5">
-              <h2 className="text-sm font-semibold">机器人能力</h2>
-            </div>
-            <CapabilityPanel capabilities={bot.capabilities} />
-          </Card>
-          <div className="space-y-4">
-            <Card className="space-y-3 p-5">
-              <h2 className="flex items-center gap-2 text-sm font-semibold">
-                <Cable className="size-4 text-fg-3" />
-                关联连接
-              </h2>
-              {connection ? (
-                <>
-                  <Link to={connectionPath(connection.id)} className="block text-[13.5px] text-accent">
-                    {connection.name}
-                  </Link>
-                  <ConnectionStatus state={connection.state} />
-                  <p className="text-[12px] text-fg-3">最近上线 {timeText(connection.lastConnectedAt)}</p>
-                  {connection.lastError && (
-                    <p className="break-words text-[12.5px] text-danger">{connection.lastError}</p>
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div key={tab} {...fadeUp}>
+          {tab === 'overview' && (
+            <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+              <Card className="overflow-hidden">
+                <div className="px-5 py-4">
+                  <h2 className="text-sm font-semibold">机器人能力</h2>
+                </div>
+                <CapabilityPanel capabilities={bot.capabilities} />
+              </Card>
+              <div className="space-y-4">
+                <Card className="space-y-3 p-5">
+                  <h2 className="flex items-center gap-2 text-sm font-semibold">
+                    <Cable className="size-4 text-fg-3" />
+                    关联连接
+                  </h2>
+                  {connection ? (
+                    <>
+                      <Link to={connectionPath(connection.id)} className="block text-[13.5px] text-accent">
+                        {connection.name}
+                      </Link>
+                      <ConnectionStatus state={connection.state} />
+                      <p className="text-[12px] text-fg-3">最近上线 {timeText(connection.lastConnectedAt)}</p>
+                      {connection.lastError && (
+                        <p className="break-words text-[12.5px] text-danger">{connection.lastError}</p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-[13px] text-fg-3">{bot.connection || '程序注册的机器人'}</p>
                   )}
-                </>
+                </Card>
+                <Card className="p-5">
+                  <h2 className="text-sm font-semibold">插件应用</h2>
+                  <p className="mt-2 text-[13px] text-fg-3">
+                    {plugins.filter((plugin) => plugin.botEnabled && plugin.state === 'active').length}{' '}
+                    个插件生效
+                  </p>
+                  <Link to={botPath(bot, 'plugins')} className="mt-3 inline-block text-[13px] text-accent">
+                    管理插件与配置覆盖
+                  </Link>
+                </Card>
+                <Link
+                  to={`/logs?platform=${encodeURIComponent(bot.platform)}&selfId=${encodeURIComponent(bot.selfId)}`}
+                  className="block px-1 text-[13px] text-accent"
+                >
+                  查看机器人日志
+                </Link>
+              </div>
+            </div>
+          )}
+          {tab === 'plugins' && (
+            <BotPlugins key={parts[4] ?? 'all'} bot={bot} plugins={plugins} initialOpen={parts[4]} />
+          )}
+          {tab === 'groups' && (
+            <Card className="overflow-hidden">
+              {bot.status === 'online' ? (
+                <GroupList bot={bot} onSend={(id) => setSendTo({ bot, target: { type: 'group', id } })} />
               ) : (
-                <p className="text-[13px] text-fg-3">{bot.connection || '程序注册的机器人'}</p>
+                <EmptyState
+                  icon={<Radio />}
+                  title="机器人当前离线"
+                  description="连接恢复后可获取群列表，已保存的规则仍可在群组页面管理。"
+                  action={<Button onClick={() => navigate('/groups')}>已保存的群规则</Button>}
+                />
               )}
             </Card>
-            <Card className="p-5">
-              <h2 className="text-sm font-semibold">插件应用</h2>
-              <p className="mt-2 text-[13px] text-fg-3">
-                {plugins.filter((plugin) => plugin.botEnabled && plugin.state === 'active').length} 个插件生效
-              </p>
-              <Link to={botPath(bot, 'plugins')} className="mt-3 inline-block text-[13px] text-accent">
-                管理插件与配置覆盖
-              </Link>
-            </Card>
-            <Link
-              to={`/logs?platform=${encodeURIComponent(bot.platform)}&selfId=${encodeURIComponent(bot.selfId)}`}
-              className="block px-1 text-[13px] text-accent"
-            >
-              查看机器人日志
-            </Link>
-          </div>
-        </div>
-      )}
-      {tab === 'plugins' && (
-        <BotPlugins key={parts[4] ?? 'all'} bot={bot} plugins={plugins} initialOpen={parts[4]} />
-      )}
-      {tab === 'groups' && (
-        <Card className="overflow-hidden">
-          {bot.status === 'online' ? (
-            <GroupList bot={bot} onSend={(id) => setSendTo({ bot, target: { type: 'group', id } })} />
-          ) : (
-            <EmptyState
-              icon={<Radio />}
-              title="机器人当前离线"
-              description="连接恢复后可获取群列表，已保存的规则仍可在群组页面管理。"
-              action={<Button onClick={() => navigate('/groups')}>已保存的群规则</Button>}
-            />
           )}
-        </Card>
-      )}
-      {tab === 'settings' && (
-        <div className="max-w-3xl space-y-4">
-          <Card className="p-6">
-            <h2 className="mb-4 text-sm font-semibold">管理员</h2>
-            <SchemaForm
-              schema={adminSchema}
-              value={adminValue}
-              issues={{}}
-              saving={saveAdmins.isPending}
-              note="保存后立即生效"
-              submitLabel="保存管理员"
-              onSubmit={(value) => saveAdmins.mutate((value as { admins: string[] }).admins)}
-            />
-          </Card>
-          {bot.connectionId && (
-            <Card className="flex items-center justify-between gap-3 p-5">
-              <span className="text-sm text-fg-2">连接凭据、启停与重连</span>
-              <Link className="text-[13px] text-accent" to={connectionPath(bot.connectionId)}>
-                进入连接设置
-              </Link>
-            </Card>
+          {tab === 'settings' && (
+            <div className="max-w-3xl space-y-4">
+              <Card className="p-6">
+                <h2 className="mb-4 text-sm font-semibold">管理员</h2>
+                <SchemaForm
+                  schema={adminSchema}
+                  value={adminValue}
+                  issues={{}}
+                  saving={saveAdmins.isPending}
+                  note="保存后立即生效"
+                  submitLabel="保存管理员"
+                  onSubmit={(value) => saveAdmins.mutate((value as { admins: string[] }).admins)}
+                />
+              </Card>
+              {bot.connectionId && (
+                <Card className="flex items-center justify-between gap-3 p-5">
+                  <span className="text-sm text-fg-2">连接凭据、启停与重连</span>
+                  <Link className="text-[13px] text-accent" to={connectionPath(bot.connectionId)}>
+                    进入连接设置
+                  </Link>
+                </Card>
+              )}
+            </div>
           )}
-        </div>
-      )}
+        </motion.div>
+      </AnimatePresence>
       <SendDialog state={sendTo} onClose={() => setSendTo(null)} />
     </>
   )

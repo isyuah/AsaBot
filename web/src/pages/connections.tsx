@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Cable, ChevronRight, Copy, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { ArrowLeft, Cable, ChevronRight, Copy, RefreshCw, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { SchemaForm } from '../components/schema-form.tsx'
@@ -18,7 +18,7 @@ import {
 import { Select } from '../components/ui/select.tsx'
 import { ApiError, api } from '../lib/api.ts'
 import { adapterPath, botPath, connectionPath, timeText } from '../lib/management.ts'
-import { Link, navigate, usePath } from '../lib/router.tsx'
+import { Link, navigate } from '../lib/router.tsx'
 import type { AdapterView, ConnectionInput, ConnectionView, JsonSchema } from '../lib/types.ts'
 
 const status: Record<ConnectionView['state'], { label: string; tone: Tone }> = {
@@ -50,8 +50,8 @@ export function RobotTabs({ view }: { view: 'bots' | 'connections' }) {
     />
   )
 }
-export function ConnectionsPage() {
-  const path = usePath().split('/').filter(Boolean).map(decodeURIComponent)
+export function ConnectionsPage({ path }: { path: string }) {
+  const parts = path.split('/').filter(Boolean).map(decodeURIComponent)
   const connections = useQuery({ queryKey: ['connections'], queryFn: api.connections })
   const adapters = useQuery({ queryKey: ['adapters'], queryFn: api.adapters })
   if (connections.error || adapters.error)
@@ -65,10 +65,10 @@ export function ConnectionsPage() {
       />
     )
   if (!connections.data || !adapters.data) return <Skeleton className="h-64 rounded-xl" />
-  if (path[2] === 'new')
-    return <ConnectionEditor key={path.join('/')} adapters={adapters.data} initialAdapter={path[3]} />
-  if (path[2]) {
-    const connection = connections.data.find((item) => item.id === path[2])
+  if (parts[2] === 'new')
+    return <ConnectionEditor key={parts.join('/')} adapters={adapters.data} initialAdapter={parts[3]} />
+  if (parts[2]) {
+    const connection = connections.data.find((item) => item.id === parts[2])
     return connection ? (
       <ConnectionEditor key={connection.id} connection={connection} adapters={adapters.data} />
     ) : (
@@ -81,17 +81,6 @@ export function ConnectionsPage() {
   }
   return (
     <>
-      <PageHeader
-        title="机器人"
-        description="管理机器人账号与平台连接"
-        actions={
-          <Button variant="primary" onClick={() => navigate('/bots/connections/new')}>
-            <Plus className="size-4" />
-            添加连接
-          </Button>
-        }
-      />
-      <RobotTabs view="connections" />
       {!connections.data.length ? (
         <Card>
           <EmptyState
