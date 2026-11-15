@@ -10,6 +10,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./testing": "./src/testing/index.ts",
+    "./feishu": "./src/adapters/feishu/index.ts",
     "./onebot11": "./src/adapters/onebot11/index.ts",
     "./onebot11/testing": "./src/adapters/onebot11/testing.ts"
   },
@@ -26,6 +27,10 @@
       "./testing": {
         "types": "./dist/testing/index.d.ts",
         "default": "./dist/testing/index.js"
+      },
+      "./feishu": {
+        "types": "./dist/adapters/feishu/index.d.ts",
+        "default": "./dist/adapters/feishu/index.js"
       },
       "./onebot11": {
         "types": "./dist/adapters/onebot11/index.d.ts",
@@ -59,6 +64,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.6",
+    "@larksuiteoapi/node-sdk": "^1.76.0",
     "croner": "^11.0.0",
     "fflate": "^0.8.3",
     "hono": "^4.13.17",

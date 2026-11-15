@@ -1462,6 +1462,13 @@ type HttpInit = RequestInit & { timeout?: Duration; proxy?: boolean | string; ma
 5. **F1b**：脚手架、JSDoc、README，然后按 24.12 的流程验证并发布。
 6. **面板**（我编写，接口就绪后进行）：能力表、命令管理、群组页、消息记录、调试台增强、插件页面宿主、设置项 `command.suggest`。
 
+## 飞书第二适配器
+
+- `adapters.feishu.accounts[{appId,appSecret}]` 支持多个国内飞书企业自建应用，使用官方 SDK 长连接。SDK ready/reconnecting/error 驱动机器人状态，关闭和重配置回收连接并隔离旧回调。
+- 平台 ID 为机器人/用户 open_id、群 chat_id；平台专属 API 和类型从 `@asabot/core/feishu` 导出，核心保持协议无关。
+- 收发文本、提及、引用、富文本、图片和文件；媒体统一限制超时和大小。混合消息按原顺序拆分，逐条记录发送，返回最后 ID。成员、机器人进退群与撤回事件按可用身份信息映射，事件使用有界 TTL 去重。
+- 配置、权限和真实联调步骤见 [FEISHU.md](FEISHU.md)。本轮不增加业务内置插件。
+
 ## 已知限制
 
 - **取消是协作式的**：插件代码如果不理会 `signal`，被取消（超时、卸载、退出）后仍会继续执行；框架只是不再等待它，也不会自动发送它的返回值。

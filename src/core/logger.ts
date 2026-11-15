@@ -11,10 +11,12 @@ const redactedFields = [
   'token',
   'password',
   'apiToken',
+  'appSecret',
   '*.accessToken',
   '*.token',
   '*.password',
   '*.apiToken',
+  '*.appSecret',
 ]
 // A subscriber failure cannot be sent through the same ring buffer without recursing.
 const subscriberErrorLogger = pino(

@@ -40,6 +40,13 @@ dispatch:
   maxPromptTimeout: 30m
 
 adapters:
+  # 飞书长连接，可与 OneBot 同时启用，详见 docs/FEISHU.md。
+  # feishu:
+  #   accounts:
+  #     - appId: ${FEISHU_APP_ID}
+  #       appSecret: ${FEISHU_APP_SECRET}
+  #   apiTimeout: 30s
+  #   mediaMaxBytes: 20971520
   onebot11:
     # 调用 OneBot API 的超时时间
     apiTimeout: 30s

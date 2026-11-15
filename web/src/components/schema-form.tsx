@@ -14,7 +14,7 @@ type Issues = Record<string, string>
 
 const primitives = new Set(['string', 'number', 'integer', 'boolean'])
 /** Keys whose values the server masks; mirrors the redaction list of the backend. */
-const secretKeys = new Set(['accessToken', 'token', 'password', 'apiToken'])
+const secretKeys = new Set(['accessToken', 'token', 'password', 'apiToken', 'appSecret'])
 
 /**
  * The field type, with one addition: `scalar` for an anyOf of primitives (e.g. durations accepted as 30000 or

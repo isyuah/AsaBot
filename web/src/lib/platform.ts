@@ -12,7 +12,7 @@ export function isValidId(value: string): boolean {
   return /^\S+$/.test(value.trim())
 }
 
-const platformNames: Record<string, string> = { onebot11: 'OneBot 11', virtual: '虚拟适配器' }
+const platformNames: Record<string, string> = { onebot11: 'OneBot 11', feishu: '飞书', virtual: '虚拟适配器' }
 
 /** Display name of an adapter platform; unknown platforms show their raw identifier. */
 export function platformName(platform: string): string {

@@ -12,7 +12,7 @@ import { writeConfigValue } from '../core/config/write.ts'
 import { constantTimeEqual } from '../core/utils/security.ts'
 
 const placeholder = '********'
-const sensitive = new Set(['accessToken', 'token', 'password', 'apiToken'])
+const sensitive = new Set(['accessToken', 'token', 'password', 'apiToken', 'appSecret'])
 const reference = /^\$\{[A-Za-z_][A-Za-z\d_]*(?::-[^}]*)?\}$/
 
 const commandInput = z
