@@ -1,4 +1,4 @@
-const sensitiveKey = /token|password|secret|authorization|^_auth$/i
+const sensitiveKey = /token|password|secret|authorization|credential|api[_-]?key|private[_-]?key|^_auth$/i
 
 function secretsIn(value: unknown, key = ''): string[] {
   if (typeof value === 'string') return sensitiveKey.test(key) && value ? [value] : []
@@ -12,9 +12,10 @@ function secretsIn(value: unknown, key = ''): string[] {
 export function redactText(value: string, config?: unknown): string {
   let result = value
     .replace(
-      /(\b(?:\w*token|\w*password|\w*secret|authorization|_auth)\b["']?\s*[=:]\s*["']?)(?:bearer\s+)?[^\s,"';}]+/gi,
+      /(\b(?:[\w-]*(?:token|password|secret)|authorization|credential|api[_-]?key|private[_-]?key|_auth)\b["']?\s*[=:]\s*["']?)(?:bearer\s+)?[^\s,"';}]+/gi,
       '$1[Redacted]',
     )
+    .replace(/\bBearer\s+[A-Za-z\d._~+/-]+=*/gi, 'Bearer [Redacted]')
     .replace(/(https?:\/\/)[^\s/@]+(?::[^\s/@]*)?@/gi, '$1[Redacted]@')
   const secrets = [
     ...secretsIn(config),

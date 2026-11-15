@@ -30,6 +30,35 @@ async function fixture(setup: (ctx: Context) => void | Promise<void>, tasks = {}
 }
 
 describe('task reliability', () => {
+  it('keeps a persisted outcome when its plugin unloads before execution cleanup', async () => {
+    let context!: Context
+    let task!: TaskHandle<null>
+    const app = await fixture((ctx) => {
+      context = ctx
+      task = ctx.task('completed', () => {})
+    })
+    const disposed = Promise.withResolvers<void>()
+    const prepare = app.storage.db.prepare.bind(app.storage.db)
+    let queued = false
+    const spy = vi.spyOn(app.storage.db, 'prepare').mockImplementation((sql) => {
+      if (!queued && sql.startsWith('UPDATE task_attempts SET outcome = ?')) {
+        queued = true
+        queueMicrotask(() => {
+          void context.dispose().then(disposed.resolve, disposed.reject)
+        })
+      }
+      return prepare(sql)
+    })
+    try {
+      task.schedule(null, { delay: 0, key: 'one' })
+      await disposed.promise
+      const record = app.tasks.query().items[0]
+      expect(record).toMatchObject({ state: 'succeeded', attempt: 1 })
+      expect(app.tasks.attempts(record?.id ?? '').map((a) => a.outcome)).toEqual(['succeeded'])
+    } finally {
+      spy.mockRestore()
+    }
+  })
   it('retries persisting results without rerunning callbacks or releasing concurrency', async () => {
     let task!: TaskHandle<number>
     const calls: number[] = []

@@ -114,6 +114,7 @@ interface Execution {
   releasePersistence?: () => void
   reason?: 'user' | 'superseded' | 'timeout' | 'interrupted'
   detached: boolean
+  persisted: boolean
 }
 
 type Row = Record<string, unknown>
@@ -225,7 +226,7 @@ export class TaskService {
     this.registrations.delete(identity(registration.plugin, registration.name))
     registration.active = false
     for (const execution of this.running.values()) {
-      if (execution.registration !== registration || execution.detached) continue
+      if (execution.registration !== registration || execution.detached || execution.persisted) continue
       execution.detached = true
       execution.cancelTimeout?.()
       execution.releasePersistence?.()
@@ -520,6 +521,7 @@ export class TaskService {
       registration,
       controller: new AbortController(),
       detached: false,
+      persisted: false,
     }
     this.running.set(task.id, execution)
     const lock = identity(task.plugin, task.name, task.key)
@@ -578,6 +580,7 @@ export class TaskService {
     while (this.alive && !execution.detached) {
       try {
         this.finish(execution, failure)
+        execution.persisted = true
         return
       } catch (error) {
         this.logger.error(

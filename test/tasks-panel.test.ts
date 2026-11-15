@@ -41,7 +41,11 @@ describe('task center', () => {
       socket.on('message', (data) => frames.push(JSON.parse(data.toString())))
       await once(socket, 'open')
       task.schedule(
-        { token: 'nested-token', nested: { appSecret: 'nested-secret', text: 'password=secret' } },
+        {
+          token: 'nested-token',
+          apiKey: 'api-key-value',
+          nested: { appSecret: 'nested-secret', text: 'password=secret' },
+        },
         { delay: 0, key: 'fail' },
       )
       task.schedule({}, { delay: '1d', key: 'later' })
@@ -50,7 +54,11 @@ describe('task center', () => {
       const result = await (await request('/tasks?state=failed&plugin=jobs&limit=1')).json()
       expect(result.total).toBe(1)
       expect(result.items[0]).toMatchObject({
-        payload: { token: '[Redacted]', nested: { appSecret: '[Redacted]', text: 'password=[Redacted]' } },
+        payload: {
+          token: '[Redacted]',
+          apiKey: '[Redacted]',
+          nested: { appSecret: '[Redacted]', text: 'password=[Redacted]' },
+        },
         error: 'appSecret=[Redacted] failure',
       })
       expect((await request('/tasks?limit=1000')).status).toBe(400)
