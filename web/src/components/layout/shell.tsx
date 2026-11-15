@@ -22,6 +22,7 @@ import { PlaygroundPage } from '../../pages/playground.tsx'
 import { PluginPageHost } from '../../pages/plugin-page.tsx'
 import { PluginsPage } from '../../pages/plugins.tsx'
 import { SettingsPage } from '../../pages/settings.tsx'
+import { TasksPage } from '../../pages/tasks.tsx'
 import { CommandPalette } from '../command-palette.tsx'
 import { OperationsDock } from '../plugin-manage.tsx'
 import { Button } from '../ui/button.tsx'
@@ -41,6 +42,7 @@ const pages: Record<string, ComponentType> = {
   '/logs': LogsPage,
   '/acl': AclPage,
   '/settings': SettingsPage,
+  '/tasks': TasksPage,
 }
 
 /** The page for a path; `key` drives the page transition, so in-page sub-routes (a group's sheet) don't re-animate. */
@@ -48,6 +50,7 @@ function resolveRoute(path: string): { key: string; Page: ComponentType } {
   const page = pages[path]
   if (page) return { key: path, Page: page }
   if (path.startsWith('/groups/')) return { key: '/groups', Page: GroupsPage }
+  if (path.startsWith('/tasks/')) return { key: '/tasks', Page: TasksPage }
   if (path.startsWith('/pages/')) return { key: path, Page: PluginPageHost }
   return { key: path, Page: NotFoundPage }
 }

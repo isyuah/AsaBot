@@ -359,6 +359,8 @@ remind.schedule({ target: 'onebot11:group:123456', text: '开会了' }, { delay:
 
 `at` 与 `delay` 二选一；同键 schedule 替换旧任务并等待旧回调退出。自动重试默认关闭，超时与取消通过 `signal` 协作。`get(key)` 查看最新状态，`attempts(key)` 查看执行历史，`retry(key)` 重试失败任务，`cancel(key)` 取消未完成任务。处理器在插件 setup 成功后开始执行；中断后恢复采用至少一次语义，涉及外部副作用时应自行保证幂等。全局默认并发 4，终态历史保留 7 天、最多 10000 条。
 
+Web 面板的「任务中心」支持筛选、分页、查看参数和执行历史、取消未完成任务与重试失败任务。参数中的凭据字段会脱敏；定时器 `cron/interval/timeout` 不进入任务中心。
+
 ### 按群开关与热重载
 
 `ctx.platform('onebot11').filter(event => groupKeyOf(event) === 'onebot11:123').command('hello')` 只在对应平台和群生效；`groupKeyOf` 从 `@asabot/core` 导入，过滤条件可以链式组合。过滤上下文支持注册观察者、中间件、命令和匹配器，资源仍随插件卸载回收。

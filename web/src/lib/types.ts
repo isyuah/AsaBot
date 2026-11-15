@@ -383,6 +383,7 @@ export interface LiveMessage {
 }
 
 export type ServerFrame =
+  | { type: 'task'; id?: string }
   | { type: 'hello'; overview: Overview }
   | { type: 'log'; record: LogRecord }
   | { type: 'bot'; bot: BotView }
@@ -394,4 +395,42 @@ export type ServerFrame =
 
 export interface ApiErrorBody {
   error: { code: string; message: string; issues?: { path: string; message: string }[] }
+}
+
+export type TaskState =
+  | 'pending'
+  | 'running'
+  | 'retry_wait'
+  | 'cancelling'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+export interface TaskRecord {
+  id: string
+  plugin: string
+  name: string
+  key: string
+  payload: unknown
+  state: TaskState
+  runAt: number
+  nextRunAt: number
+  createdAt: number
+  updatedAt: number
+  startedAt?: number
+  finishedAt?: number
+  attempt: number
+  failures: number
+  policy: { maxRetries: number; delay: number; maxDelay: number; timeout?: number }
+  error?: string
+  blockedReason?: string
+  canRetry: boolean
+}
+export interface TaskAttempt {
+  id: string
+  taskId: string
+  attempt: number
+  startedAt: number
+  finishedAt?: number
+  outcome: 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted' | 'timeout'
+  error?: string
 }

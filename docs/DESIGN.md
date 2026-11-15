@@ -865,6 +865,8 @@ remind.retry(key): boolean // 手动重试失败任务
 - **生命周期与清理**：卸载时 abort 回调、解除处理器；旧回调完成后释放锁，不允许回写已恢复或 purge 的任务。终态默认保留 7 天、最多 10000 条，运行中和待执行任务不清理。purge 删除插件任务和尝试记录。
 - 任务时间是绝对时间戳，与 `timezone` 无关。
 
+任务中心只管理 `ctx.task`，不包含 cron/interval/timeout。面板提供 `GET /api/panel/tasks`（plugin/name/state/q/offset/limit 服务端筛选分页）、`GET /tasks/:id`、`GET /tasks/:id/attempts`、`POST /tasks/:id/cancel` 和 `POST /tasks/:id/retry`，沿用面板认证及 Origin 验证。WebSocket 发送无参数内容的 task 变更通知，客户端失效查询后重新获取脱敏视图。面板不创建或编辑插件任务。
+
 **A9 发送前钩子（修订 7、12）**
 ```ts
 ctx.beforeSend(

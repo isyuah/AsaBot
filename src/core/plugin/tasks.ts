@@ -23,14 +23,14 @@ export type TaskOutcome = 'running' | 'succeeded' | 'failed' | 'cancelled' | 'in
 /** at 和 delay 必须且只能提供一个；相同逻辑键替换旧任务。 */
 export interface TaskOptions {
   at?: Date | number
-  delay?: Duration
+  delay?: Duration | string
   key?: string
 }
 
 /** 默认不自动重试、不限制执行时长；中止始终是协作式的。 */
 export interface TaskRegistrationOptions {
-  retry?: { maxRetries: number; delay?: Duration; maxDelay?: Duration }
-  timeout?: Duration
+  retry?: { maxRetries: number; delay?: Duration | string; maxDelay?: Duration | string }
+  timeout?: Duration | string
 }
 
 export interface TaskPolicy {
@@ -247,7 +247,9 @@ export class TaskService {
     if ((options.at === undefined) === (options.delay === undefined))
       throw new TypeError('必须且只能指定 at 或 delay')
     const runAt =
-      options.at === undefined ? Date.now() + parseDuration(options.delay as Duration) : Number(options.at)
+      options.at === undefined
+        ? Date.now() + parseDuration(options.delay as Duration | string)
+        : Number(options.at)
     if (!Number.isFinite(runAt)) throw new TypeError('无效的任务时间')
     const json = JSON.stringify(payload)
     if (json === undefined) throw new TypeError('任务 payload 必须可以序列化为 JSON')

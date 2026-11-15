@@ -46,6 +46,9 @@ function applyFrame(
   pendingLogs: LogRecord[] | null,
 ) {
   switch (frame.type) {
+    case 'task':
+      void client.invalidateQueries({ queryKey: ['tasks'] })
+      break
     case 'hello':
       client.setQueryData<Overview>(['overview'], frame.overview)
       client.setQueryData<BotView[]>(['bots'], frame.overview.bots)

@@ -26,6 +26,8 @@ import type {
   SetupInput,
   StatsPoint,
   Target,
+  TaskAttempt,
+  TaskRecord,
 } from './types.ts'
 
 export class ApiError extends Error {
@@ -90,6 +92,12 @@ export const api = {
   logout: () => request<unknown>('POST', '/logout', {}),
 
   overview: () => request<Overview>('GET', '/overview'),
+  tasks: (filters: Record<string, string>) =>
+    request<{ items: TaskRecord[]; total: number }>('GET', `/tasks?${new URLSearchParams(filters)}`),
+  task: (id: string) => request<TaskRecord>('GET', `/tasks/${encode(id)}`),
+  taskAttempts: (id: string) => request<TaskAttempt[]>('GET', `/tasks/${encode(id)}/attempts`),
+  taskAction: (id: string, action: 'cancel' | 'retry') =>
+    request<TaskRecord>('POST', `/tasks/${encode(id)}/${action}`, {}),
   stats: (range: '1h' | '24h') => request<StatsPoint[]>('GET', `/stats/messages?range=${range}`),
 
   bots: () => request<BotView[]>('GET', '/bots'),

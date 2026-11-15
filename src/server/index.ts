@@ -19,7 +19,9 @@ import type { MessageSentEvent } from '../core/event/index.ts'
 import { getRecentLogs, subscribeLogs } from '../core/logger.ts'
 import { plainText } from '../core/message/index.ts'
 import type { PackageOperation } from '../core/plugin/packages.ts'
+import { TaskConflictError, taskStates } from '../core/plugin/tasks.ts'
 import { ManagementError } from '../core/plugin/upload.ts'
+import { redactValue } from '../core/utils/redact.ts'
 import { constantTimeEqual } from '../core/utils/security.ts'
 import { PanelAuth } from './auth.ts'
 import { Groups } from './groups.ts'
@@ -452,6 +454,45 @@ export class HttpServer implements ServerService {
     panel.get('/settings', async (c) => c.json(await this.settings.get()))
     panel.put('/settings', async (c) => c.json(await this.settings.update(await body(c, settingsInput))))
     panel.get('/overview', (c) => c.json(overview(this.app)))
+    const requireTask = (id: string) => {
+      const task = this.app.tasks.get(id)
+      if (!task) throw new HttpError(404, 'NOT_FOUND', '任务不存在或历史已清理')
+      return task
+    }
+    panel.get('/tasks', (c) => {
+      const input = z
+        .object({
+          plugin: z.string().max(200).optional(),
+          name: z.string().max(200).optional(),
+          state: z.enum(taskStates).optional(),
+          q: z.string().max(200).optional(),
+          offset: z.coerce.number().int().nonnegative().default(0),
+          limit: z.coerce.number().int().min(1).max(100).default(25),
+        })
+        .strict()
+        .safeParse(c.req.query())
+      if (!input.success) throw new HttpError(400, 'BAD_REQUEST', '无效的任务筛选条件')
+      return c.json(redactValue(this.app.tasks.query(input.data), this.app.config))
+    })
+    panel.get('/tasks/:id', (c) => c.json(redactValue(requireTask(c.req.param('id')), this.app.config)))
+    panel.get('/tasks/:id/attempts', (c) => {
+      requireTask(c.req.param('id'))
+      return c.json(redactValue(this.app.tasks.attempts(c.req.param('id')), this.app.config))
+    })
+    panel.post('/tasks/:id/cancel', (c) => {
+      const id = requireTask(c.req.param('id')).id
+      if (!this.app.tasks.cancel(id)) throw new HttpError(409, 'CONFLICT', '任务已结束或正在取消')
+      return c.json(redactValue(this.app.tasks.get(id), this.app.config))
+    })
+    panel.post('/tasks/:id/retry', (c) => {
+      const id = requireTask(c.req.param('id')).id
+      try {
+        return c.json(redactValue(this.app.tasks.retry(id), this.app.config))
+      } catch (error) {
+        if (error instanceof TaskConflictError) throw new HttpError(409, 'CONFLICT', error.message)
+        throw error
+      }
+    })
     panel.get('/stats/messages', (c) => {
       const range = c.req.query('range') ?? '1h'
       if (range !== '1h' && range !== '24h') throw new HttpError(400, 'BAD_REQUEST', 'Invalid range')
@@ -787,6 +828,7 @@ export class HttpServer implements ServerService {
     const unsubscribePanelEvents = this.app.subscribePanelEvents((event) =>
       push({ type: 'plugin-event', ...event }),
     )
+    const unsubscribeTasks = this.app.tasks.subscribe((id) => push({ type: 'task', id }))
     const ping = setInterval(() => {
       if (client.readyState !== WebSocket.OPEN) return
       if (this.auth.authenticated(cookie)) client.ping()
@@ -818,6 +860,7 @@ export class HttpServer implements ServerService {
       unsubscribePackageUpdates()
       unsubscribeEvents()
       unsubscribePanelEvents()
+      unsubscribeTasks()
     })
   }
 

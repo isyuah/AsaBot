@@ -47,6 +47,7 @@ export const navGroups: { label: string; items: NavItem[] }[] = [
   {
     label: '运维',
     items: [
+      { to: '/tasks', label: '任务中心', icon: ListChecks },
       { to: '/logs', label: '日志', icon: ScrollText },
       { to: '/acl', label: '访问控制', icon: ShieldCheck },
       { to: '/settings', label: '设置', icon: Settings },
