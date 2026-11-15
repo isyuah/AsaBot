@@ -1,19 +1,23 @@
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { createServer } from 'node:http'
+import { EventDispatcher } from '@larksuiteoapi/node-sdk'
 import { describe, expect, it, vi } from 'vitest'
 import {
   FeishuAdapter,
+  type FeishuBot,
+  type FeishuCardActionEvent,
   type FeishuEventHandlers,
   type FeishuLifecycle,
   type FeishuRequest,
   type FeishuTransport,
+  feishu,
   feishuSchema,
   isFeishu,
+  isFeishuCardAction,
 } from '../src/adapters/feishu/index.ts'
 import { incomingMessage, readMedia } from '../src/adapters/feishu/message.ts'
-import type { Bot } from '../src/core/bot.ts'
-import { definePlugin, seg } from '../src/index.ts'
+import { definePlugin, seg, z } from '../src/index.ts'
 import { createTestApp } from '../src/testing/index.ts'
 
 const account = { appId: 'cli_0123456789abcdef', appSecret: 'test-app-secret' }
@@ -75,7 +79,8 @@ async function fixture(plugins: Parameters<typeof createTestApp>[0] = {}, config
   await vi.waitFor(() =>
     expect(t.app.bots.list().filter((b) => b.platform === 'feishu' && b.status === 'online')).toHaveLength(1),
   )
-  const bot = t.app.bots.list().find(isFeishu) as Bot
+  const bot = t.app.bots.list().find(isFeishu)
+  if (!bot) throw new Error('Feishu bot missing')
   return { ...t, adapter, transports, transport: transports[0] as MockTransport, bot }
 }
 
@@ -100,7 +105,193 @@ function message(
   }
 }
 
+function cardAction(action: Record<string, unknown>) {
+  return {
+    event_id: randomUUID(),
+    host: 'im_message',
+    operator: { open_id: 'ou_user' },
+    context: { open_message_id: 'om_card', open_chat_id: 'oc_group' },
+    action,
+  }
+}
+
+function commandValue(bot: FeishuBot, command: string): Record<string, unknown> {
+  return z
+    .object({ behaviors: z.tuple([z.object({ value: z.record(z.string(), z.unknown()) })]) })
+    .parse(bot.feishu.commandButton('执行', command)).behaviors[0].value
+}
+
 describe('Feishu adapter', () => {
+  it('sends native cards and markdown and updates cards through the API', async () => {
+    const t = await fixture()
+    try {
+      const card = feishu.message(
+        [
+          feishu.form('request', [
+            feishu.input('reason', { required: true }),
+            feishu.select('priority', [{ label: '高', value: 'high' }]),
+            feishu.submit('提交', 'submit'),
+          ]),
+        ],
+        '申请',
+      )
+      const result = await t.bot.feishu.sendCard({ type: 'group', id: 'oc_group' }, card)
+      await t.bot.feishu.updateCard(result.messageId, feishu.message([feishu.markdown('已完成')]))
+      await t.bot.sendPrivate('ou_user', [
+        seg.markdown('**原生 Markdown**'),
+        seg.button('执行', { command: '/who' }),
+      ])
+      const requests = t.transport.requests.filter((r) => ['POST', 'PATCH'].includes(r.method))
+      expect(requests.map((r) => r.input?.data?.msg_type)).toEqual([
+        'interactive',
+        undefined,
+        'interactive',
+        'interactive',
+      ])
+      expect(JSON.parse(String(requests[0]?.input?.data?.content))).toEqual(card)
+      expect(requests[1]?.path).toBe(`/im/v1/messages/${result.messageId}`)
+      expect(JSON.stringify(requests)).not.toContain(account.appSecret)
+    } finally {
+      await t.dispose()
+    }
+  })
+
+  it('normalizes SDK card callbacks, keeps full form data and responds only once', async () => {
+    const events: FeishuCardActionEvent[] = []
+    const acceptances: boolean[] = []
+    const t = await fixture({
+      plugins: [
+        definePlugin({
+          name: 'forms',
+          setup(ctx) {
+            ctx.on('notice.feishu.card.action', (event) => {
+              if (!isFeishuCardAction(event)) return
+              events.push(event)
+              acceptances.push(
+                event.respond({
+                  toast: { type: 'success', content: '已提交' },
+                  card: { type: 'raw', data: feishu.message([feishu.markdown('处理中')]) },
+                }),
+              )
+              acceptances.push(event.respond({}))
+            })
+          },
+        }),
+      ],
+    })
+    try {
+      const raw = cardAction({
+        tag: 'button',
+        name: 'submit',
+        value: { action: 'create' },
+        form_value: { reason: '完整内容', people: ['ou_a', 'ou_b'], nested: { checked: true } },
+      })
+      const { event_id, ...event } = raw
+      const dispatcher = new EventDispatcher({ loggerLevel: 0 }).register(t.transport.handlers)
+      const response = await dispatcher.invoke(
+        { schema: '2.0', header: { event_id, event_type: 'card.action.trigger' }, event },
+        { needCheck: false },
+      )
+      expect(response).toMatchObject({ toast: { type: 'success' }, card: { type: 'raw' } })
+      expect(await t.transport.receive('card.action.trigger', raw)).toEqual(response)
+      expect(events).toHaveLength(1)
+      expect(acceptances).toEqual([true, false])
+      expect(events[0]).toMatchObject({
+        userId: 'ou_user',
+        groupId: 'oc_group',
+        sender: { role: 'owner' },
+        action: { formValue: { reason: '完整内容', people: ['ou_a', 'ou_b'], nested: { checked: true } } },
+      })
+    } finally {
+      await t.dispose()
+    }
+  })
+
+  it('routes signed buttons as the clicking user and keeps forms out of commands', async () => {
+    const executed: string[] = []
+    const t = await fixture({
+      plugins: [
+        definePlugin({
+          name: 'buttons',
+          setup(ctx) {
+            ctx.on('notice.feishu.card.action', (event) => {
+              if (isFeishuCardAction(event)) event.respond({})
+            })
+            ctx.command('who').action(({ session }) => {
+              executed.push(session.userId)
+              return undefined
+            })
+            ctx
+              .command('secure')
+              .permission('superuser')
+              .action(() => {
+                executed.push('privileged')
+              })
+          },
+        }),
+      ],
+    })
+    try {
+      await t.transport.receive(
+        'card.action.trigger',
+        cardAction({ tag: 'button', value: commandValue(t.bot, '/who') }),
+      )
+      await t.app.whenIdle()
+      expect(executed).toEqual(['ou_user'])
+      await t.transport.receive(
+        'card.action.trigger',
+        cardAction({ tag: 'button', value: commandValue(t.bot, '/secure') }),
+      )
+      await t.transport.receive(
+        'card.action.trigger',
+        cardAction({ tag: 'button', value: commandValue(t.bot, '/who'), form_value: { reason: '/who' } }),
+      )
+      await t.transport.receive(
+        'card.action.trigger',
+        cardAction({ tag: 'button', value: { __asabot_command: { command: '/who', signature: 'forged' } } }),
+      )
+      await t.app.whenIdle()
+      expect(executed).toEqual(['ou_user'])
+      t.app.plugins.setGroupEnabled('buttons', 'feishu:oc_group', false)
+      await t.transport.receive(
+        'card.action.trigger',
+        cardAction({ tag: 'button', value: commandValue(t.bot, '/who') }),
+      )
+      await t.app.whenIdle()
+      expect(executed).toEqual(['ou_user'])
+    } finally {
+      await t.dispose()
+    }
+  })
+
+  it('returns the callback deadline while business work continues and rejects late responses', async () => {
+    let event: FeishuCardActionEvent | undefined
+    const t = await fixture({
+      plugins: [
+        definePlugin({
+          name: 'slow-form',
+          setup(ctx) {
+            ctx.on('notice.feishu.card.action', (value) => {
+              if (isFeishuCardAction(value)) event = value
+            })
+          },
+        }),
+      ],
+    })
+    try {
+      const response = t.transport.receive(
+        'card.action.trigger',
+        cardAction({ tag: 'input', name: 'reason', input_value: '输入内容' }),
+      )
+      await vi.waitFor(() => expect(event?.action.inputValue).toBe('输入内容'))
+      expect(await response).toEqual({})
+      expect(event?.respond({ toast: { type: 'success', content: '太晚' } })).toBe(false)
+      await t.bot.feishu.updateCard('om_card', feishu.message([feishu.markdown('后台任务完成')]))
+      expect(t.transport.requests.at(-1)?.method).toBe('PATCH')
+    } finally {
+      await t.dispose()
+    }
+  })
   it('receives, deduplicates and dispatches commands with quoting and mention identity', async () => {
     const received: unknown[] = []
     const t = await fixture({

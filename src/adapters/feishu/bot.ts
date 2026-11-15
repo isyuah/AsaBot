@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHmac, randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { AdapterHost } from '../../core/adapter.ts'
 import type {
@@ -18,11 +18,16 @@ import type { Session } from '../../core/event/index.ts'
 import { isSegment, type Message, normalizeSendable, type Sendable } from '../../core/message/index.ts'
 import { LruSet } from '../../core/utils/lru.ts'
 import { redactText } from '../../core/utils/redact.ts'
+import { constantTimeEqual } from '../../core/utils/security.ts'
+import { cardSchema, type FeishuCard, type FeishuElement, feishu } from './cards.ts'
 import type { FeishuConfig } from './config.ts'
 import { incomingMessage, readMedia } from './message.ts'
 import type { FeishuRequest, FeishuTransport } from './transport.ts'
 
 export interface FeishuApi {
+  sendCard(target: MessageTarget, card: FeishuCard): Promise<SendResult>
+  updateCard(messageId: string, card: FeishuCard): Promise<void>
+  commandButton(label: string, command: string): FeishuElement
   downloadResource(messageId: string, key: string, type: 'image' | 'file'): Promise<Buffer>
 }
 export interface FeishuBot extends Bot {
@@ -36,6 +41,7 @@ const envelope = z.object({ code: z.number(), msg: z.string().optional() }).pass
 const sentSchema = z.object({ message_id: z.string().min(1) })
 const memberSchema = z.object({ member_id: z.string(), name: z.string().default('') })
 const chatSchema = z.object({
+  chat_mode: z.enum(['group', 'p2p', 'topic']).optional(),
   owner_id: z.string().optional(),
   user_manager_id_list: z.array(z.string()).default([]),
 })
@@ -43,7 +49,7 @@ const chatSchema = z.object({
 export class FeishuBotImpl implements FeishuBot {
   readonly platform = 'feishu'
   readonly capabilities = {
-    segments: ['text', 'at', 'reply', 'image', 'file'],
+    segments: ['text', 'at', 'reply', 'image', 'file', 'markdown', 'button', 'feishu:card'],
     textStyles: ['bold', 'italic', 'underline', 'strike', 'code'] as const,
     actions: [
       'sendPrivate',
@@ -66,20 +72,45 @@ export class FeishuBotImpl implements FeishuBot {
   private readonly host: AdapterHost
   private readonly transport: FeishuTransport
   private readonly config: FeishuConfig
+  private readonly buttonSecret: string
   private readonly roles = new Map<
     string,
     { expires: number; value: Promise<z.output<typeof chatSchema> | undefined> }
   >()
 
-  constructor(host: AdapterHost, transport: FeishuTransport, self: UserInfo, config: FeishuConfig) {
+  constructor(
+    host: AdapterHost,
+    transport: FeishuTransport,
+    self: UserInfo,
+    config: FeishuConfig,
+    buttonSecret: string,
+  ) {
     this.host = host
     this.transport = transport
     this.selfId = self.userId
     this.nickname = self.nickname
     this.config = config
+    this.buttonSecret = buttonSecret
     this.feishu = {
-      downloadResource: (messageId, key, type) =>
-        this.host.invokeApi(
+      sendCard: (target, card) =>
+        target.type === 'group'
+          ? this.sendGroup(target.id, feishu.card(card))
+          : this.sendPrivate(target.id, feishu.card(card)),
+      commandButton: (label, command) => this.commandButton(label, command),
+      updateCard: async (messageId, card) => {
+        await this.host.invokeApi(
+          { bot: this, method: 'feishu.updateCard', args: [messageId, card] },
+          async (args) => {
+            const [id, value] = z.tuple([z.string().min(1), cardSchema]).parse(args)
+            this.assertOnline()
+            await this.raw('PATCH', `/im/v1/messages/${encodeURIComponent(id)}`, {
+              data: { content: JSON.stringify(value) },
+            })
+          },
+        )
+      },
+      downloadResource: async (messageId, key, type) => {
+        const result = await this.host.invokeApi(
           { bot: this, method: 'feishu.downloadResource', args: [messageId, key, type] },
           async (args) => {
             const [id, fileKey, kind] = z
@@ -88,8 +119,50 @@ export class FeishuBotImpl implements FeishuBot {
             this.assertOnline()
             return this.safe(() => this.transport.download(id, fileKey, kind))
           },
-        ) as Promise<Buffer>,
+        )
+        return z.instanceof(Buffer).parse(result)
+      },
     }
+  }
+
+  private signature(command: string): string {
+    return createHmac('sha256', this.buttonSecret)
+      .update(JSON.stringify([this.selfId, command]))
+      .digest('base64url')
+  }
+
+  private commandButton(label: string, command: string): FeishuElement {
+    z.string().min(1).max(2000).parse(command)
+    return feishu.button(label, {
+      value: { __asabot_command: { command, signature: this.signature(command) } },
+    })
+  }
+
+  commandFrom(value: Record<string, unknown>): string | undefined {
+    const result = z
+      .object({ command: z.string().min(1).max(2000), signature: z.string() })
+      .safeParse(value.__asabot_command)
+    if (!result.success || !constantTimeEqual(result.data.signature, this.signature(result.data.command)))
+      return undefined
+    return result.data.command
+  }
+
+  async resolveChannel(
+    chatId: string,
+  ): Promise<{ messageType: 'private' } | { messageType: 'group'; groupId: string }> {
+    const cached = this.roles.get(chatId)
+    const chat = cached && cached.expires > Date.now() ? await cached.value : undefined
+    const mode =
+      chat?.chat_mode ??
+      (
+        await this.data(
+          'GET',
+          `/im/v1/chats/${encodeURIComponent(chatId)}`,
+          z.object({ chat_mode: z.enum(['group', 'p2p', 'topic']) }),
+          { params: { user_id_type: 'open_id' } },
+        )
+      ).chat_mode
+    return mode === 'p2p' ? { messageType: 'private' } : { messageType: 'group', groupId: chatId }
   }
 
   async safe<T>(work: () => Promise<T>): Promise<T> {
@@ -227,6 +300,7 @@ export class FeishuBotImpl implements FeishuBot {
     }
     for (const segment of prepared) {
       if (isSegment(segment, 'reply')) {
+        await flush()
         replyId = segment.data.id
         continue
       }
@@ -248,6 +322,19 @@ export class FeishuBotImpl implements FeishuBot {
         await deliver('file', { file_key: await this.media('file', segment.data.file, segment.data.name) }, [
           segment,
         ])
+      } else if (isSegment(segment, 'markdown')) {
+        await flush()
+        await deliver('interactive', feishu.message([feishu.markdown(segment.data.content)]), [segment])
+      } else if (isSegment(segment, 'button')) {
+        await flush()
+        const button =
+          segment.data.kind === 'link'
+            ? feishu.button(segment.data.label, { link: segment.data.value })
+            : this.commandButton(segment.data.label, segment.data.value)
+        await deliver('interactive', feishu.message([button]), [segment])
+      } else if (segment.type === 'feishu:card') {
+        await flush()
+        await deliver('interactive', cardSchema.parse(segment.data.card), [segment])
       } else throw new UnsupportedError('feishu', segment.type)
     }
     await flush()

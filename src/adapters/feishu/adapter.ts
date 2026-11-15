@@ -3,8 +3,10 @@ import { isDeepStrictEqual } from 'node:util'
 import { z } from 'zod'
 import type { Adapter, AdapterHost } from '../../core/adapter.ts'
 import { createSession } from '../../core/event/index.ts'
+import { seg } from '../../core/message/index.ts'
 import { redactText } from '../../core/utils/redact.ts'
 import { FeishuBotImpl } from './bot.ts'
+import { cardResponseSchema, type FeishuCardActionEvent, type FeishuCardResponse } from './cards.ts'
 import { type FeishuAccountConfig, type FeishuConfig, feishuSchema } from './config.ts'
 import { incomingMessage, mentionSchema } from './message.ts'
 import {
@@ -34,6 +36,24 @@ const messageEvent = baseSchema.extend({
   }),
 })
 
+const cardEventSchema = baseSchema.extend({
+  host: z.literal('im_message'),
+  operator: z.object({ open_id: z.string().min(1) }),
+  context: z.object({ open_message_id: z.string().min(1), open_chat_id: z.string().min(1) }),
+  action: z
+    .object({
+      tag: z.string(),
+      name: z.string().optional(),
+      value: z.record(z.string(), z.unknown()).default({}),
+      input_value: z.string().optional(),
+      option: z.string().optional(),
+      options: z.array(z.string()).optional(),
+      form_value: z.record(z.string(), z.unknown()).optional(),
+      timezone: z.string().optional(),
+    })
+    .passthrough(),
+})
+
 class Account {
   readonly config: FeishuAccountConfig
   private readonly settings: FeishuConfig
@@ -46,6 +66,7 @@ class Account {
   private failures = 0
   private readonly seen = new Map<string, { expires: number; result: Promise<unknown> }>()
   private readonly messages = new Map<string, { userId: string; groupId?: string }>()
+  private readonly cardResponses = new Set<() => void>()
 
   constructor(
     config: FeishuAccountConfig,
@@ -65,6 +86,8 @@ class Account {
       ready: () => {
         if (this.transport !== transport || this.closed) return
         this.failures = 0
+        clearTimeout(this.reconnect)
+        this.reconnect = undefined
         this.status('online')
       },
       reconnecting: () => {
@@ -96,6 +119,7 @@ class Account {
         transport,
         { userId: response.bot.open_id, nickname: response.bot.app_name },
         this.settings,
+        this.config.appSecret,
       )
       this.host.registerBot(this.bot)
       this.host.setBotInfo(this.bot, { connection: 'long-connection' })
@@ -165,6 +189,7 @@ class Account {
 
   stop(): void {
     this.closed = true
+    for (const cancel of this.cardResponses) cancel()
     clearTimeout(this.reconnect)
     this.disconnect()
     this.seen.clear()
@@ -215,7 +240,10 @@ class Account {
         id: event.event_id,
         platform: 'feishu',
         selfId: bot.selfId,
-        time: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now(),
+        time:
+          Number.isFinite(timestamp) && timestamp > 0
+            ? Math.trunc(timestamp >= 1e15 ? timestamp / 1000 : timestamp)
+            : Date.now(),
         raw,
         bot,
         kind: 'notice' as const,
@@ -281,8 +309,8 @@ class Account {
           }
           this.host.emit(
             join
-              ? { ...common, name: 'notice.member.join', joinType: 'invite' }
-              : { ...common, name: 'notice.member.leave', reason: 'leave' },
+              ? { ...common, name: 'notice.member.join', joinType: 'unknown' }
+              : { ...common, name: 'notice.member.leave', reason: 'unknown' },
           )
         }
         return {}
@@ -313,15 +341,119 @@ class Account {
           name: 'notice.message.recall',
           messageId: event.message_id,
         })
-      else
+      else {
+        const channel = await bot.resolveChannel(event.chat_id)
+        if (this.closed || this.bot !== bot) return {}
         this.host.emit({
           ...base(raw),
+          ...(channel.messageType === 'group' ? { groupId: channel.groupId } : {}),
           name: 'notice.feishu.message.recall',
           platformType: 'im.message.recalled_v1',
         })
+      }
       return {}
     })
+    handlers['card.action.trigger'] = guard('card.action.trigger', (raw) => this.cardAction(bot, raw))
     return handlers
+  }
+
+  private cardAction(bot: FeishuBotImpl, raw: unknown): Promise<FeishuCardResponse> {
+    const source = cardEventSchema.parse(raw)
+    const completion = Promise.withResolvers<FeishuCardResponse>()
+    const deadline = Date.now() + 2000
+    let completed = false
+    const finish = (response: FeishuCardResponse): boolean => {
+      if (completed) return false
+      completed = true
+      clearTimeout(timer)
+      this.cardResponses.delete(cancel)
+      completion.resolve(response)
+      return true
+    }
+    const cancel = () => {
+      finish({})
+    }
+    const timer = setTimeout(cancel, 2000)
+    timer.unref()
+    this.cardResponses.add(cancel)
+    const respond = (response: FeishuCardResponse): boolean => {
+      if (completed || Date.now() >= deadline || this.closed || this.bot !== bot) return false
+      return finish(cardResponseSchema.parse(response))
+    }
+    void (async () => {
+      const channel = await bot.resolveChannel(source.context.open_chat_id)
+      const user = source.operator.open_id
+      const sender = await bot.resolveSender(
+        user,
+        channel.messageType === 'group' ? channel.groupId : undefined,
+      )
+      if (this.closed || this.bot !== bot) return
+      const action = source.action
+      const event: FeishuCardActionEvent = {
+        id: source.event_id,
+        kind: 'notice',
+        name: 'notice.feishu.card.action',
+        platform: 'feishu',
+        selfId: bot.selfId,
+        time: Date.now(),
+        raw,
+        bot,
+        platformType: 'card.action.trigger',
+        userId: user,
+        sender,
+        ...(channel.messageType === 'group' ? { groupId: channel.groupId } : {}),
+        chatId: source.context.open_chat_id,
+        messageId: source.context.open_message_id,
+        action: {
+          tag: action.tag,
+          value: action.value,
+          ...(action.name === undefined ? {} : { name: action.name }),
+          ...(action.input_value === undefined ? {} : { inputValue: action.input_value }),
+          ...(action.option === undefined ? {} : { option: action.option }),
+          ...(action.options === undefined ? {} : { options: action.options }),
+          ...(action.form_value === undefined ? {} : { formValue: action.form_value }),
+          ...(action.timezone === undefined ? {} : { timezone: action.timezone }),
+          raw: action,
+        },
+        respond,
+      }
+      this.host.emit(event)
+      const command =
+        action.tag === 'button' && action.form_value === undefined ? bot.commandFrom(action.value) : undefined
+      if (command !== undefined)
+        this.host.emit(
+          createSession(
+            {
+              id: `${source.event_id}:command`,
+              platform: 'feishu',
+              selfId: bot.selfId,
+              time: event.time,
+              raw,
+              bot,
+              ...channel,
+              messageId: source.context.open_message_id,
+              userId: user,
+              message: [seg.at(bot.selfId), seg.text(command)],
+              sender,
+              isSuperuser: this.host.isSuperuser(user),
+              sentMessageIds: bot.sentMessageIds,
+            },
+            this.host.sessionServices,
+          ),
+        )
+    })().catch((error: unknown) => {
+      this.host.logger.warn(
+        {
+          platform: 'feishu',
+          appId: this.config.appId,
+          eventId: source.event_id,
+          reason: redactText(error instanceof Error ? error.message : String(error), this.config),
+        },
+        'Feishu card action failed',
+      )
+      respond({ toast: { type: 'error', content: '暂时无法处理，请稍后重试' } })
+    })
+    return completion.promise
   }
 }
 

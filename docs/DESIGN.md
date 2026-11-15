@@ -861,6 +861,7 @@ remind.retry(key): boolean // 手动重试失败任务
 - **存储**：`tasks` 每次 schedule 生成独立 ID；`task_attempts` 保存每次执行结果。旧 `scheduled_tasks` 一次性迁移后删除。同一 `(plugin, name, key)` 的新任务取消旧任务并等待其回调结束，保留两者历史。
 - **装载**：应用级 TaskService 统一调度，插件 setup 成功后激活处理器。到期任务立即进入队列；未注册或未激活的处理器显示阻塞原因。全局并发默认 4，可用 `tasks.maxConcurrent` 配置。
 - **状态**：`pending → running → succeeded/failed/retry_wait`；取消及超时经过 `cancelling`，等待回调结束。超时和取消均通过 AbortSignal 协作；未退出的回调继续占用并发和同键锁，禁止重叠重试。
+- **结果落库**：回调结束后若持久化暂时失败，保留并发和同键锁并重试写入，不重新执行回调。已落库的结果不会因紧接着发生的插件卸载被改写为中断。
 - **重试与恢复**：自动重试默认关闭，插件显式传入 retry 开启指数退避。失败任务保留；手动重试保留 attempt 历史并重置失败重试额度。进程中断、插件卸载将本次 attempt 记为 interrupted，任务恢复 pending，不消耗业务重试额度。持久化任务为至少一次语义，插件应对外部副作用做幂等处理。
 - **生命周期与清理**：卸载时 abort 回调、解除处理器；旧回调完成后释放锁，不允许回写已恢复或 purge 的任务。终态默认保留 7 天、最多 10000 条，运行中和待执行任务不清理。purge 删除插件任务和尝试记录。
 - 任务时间是绝对时间戳，与 `timezone` 无关。
@@ -1468,6 +1469,7 @@ type HttpInit = RequestInit & { timeout?: Duration; proxy?: boolean | string; ma
 - 平台 ID 为机器人/用户 open_id、群 chat_id；平台专属 API 和类型从 `@asabot/core/feishu` 导出，核心保持协议无关。
 - 收发文本、提及、引用、富文本、图片和文件；媒体统一限制超时和大小。混合消息按原顺序拆分，逐条记录发送，返回最后 ID。成员、机器人进退群与撤回事件按可用身份信息映射，事件使用有界 TTL 去重。
 - 配置、权限和真实联调步骤见 [FEISHU.md](FEISHU.md)。本轮不增加业务内置插件。
+- Markdown、按钮及 JSON 2.0 原生卡片通过适配器发送；`notice.feishu.card.action` 保留完整表单，并提供 2 秒内一次性的 `respond`。超时后可通过 `feishu.updateCard` 更新；有签名的命令按钮以点击者身份进入现有命令管线，表单值不转换为命令。
 
 ## 已知限制
 
