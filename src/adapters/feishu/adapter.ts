@@ -108,7 +108,13 @@ class Account {
         .object({
           code: z.number(),
           msg: z.string().optional(),
-          bot: z.object({ open_id: z.string(), app_name: z.string().default('') }).optional(),
+          bot: z
+            .object({
+              open_id: z.string(),
+              app_name: z.string().default(''),
+              avatar_url: z.string().optional(),
+            })
+            .optional(),
         })
         .parse(await transport.request('GET', '/bot/v3/info/'))
       if (response.code !== 0 || !response.bot)
@@ -117,7 +123,7 @@ class Account {
       this.bot = new FeishuBotImpl(
         this.host,
         transport,
-        { userId: response.bot.open_id, nickname: response.bot.app_name },
+        { userId: response.bot.open_id, nickname: response.bot.app_name, avatar: response.bot.avatar_url },
         this.settings,
         this.config.appSecret,
       )

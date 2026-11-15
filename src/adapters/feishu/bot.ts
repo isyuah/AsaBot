@@ -66,6 +66,7 @@ export class FeishuBotImpl implements FeishuBot {
   status: Bot['status'] = 'connecting'
   readonly selfId: string
   readonly nickname: string
+  readonly avatar?: string
   readonly feishu: FeishuApi
   readonly sentMessageIds = new LruSet<string>(1000)
   readonly shutdown = new AbortController()
@@ -89,6 +90,7 @@ export class FeishuBotImpl implements FeishuBot {
     this.transport = transport
     this.selfId = self.userId
     this.nickname = self.nickname
+    this.avatar = self.avatar
     this.config = config
     this.buttonSecret = buttonSecret
     this.feishu = {
@@ -343,7 +345,7 @@ export class FeishuBotImpl implements FeishuBot {
   }
 
   async getSelf(): Promise<UserInfo> {
-    return { userId: this.selfId, nickname: this.nickname }
+    return { userId: this.selfId, nickname: this.nickname, avatar: this.avatar }
   }
   async deleteMessage(messageId: string): Promise<void> {
     this.assertOnline()

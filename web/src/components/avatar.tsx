@@ -32,7 +32,7 @@ export function Avatar({
   size?: number
   className?: string
 }) {
-  const [failed, setFailed] = useState(false)
+  const [failedSrc, setFailedSrc] = useState<string>()
   const initial = (name?.trim() || id).slice(0, 1).toUpperCase()
   return (
     <span
@@ -43,14 +43,14 @@ export function Avatar({
       )}
       style={{ width: size, height: size, fontSize: size * 0.4 }}
     >
-      {src && !failed ? (
+      {src && src !== failedSrc ? (
         <img
           src={src}
           alt=""
           loading="lazy"
           referrerPolicy="no-referrer"
           className="size-full object-cover"
-          onError={() => setFailed(true)}
+          onError={() => setFailedSrc(src)}
         />
       ) : (
         initial

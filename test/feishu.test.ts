@@ -36,7 +36,11 @@ class MockTransport implements FeishuTransport {
     this.requests.push({ method, path, input })
     const overridden = this.override?.(method, path, input)
     if (overridden !== undefined) return overridden
-    if (path === '/bot/v3/info/') return { code: 0, bot: { open_id: this.self, app_name: 'Test bot' } }
+    if (path === '/bot/v3/info/')
+      return {
+        code: 0,
+        bot: { open_id: this.self, app_name: 'Test bot', avatar_url: 'https://example.com/bot.png' },
+      }
     if (path === '/im/v1/chats')
       return { code: 0, data: { items: [{ chat_id: 'oc_group', name: 'Test group' }], has_more: false } }
     if (path.endsWith('/members'))
@@ -122,6 +126,15 @@ function commandValue(bot: FeishuBot, command: string): Record<string, unknown> 
 }
 
 describe('Feishu adapter', () => {
+  it('keeps the bot avatar returned with its identity', async () => {
+    const t = await fixture()
+    try {
+      expect(t.bot.avatar).toBe('https://example.com/bot.png')
+      expect(await t.bot.getSelf()).toMatchObject({ avatar: t.bot.avatar })
+    } finally {
+      await t.dispose()
+    }
+  })
   it('sends native cards and markdown and updates cards through the API', async () => {
     const t = await fixture()
     try {

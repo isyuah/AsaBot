@@ -72,6 +72,7 @@ export interface SendResult {
 export interface UserInfo {
   userId: string
   nickname: string
+  avatar?: string
   sex?: string
   age?: number
   [key: string]: unknown
@@ -107,6 +108,8 @@ export interface Bot {
   /** Display name of the bot account, known once it has logged in. */
   /** 登录后已知的机器人昵称。 */
   readonly nickname?: string
+  /** 平台提供的当前机器人头像，不依赖用户头像查询能力。 */
+  readonly avatar?: string
   /** 向用户发送私聊消息，返回消息 ID。 */
   sendPrivate(userId: string, content: Sendable): Promise<SendResult>
   /** 向群发送消息，返回消息 ID。 */
