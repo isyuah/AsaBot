@@ -92,6 +92,7 @@ export async function loadMainConfig(configPath: string): Promise<{ config: Conf
       configPath,
       `# 完整配置示例见 asabot.config.example.yaml\n${stringify({
         superusers: [],
+        adapterModules: [],
         connections: [],
         server: { host, port, panelPassword: '' },
       })}`,

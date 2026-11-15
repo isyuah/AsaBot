@@ -9,6 +9,7 @@ export interface BotView {
   status: BotStatus
   /** Display text supplied by the adapter, e.g. '正向 WS'. */
   connection: string
+  connectionId?: string
   url?: string
   avatar?: string
   capabilities: BotCapabilities
@@ -27,6 +28,7 @@ export interface BotCapabilities {
 export type PluginStateName = 'loading' | 'active' | 'failed' | 'disabled'
 
 export interface JsonSchema {
+  writeOnly?: boolean
   type?: string | string[]
   title?: string
   description?: string
@@ -65,7 +67,7 @@ export interface CommandView {
   overrideIssues: string[]
 }
 
-export type CommandPermission = 'everyone' | 'superuser' | 'group.admin' | 'group.owner'
+export type CommandPermission = 'everyone' | 'superuser' | 'bot.admin' | 'group.admin' | 'group.owner'
 export type CooldownScope = 'user' | 'group' | 'global'
 
 export interface CommandOverride {
@@ -83,6 +85,7 @@ export interface PluginView {
   name: string
   version?: string
   description?: string
+  depends?: string[]
   source: 'builtin' | 'file' | 'package'
   /** file and package plugins can be uninstalled; builtin ones only disabled. */
   removable: boolean
@@ -92,6 +95,7 @@ export interface PluginView {
   error?: string
   enabled: boolean
   configSchema?: JsonSchema
+  capabilities?: { required?: Partial<BotCapabilities>; optional?: Partial<BotCapabilities> }
   commands: CommandView[]
   /** Current effective config (parsed by the plugin schema); absent when the plugin has no schema. */
   config?: unknown
@@ -143,8 +147,7 @@ export interface Session {
 export interface SetupInput {
   code: string
   password: string
-  superusers: string[]
-  adapters?: Record<string, unknown>
+  superusers: ActorIdentity[]
 }
 
 export interface CommandSettings {
@@ -158,23 +161,17 @@ export interface CommandSettings {
 }
 
 export interface Settings {
-  superusers: string[]
+  superusers: ActorIdentity[]
   timezone: string
   command: CommandSettings
-  /** Configured adapters: raw (pre-interpolation) values with masked literal secrets. */
-  adapters: Record<string, { value: unknown; schema: JsonSchema }>
-  /** Every adapter platform the server knows how to create. */
-  available: string[]
   /** Saved settings that only apply after a restart, e.g. ['timezone']. */
   restartRequired: string[]
 }
 
 export interface SettingsUpdate {
-  superusers?: string[]
+  superusers?: ActorIdentity[]
   timezone?: string
   command?: Partial<CommandSettings>
-  /** `null` removes the adapter. */
-  adapters?: Record<string, unknown>
 }
 
 export type PackageSort = 'relevance' | 'updated' | 'name'
@@ -251,6 +248,7 @@ export interface BotGroup {
 
 /** A group known to the panel: from online bots' group lists or from any per-group rule. */
 export interface GroupView {
+  selfId: string
   groupKey: string
   platform: string
   groupId: string
@@ -263,7 +261,15 @@ export interface GroupView {
 
 export interface GroupDetail {
   group: GroupView
-  plugins: { name: string; enabled: boolean; configurable: boolean; override?: Record<string, unknown> }[]
+  plugins: {
+    name: string
+    enabled: boolean
+    configurable: boolean
+    override?: Record<string, unknown>
+    effectiveConfig?: unknown
+    inheritedConfig?: unknown
+    configSources?: Record<string, string>
+  }[]
   commands: { path: string; owner: string; enabled: boolean }[]
 }
 
@@ -383,6 +389,8 @@ export interface LiveMessage {
 }
 
 export type ServerFrame =
+  | { type: 'connections' }
+  | { type: 'policies' }
   | { type: 'task'; id?: string }
   | { type: 'hello'; overview: Overview }
   | { type: 'log'; record: LogRecord }
@@ -433,4 +441,57 @@ export interface TaskAttempt {
   finishedAt?: number
   outcome: 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted' | 'timeout'
   error?: string
+}
+
+export interface ActorIdentity {
+  platform: string
+  selfId: string
+  userId: string
+}
+export interface ConnectionInput {
+  id: string
+  name: string
+  adapter: string
+  enabled: boolean
+  config: unknown
+}
+export interface ConnectionView extends ConnectionInput {
+  platform: string
+  state: 'disabled' | 'connecting' | 'waiting' | 'online' | 'retrying' | 'error' | 'offline'
+  changedAt: number
+  lastConnectedAt?: number
+  lastError?: string
+  errorAt?: number
+  nextRetryAt?: number
+  endpoints: string[]
+  bots: { platform: string; selfId: string }[]
+}
+export interface AdapterView {
+  id: string
+  platform: string
+  name: string
+  version: string
+  description: string
+  source: string
+  connectionTypes: string[]
+  capabilities: BotCapabilities
+  configSchema: JsonSchema
+}
+export interface Compatibility {
+  declared: boolean
+  required: { kind: keyof BotCapabilities; name: string }[]
+  optional: { kind: keyof BotCapabilities; name: string }[]
+}
+export interface BotPluginView extends PluginView {
+  botEnabled: boolean
+  overrideEnabled?: boolean
+  override?: Record<string, unknown>
+  effectiveConfig?: unknown
+  configSources: Record<string, string>
+  compatibility: Compatibility
+}
+export interface BotDetail {
+  bot: BotView
+  admins: string[]
+  plugins: BotPluginView[]
 }

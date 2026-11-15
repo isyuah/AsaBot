@@ -11,6 +11,7 @@ import { type ThemePreference, useTheme } from '../../lib/theme.tsx'
 import { commandPaletteOpen } from '../../lib/ui-state.ts'
 import { cn } from '../../lib/utils.ts'
 import { AclPage } from '../../pages/acl.tsx'
+import { AdaptersPage } from '../../pages/adapters.tsx'
 import { BotsPage } from '../../pages/bots.tsx'
 import { CommandsPage } from '../../pages/commands.tsx'
 import { GroupsPage } from '../../pages/groups.tsx'
@@ -20,7 +21,7 @@ import { NotFoundPage } from '../../pages/not-found.tsx'
 import { OverviewPage } from '../../pages/overview.tsx'
 import { PlaygroundPage } from '../../pages/playground.tsx'
 import { PluginPageHost } from '../../pages/plugin-page.tsx'
-import { PluginsPage } from '../../pages/plugins.tsx'
+import { PluginDetailPage, PluginsPage } from '../../pages/plugins.tsx'
 import { SettingsPage } from '../../pages/settings.tsx'
 import { TasksPage } from '../../pages/tasks.tsx'
 import { CommandPalette } from '../command-palette.tsx'
@@ -38,6 +39,7 @@ const pages: Record<string, ComponentType> = {
   '/groups': GroupsPage,
   '/history': HistoryPage,
   '/bots': BotsPage,
+  '/adapters': AdaptersPage,
   '/playground': PlaygroundPage,
   '/logs': LogsPage,
   '/acl': AclPage,
@@ -49,6 +51,9 @@ const pages: Record<string, ComponentType> = {
 function resolveRoute(path: string): { key: string; Page: ComponentType } {
   const page = pages[path]
   if (page) return { key: path, Page: page }
+  if (path.startsWith('/bots/')) return { key: '/bots', Page: BotsPage }
+  if (path.startsWith('/adapters/')) return { key: '/adapters', Page: AdaptersPage }
+  if (path.startsWith('/plugin/')) return { key: '/plugins', Page: PluginDetailPage }
   if (path.startsWith('/groups/')) return { key: '/groups', Page: GroupsPage }
   if (path.startsWith('/tasks/')) return { key: '/tasks', Page: TasksPage }
   if (path.startsWith('/pages/')) return { key: path, Page: PluginPageHost }

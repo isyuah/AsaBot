@@ -32,6 +32,7 @@ const permissionLabels: Record<CommandPermission, string> = {
   everyone: '所有人',
   'group.admin': '群管理员',
   'group.owner': '群主',
+  'bot.admin': '机器人管理员',
   superuser: '超管',
 }
 const scopeLabels: Record<CooldownScope, string> = { user: '每个用户', group: '每个群', global: '全局' }

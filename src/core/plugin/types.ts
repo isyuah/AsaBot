@@ -22,6 +22,7 @@ export interface PluginState {
   name: string
   version?: string
   description?: string
+  depends?: string[]
   source: 'builtin' | 'file' | 'package'
   path?: string
   state: 'loading' | 'active' | 'failed' | 'disabled'

@@ -15,7 +15,7 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function navigate(path: string): void {
-  if (path === window.location.pathname) return
+  if (path === window.location.pathname + window.location.search) return
   window.history.pushState(null, '', path)
   for (const listener of listeners) listener()
 }
@@ -39,4 +39,8 @@ export function Link({ to, onClick, ...props }: AnchorHTMLAttributes<HTMLAnchorE
       }}
     />
   )
+}
+
+export function useLocation(): string {
+  return useSyncExternalStore(subscribe, () => window.location.pathname + window.location.search)
 }

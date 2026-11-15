@@ -1,10 +1,15 @@
 import type {
   AccessEntry,
+  AdapterView,
   ApiErrorBody,
+  BotDetail,
   BotGroup,
+  BotPluginView,
   BotView,
   CommandOverride,
   CommandView,
+  ConnectionInput,
+  ConnectionView,
   GroupDetail,
   GroupView,
   LogLevel,
@@ -101,6 +106,37 @@ export const api = {
   stats: (range: '1h' | '24h') => request<StatsPoint[]>('GET', `/stats/messages?range=${range}`),
 
   bots: () => request<BotView[]>('GET', '/bots'),
+  bot: (bot: Pick<BotView, 'platform' | 'selfId'>) =>
+    request<BotDetail>('GET', `/bots/${encode(bot.platform)}/${encode(bot.selfId)}`),
+  botAdmins: (bot: Pick<BotView, 'platform' | 'selfId'>, admins: string[]) =>
+    request<{ admins: string[] }>('PUT', `/bots/${encode(bot.platform)}/${encode(bot.selfId)}/admins`, {
+      admins,
+    }),
+  botPlugin: (
+    bot: Pick<BotView, 'platform' | 'selfId'>,
+    name: string,
+    input: { enabled?: boolean | null; config?: Record<string, unknown> | null },
+  ) =>
+    request<BotPluginView>(
+      'PUT',
+      `/bots/${encode(bot.platform)}/${encode(bot.selfId)}/plugins/${encode(name)}`,
+      input,
+    ),
+  pluginBots: (name: string) =>
+    request<{ bot: BotView; application: BotPluginView }[]>('GET', `/plugins/${encode(name)}/bots`),
+  adapters: () => request<AdapterView[]>('GET', '/adapters'),
+  connections: () => request<ConnectionView[]>('GET', '/connections'),
+  saveConnection: (input: ConnectionInput, create = false) =>
+    create
+      ? request<ConnectionView[]>('POST', '/connections', input)
+      : request<ConnectionView[]>('PUT', `/connections/${encode(input.id)}`, {
+          name: input.name,
+          adapter: input.adapter,
+          enabled: input.enabled,
+          config: input.config,
+        }),
+  deleteConnection: (id: string) => request<ConnectionView[]>('DELETE', `/connections/${encode(id)}`, {}),
+  reconnect: (id: string) => request<ConnectionView[]>('POST', `/connections/${encode(id)}/reconnect`, {}),
   botGroups: (bot: Pick<BotView, 'platform' | 'selfId'>) =>
     request<BotGroup[]>('GET', `/bots/${encode(bot.platform)}/${encode(bot.selfId)}/groups`),
   send: (input: { target: Target | string; message: string | Segment[] }) =>

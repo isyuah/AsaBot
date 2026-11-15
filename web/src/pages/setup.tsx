@@ -1,13 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowRight, Check, Copy, KeyRound, Link2, Lock, Terminal } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, KeyRound, Lock, Terminal } from 'lucide-react'
 import { AnimatePresence, motion, useAnimationControls } from 'motion/react'
 import { type FormEvent, type ReactNode, useState } from 'react'
 import { toast } from 'sonner'
 import { Logo } from '../components/layout/logo.tsx'
-import { ListControl } from '../components/schema-form.tsx'
 import { Button } from '../components/ui/button.tsx'
 import { Field, Input } from '../components/ui/input.tsx'
-import { Segmented } from '../components/ui/misc.tsx'
 import { ApiError, api } from '../lib/api.ts'
 import { softSpring, spring } from '../lib/motion.ts'
 import { resetSession } from '../lib/session.ts'
@@ -17,12 +15,8 @@ import { Backdrop } from './login.tsx'
 
 const steps = [
   { title: '验证设置码', description: '确认你能访问运行 AsaBot 的机器' },
-  { title: '设置面板密码', description: '之后用它登录管理面板' },
-  { title: '超级用户', description: '拥有全部权限的账号，可以稍后修改' },
-  { title: '连接 OneBot', description: '可以跳过，之后在设置中添加' },
+  { title: '设置面板密码', description: '之后用它登录面板，再到机器人页面添加连接' },
 ] as const
-
-type Mode = 'forward' | 'reverse' | 'later'
 
 /** Setup codes are `XXXX-XXXX` in a base32 alphabet; accept any case and spacing while typing. */
 function formatCode(input: string): string {
@@ -33,8 +27,6 @@ function formatCode(input: string): string {
   return raw.length > 4 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : raw
 }
 
-const wsUrl = /^wss?:\/\/\S+$/i
-
 export function SetupPage() {
   const client = useQueryClient()
   const [step, setStep] = useState(0)
@@ -42,10 +34,6 @@ export function SetupPage() {
   const [code, setCode] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
-  const [superusers, setSuperusers] = useState<string[]>([])
-  const [mode, setMode] = useState<Mode>('forward')
-  const [url, setUrl] = useState('')
-  const [token, setToken] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const shake = useAnimationControls()
 
@@ -73,8 +61,7 @@ export function SetupPage() {
         fail(0, { code: '尝试次数过多，请稍后再试' })
       else if (error instanceof ApiError && error.issues.length > 0) {
         const issue = error.issues[0] as { path: string; message: string }
-        const at = issue.path.startsWith('password') ? 1 : issue.path.startsWith('superusers') ? 2 : 3
-        fail(at, { [at === 1 ? 'password' : at === 3 ? 'url' : 'superusers']: issue.message })
+        fail(issue.path.startsWith('password') ? 1 : 0, { password: issue.message })
       } else toast.error(error.message)
     },
   })
@@ -85,8 +72,6 @@ export function SetupPage() {
     if (step === 1 && password.length < 8) return { password: '至少 8 个字符' }
     if (step === 1 && password.includes('${')) return { password: '密码不能包含 ${' }
     if (step === 1 && confirm !== password) return { confirm: '两次输入的密码不一致' }
-    if (step === 3 && mode === 'forward' && !wsUrl.test(url.trim()))
-      return { url: '请填写 ws:// 或 wss:// 开头的地址' }
     return {}
   }
 
@@ -96,16 +81,9 @@ export function SetupPage() {
     if (Object.keys(found).length > 0) return fail(step, found)
     setErrors({})
     if (step < steps.length - 1) return go(step + 1)
-    const onebot =
-      mode === 'forward'
-        ? { connections: [{ type: 'forward', url: url.trim(), ...(token ? { accessToken: token } : {}) }] }
-        : mode === 'reverse'
-          ? { reverse: { enabled: true, accessToken: token } }
-          : undefined
-    finish.mutate({ code, password, superusers, ...(onebot ? { adapters: { onebot11: onebot } } : {}) })
+    finish.mutate({ code, password, superusers: [] })
   }
 
-  const reverseAddress = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/onebot/v11/ws`
   const current = steps[step] as (typeof steps)[number]
 
   return (
@@ -230,77 +208,6 @@ export function SetupPage() {
                     </Field>
                   </>
                 )}
-                {step === 2 && (
-                  <Field
-                    label="超级用户 ID"
-                    error={errors.superusers}
-                    hint="输入后按回车添加。超级用户可以在聊天中管理插件和访问控制"
-                    htmlFor="setup-superusers"
-                  >
-                    <ListControl
-                      id="setup-superusers"
-                      value={superusers}
-                      onChange={(next) => setSuperusers(next as string[])}
-                    />
-                  </Field>
-                )}
-                {step === 3 && (
-                  <>
-                    {/* Segmented resets its own margin, which would cancel the parent spacing. */}
-                    <div>
-                      <Segmented
-                        value={mode}
-                        onChange={(next) => {
-                          setMode(next)
-                          setErrors({})
-                        }}
-                        className="w-full [&>button]:flex-1"
-                        options={[
-                          { value: 'forward', label: '正向 WS' },
-                          { value: 'reverse', label: '反向 WS' },
-                          { value: 'later', label: '稍后配置' },
-                        ]}
-                      />
-                    </div>
-                    {mode === 'forward' && (
-                      <>
-                        <Field
-                          label="OneBot 实现的 WebSocket 地址"
-                          error={errors.url}
-                          hint="AsaBot 主动连接这个地址，例如 NapCat 的 WebSocket 服务器"
-                          htmlFor="setup-url"
-                        >
-                          <Input
-                            id="setup-url"
-                            icon={<Link2 />}
-                            placeholder="ws://127.0.0.1:3001"
-                            value={url}
-                            aria-invalid={Boolean(errors.url)}
-                            onChange={(event) => {
-                              setUrl(event.target.value)
-                              setErrors({})
-                            }}
-                            className="font-mono"
-                          />
-                        </Field>
-                        <TokenField value={token} onChange={setToken} />
-                      </>
-                    )}
-                    {mode === 'reverse' && (
-                      <>
-                        <Field label="在 OneBot 实现中填写这个地址" hint="由 OneBot 实现主动连接 AsaBot">
-                          <CopyField value={reverseAddress} />
-                        </Field>
-                        <TokenField value={token} onChange={setToken} />
-                      </>
-                    )}
-                    {mode === 'later' && (
-                      <Hint icon={<Link2 />}>
-                        完成后在「设置」页面添加连接。没有连接时，仍然可以在调试台里试用插件。
-                      </Hint>
-                    )}
-                  </>
-                )}
               </motion.div>
             </AnimatePresence>
           </div>
@@ -340,48 +247,6 @@ function Hint({ icon, children }: { icon: ReactNode; children: ReactNode }) {
     <div className="flex gap-2.5 rounded-xl bg-surface-2 px-3.5 py-3 text-[12.5px] leading-relaxed text-fg-2 [&>svg]:mt-0.5 [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-fg-3">
       {icon}
       <p>{children}</p>
-    </div>
-  )
-}
-
-function TokenField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  return (
-    <Field label="访问令牌" hint="与 OneBot 实现中配置的 token 一致；没有设置可以留空" htmlFor="setup-token">
-      <Input
-        id="setup-token"
-        type="password"
-        autoComplete="off"
-        icon={<KeyRound />}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="font-mono"
-      />
-    </Field>
-  )
-}
-
-function CopyField({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false)
-  return (
-    <div className="flex h-9 items-center gap-2 rounded-[10px] border border-border bg-surface-2 pr-1 pl-3">
-      <code className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-fg">{value}</code>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label="复制地址"
-        onClick={() =>
-          void navigator.clipboard.writeText(value).then(
-            () => {
-              setCopied(true)
-              window.setTimeout(() => setCopied(false), 1500)
-            },
-            () => toast.error('无法访问剪贴板，请手动复制'),
-          )
-        }
-      >
-        {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
-      </Button>
     </div>
   )
 }

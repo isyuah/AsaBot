@@ -1,16 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Cable, Plus, RotateCw, SlidersHorizontal, TerminalSquare, Trash2 } from 'lucide-react'
+import { RotateCw, SlidersHorizontal, TerminalSquare } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { type ReactNode, useState } from 'react'
+import type { ReactNode } from 'react'
 import { toast } from 'sonner'
 import { SchemaForm } from '../components/schema-form.tsx'
-import { Button } from '../components/ui/button.tsx'
-import { Dialog } from '../components/ui/dialog.tsx'
 import { Card, ErrorState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
-import { Select } from '../components/ui/select.tsx'
 import { ApiError, api } from '../lib/api.ts'
 import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
-import { platformName } from '../lib/platform.ts'
 import type { JsonSchema, Settings, SettingsUpdate } from '../lib/types.ts'
 
 const basicSchema: JsonSchema = {
@@ -18,9 +14,18 @@ const basicSchema: JsonSchema = {
   properties: {
     superusers: {
       type: 'array',
-      items: { type: 'string' },
-      title: '超级用户',
-      description: '拥有全部权限、不受冷却限制的用户 ID',
+      items: {
+        type: 'object',
+        required: ['platform', 'selfId', 'userId'],
+        properties: {
+          platform: { type: 'string', title: '平台' },
+          selfId: { type: 'string', title: '机器人 ID' },
+          userId: { type: 'string', title: '用户 ID' },
+        },
+      },
+      title: '框架管理员',
+      description:
+        '身份绑定平台、机器人和用户，可在聊天中管理全局插件、安装包与访问控制。各机器人的管理员在机器人设置中配置',
     },
     timezone: {
       type: 'string',
@@ -67,7 +72,7 @@ const commandSchema: JsonSchema = {
 const restartLabels: Record<string, string> = { timezone: '时区' }
 
 /** Which part of the settings a save came from: its issues and spinner belong to that card only. */
-type Section = 'basic' | 'command' | `adapter:${string}`
+type Section = 'basic' | 'command'
 
 function sectionIssues(error: unknown, prefix: string): Record<string, string> {
   if (!(error instanceof ApiError)) return {}
@@ -81,18 +86,12 @@ function sectionIssues(error: unknown, prefix: string): Record<string, string> {
 export function SettingsPage() {
   const client = useQueryClient()
   const settings = useQuery({ queryKey: ['settings'], queryFn: api.settings })
-  const [removing, setRemoving] = useState<string | null>(null)
   const save = useMutation({
     mutationFn: ({ input }: { section: Section; input: SettingsUpdate; message: string }) =>
       api.updateSettings(input),
     meta: { silent: true },
-    onSuccess: (next, { input, message }) => {
+    onSuccess: (next, { message }) => {
       client.setQueryData<Settings>(['settings'], next)
-      if (input.adapters) {
-        void client.invalidateQueries({ queryKey: ['bots'] })
-        void client.invalidateQueries({ queryKey: ['overview'] })
-      }
-      setRemoving(null)
       toast.success(message)
     },
     onError: (error) => {
@@ -138,13 +137,13 @@ export function SettingsPage() {
             )}
           </AnimatePresence>
 
-          <Section icon={<SlidersHorizontal />} title="基本" description="超级用户与时区">
+          <Section icon={<SlidersHorizontal />} title="基本" description="框架管理员与时区">
             <SchemaForm
               schema={basicSchema}
               value={{ superusers: settings.data.superusers, timezone: settings.data.timezone }}
               issues={sectionIssues(failed('basic'), '')}
               saving={saving('basic')}
-              note="超级用户立即生效，时区在重启后生效"
+              note="管理员设置立即生效，时区在重启后生效"
               submitLabel="保存"
               onSubmit={(value) =>
                 save.mutate({
@@ -173,84 +172,8 @@ export function SettingsPage() {
               }
             />
           </Section>
-
-          {Object.entries(settings.data.adapters).map(([platform, adapter]) => (
-            <Section
-              key={platform}
-              icon={<Cable />}
-              title={platformName(platform)}
-              description={
-                <>
-                  连接协议 · <span className="font-mono">adapters.{platform}</span>
-                </>
-              }
-              action={
-                <Button variant="ghost" size="sm" onClick={() => setRemoving(platform)}>
-                  <Trash2 className="size-3.5" />
-                  移除
-                </Button>
-              }
-            >
-              <SchemaForm
-                schema={adapter.schema}
-                value={adapter.value}
-                issues={sectionIssues(failed(`adapter:${platform}`), `adapters.${platform}`)}
-                saving={saving(`adapter:${platform}`)}
-                note="保存后按新配置重新连接，机器人会短暂离线"
-                submitLabel="保存并重连"
-                onSubmit={(value) =>
-                  save.mutate({
-                    section: `adapter:${platform}`,
-                    input: { adapters: { [platform]: value } },
-                    message: `${platformName(platform)} 已按新配置重新连接`,
-                  })
-                }
-              />
-            </Section>
-          ))}
-
-          <AddAdapter
-            settings={settings.data}
-            pending={save.isPending}
-            onAdd={(platform) =>
-              save.mutate({
-                section: `adapter:${platform}`,
-                input: { adapters: { [platform]: {} } },
-                message: `已添加 ${platformName(platform)}`,
-              })
-            }
-          />
         </motion.div>
       )}
-
-      <Dialog
-        open={removing !== null}
-        onOpenChange={(open) => !open && setRemoving(null)}
-        title={`移除 ${removing ? platformName(removing) : ''}`}
-        description="这个协议下的所有机器人会断开连接并注销，相应配置会从配置文件中删除。"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setRemoving(null)}>
-              取消
-            </Button>
-            <Button
-              variant="danger"
-              loading={save.isPending && save.variables?.section === `adapter:${removing}`}
-              onClick={() =>
-                removing &&
-                save.mutate({
-                  section: `adapter:${removing}`,
-                  input: { adapters: { [removing]: null } },
-                  message: `已移除 ${platformName(removing)}`,
-                })
-              }
-            >
-              <Trash2 className="size-3.5" />
-              移除
-            </Button>
-          </>
-        }
-      />
     </>
   )
 }
@@ -285,42 +208,6 @@ function Section({
         </div>
         <div className="px-6 pt-4 pb-6">{children}</div>
       </Card>
-    </motion.div>
-  )
-}
-
-function AddAdapter({
-  settings,
-  pending,
-  onAdd,
-}: {
-  settings: Settings
-  pending: boolean
-  onAdd: (platform: string) => void
-}) {
-  const options = settings.available.filter((platform) => !(platform in settings.adapters))
-  const [platform, setPlatform] = useState<string>()
-  if (options.length === 0) return null
-  const chosen = platform && options.includes(platform) ? platform : options[0]
-  return (
-    <motion.div variants={staggerItem}>
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-border-strong px-5 py-4">
-        <div className="mr-auto">
-          <p className="text-[13.5px] font-medium text-fg">添加连接协议</p>
-          <p className="mt-0.5 text-[12.5px] text-fg-3">以默认配置创建，保存后再在上面的表单中填写连接信息</p>
-        </div>
-        <Select
-          aria-label="连接协议"
-          value={chosen}
-          onValueChange={setPlatform}
-          options={options.map((item) => ({ value: item, label: platformName(item) }))}
-          className="min-w-36"
-        />
-        <Button variant="secondary" loading={pending} onClick={() => chosen && onAdd(chosen)}>
-          <Plus className="size-3.5" />
-          添加
-        </Button>
-      </div>
     </motion.div>
   )
 }

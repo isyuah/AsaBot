@@ -104,6 +104,7 @@ export function SchemaForm({
   onSubmit,
   note = '保存后写回配置文件并重载插件',
   submitLabel = '保存并重载',
+  submitWhenPristine = false,
 }: {
   schema: JsonSchema
   value: Value
@@ -111,10 +112,15 @@ export function SchemaForm({
   saving: boolean
   onSubmit: (value: Value) => void
   note?: ReactNode
+  submitWhenPristine?: boolean
   submitLabel?: string
 }) {
   const issues = useMemo(() => normalizeIssueKeys(rawIssues), [rawIssues])
-  const initial = useMemo(() => value ?? defaultsOf(schema), [schema, value])
+  const initialText = JSON.stringify(value ?? defaultsOf(schema))
+  const initial = useMemo<Value>(
+    () => (initialText === undefined ? undefined : JSON.parse(initialText)),
+    [initialText],
+  )
   const supported = useMemo(() => isSupported(schema), [schema])
   const [draft, setDraft] = useState<Value>(initial)
   const [jsonMode, setJsonMode] = useState(!supported)
@@ -219,7 +225,7 @@ export function SchemaForm({
       </AnimatePresence>
 
       <AnimatePresence>
-        {dirty && (
+        {(dirty || submitWhenPristine) && (
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
@@ -227,7 +233,7 @@ export function SchemaForm({
             transition={softSpring}
             className="sticky bottom-0 mt-6 -mx-6 flex items-center justify-between gap-3 border-t border-border bg-surface/90 px-6 py-3 backdrop-blur"
           >
-            <span className="text-[12.5px] text-fg-3">有未保存的修改</span>
+            <span className="text-[12.5px] text-fg-3">{dirty ? '有未保存的修改' : '填写完成后保存'}</span>
             <div className="flex gap-2">
               <Button
                 variant="ghost"
@@ -345,7 +351,7 @@ function SchemaFields({
               id={id}
               schema={child}
               value={current}
-              secret={secretKeys.has(key)}
+              secret={secretKeys.has(key) || child.writeOnly === true}
               invalid={Boolean(error)}
               onChange={(next) => onChange(childPath, next)}
             />

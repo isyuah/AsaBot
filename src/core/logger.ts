@@ -176,7 +176,9 @@ export function createLogger(options: CreateLoggerOptions = {}): Logger {
       redact: { paths: redactedFields, censor: '[Redacted]' },
       mixin: () => {
         const context = dispatchContext.getStore()
-        return context?.active.value ? { eventId: context.eventId } : {}
+        return context?.active.value
+          ? { eventId: context.eventId, platform: context.trace.platform, selfId: context.trace.selfId }
+          : {}
       },
     },
     pino.multistream(streams),

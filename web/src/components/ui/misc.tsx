@@ -110,7 +110,7 @@ export function PageTabs<V extends string>({
             aria-selected={active}
             onClick={() => onChange(tab.value)}
             className={cn(
-              'relative -mb-px flex h-10 cursor-pointer items-center gap-1.5 text-[13.5px] font-medium transition-colors',
+              'relative -mb-px flex h-10 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap text-[13.5px] font-medium transition-colors',
               active ? 'text-fg' : 'text-fg-3 hover:text-fg-2',
             )}
           >

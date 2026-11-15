@@ -12,6 +12,7 @@ import { api } from '../lib/api.ts'
 import { formatClock, levelName, levelStyle } from '../lib/format.ts'
 import { softSpring } from '../lib/motion.ts'
 import { useClearLogs, useLiveLogs } from '../lib/realtime.tsx'
+import { navigate, useLocation } from '../lib/router.tsx'
 import type { LogEntry, LogLevel } from '../lib/types.ts'
 import { cn } from '../lib/utils.ts'
 
@@ -29,12 +30,18 @@ const hiddenKeys = new Set(['time', 'level', 'msg', 'plugin', 'eventId', 'pid', 
 const maxRendered = 600
 
 export function LogsPage() {
+  const location = useLocation()
+  const scope = useMemo(() => new URLSearchParams(location.split('?')[1]), [location])
   const live = useLiveLogs()
   const clear = useClearLogs()
   const [level, setLevel] = useState<LevelFilter>('10')
   const [plugin, setPlugin] = useState('*')
   const [query, setQuery] = useState('')
   // Logs written while handling one dispatched event (records carry eventId, DESIGN §24.8).
+  useEffect(() => {
+    const query = new URLSearchParams(location.split('?')[1])
+    setPlugin(query.get('plugin') ?? '*')
+  }, [location])
   const [eventId, setEventId] = useState<string | null>(null)
   const [paused, setPaused] = useState(false)
   const [snapshot, setSnapshot] = useState<LogEntry[] | null>(null)
@@ -57,6 +64,9 @@ export function LogsPage() {
       .filter(
         (record) =>
           record.level >= min &&
+          (!scope.has('connectionId') || record.connectionId === scope.get('connectionId')) &&
+          (!scope.has('platform') || record.platform === scope.get('platform')) &&
+          (!scope.has('selfId') || record.selfId === scope.get('selfId')) &&
           (eventId === null || record.eventId === eventId) &&
           (plugin === '*' || (plugin === '-' ? !record.plugin : record.plugin === plugin)) &&
           (!keyword ||
@@ -64,7 +74,7 @@ export function LogsPage() {
             JSON.stringify(record).toLowerCase().includes(keyword)),
       )
       .slice(-maxRendered)
-  }, [source, level, plugin, query, eventId])
+  }, [source, level, plugin, query, eventId, scope])
 
   // Keep the view pinned to the newest entry unless the user scrolled up to read.
   useEffect(() => {
@@ -98,6 +108,29 @@ export function LogsPage() {
         }
       />
       <div className="mb-3 flex flex-wrap items-center gap-2">
+        {(scope.has('connectionId') || scope.has('selfId')) && (
+          <span className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border py-1 pr-1 pl-2.5 text-xs text-fg-2">
+            <span className="truncate">
+              {scope.has('connectionId')
+                ? `连接：${scope.get('connectionId')}`
+                : `机器人：${scope.get('platform')} · ${scope.get('selfId')}`}
+            </span>
+            <button
+              type="button"
+              aria-label="清除来源范围"
+              className="rounded p-1 hover:bg-surface-2"
+              onClick={() => {
+                const params = new URLSearchParams(scope)
+                params.delete('connectionId')
+                params.delete('selfId')
+                params.delete('platform')
+                navigate(`/logs${params.size ? `?${params}` : ''}`)
+              }}
+            >
+              <X className="size-3.5" />
+            </button>
+          </span>
+        )}
         <Segmented
           value={level}
           onChange={setLevel}

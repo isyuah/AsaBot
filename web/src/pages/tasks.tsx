@@ -16,7 +16,7 @@ import {
 } from '../components/ui/primitives.tsx'
 import { Select } from '../components/ui/select.tsx'
 import { api } from '../lib/api.ts'
-import { navigate, usePath } from '../lib/router.tsx'
+import { navigate, useLocation, usePath } from '../lib/router.tsx'
 import type { TaskState } from '../lib/types.ts'
 
 const states: Record<TaskState, { label: string; tone: Tone }> = {
@@ -38,15 +38,18 @@ const outcomeLabels = {
 }
 const time = (value?: number) =>
   value === undefined ? '—' : new Date(value).toLocaleString('zh-CN', { hour12: false })
-const pathFor = (id: string) => `/tasks/${encodeURIComponent(id)}`
+const pathFor = (id: string) => `/tasks/${encodeURIComponent(id)}${window.location.search}`
 
 export function TasksPage() {
   const path = usePath()
+  const location = useLocation()
   const selected = path.startsWith('/tasks/') ? decodeURIComponent(path.slice(7)) : null
   const [q, setQ] = useState('')
-  const [plugin, setPlugin] = useState('all')
+  const plugin = new URLSearchParams(location.split('?')[1]).get('plugin') ?? 'all'
   const [state, setState] = useState('all')
-  const [page, setPage] = useState(0)
+  const [paging, setPaging] = useState({ plugin, page: 0 })
+  const page = paging.plugin === plugin ? paging.page : 0
+  const setPage = (page: number) => setPaging({ plugin, page })
   const plugins = useQuery({ queryKey: ['plugins'], queryFn: api.plugins })
   const filters = {
     q,
@@ -101,7 +104,7 @@ export function TasksPage() {
           aria-label="所属插件"
           value={plugin}
           onValueChange={(v) => {
-            setPlugin(v)
+            navigate(v === 'all' ? '/tasks' : `/tasks?plugin=${encodeURIComponent(v)}`)
             setPage(0)
           }}
           options={[
@@ -225,7 +228,7 @@ function TaskSheet({ id }: { id: string | null }) {
     <Sheet
       open={id !== null}
       onOpenChange={(open) => {
-        if (!open) navigate('/tasks')
+        if (!open) navigate(`/tasks${window.location.search}`)
       }}
       title={item?.name ?? '任务详情'}
       subtitle={item?.plugin}

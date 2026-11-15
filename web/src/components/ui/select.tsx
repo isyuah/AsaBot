@@ -14,6 +14,7 @@ export function Select<V extends string>({
   options,
   placeholder,
   className,
+  disabled,
   'aria-label': ariaLabel,
 }: {
   value: V | undefined
@@ -21,15 +22,20 @@ export function Select<V extends string>({
   options: SelectOption<V>[]
   placeholder?: string
   className?: string
+  disabled?: boolean
   'aria-label'?: string
 }) {
   return (
     // Radix treats "" as "nothing selected" (shows the placeholder) and stays controlled while data loads.
-    <SelectPrimitive.Root value={value ?? ''} onValueChange={(next) => onValueChange(next as V)}>
+    <SelectPrimitive.Root
+      disabled={disabled}
+      value={value ?? ''}
+      onValueChange={(next) => onValueChange(next as V)}
+    >
       <SelectPrimitive.Trigger
         aria-label={ariaLabel}
         className={cn(
-          'inline-flex h-9 min-w-32 cursor-pointer items-center justify-between gap-2 rounded-[10px] border border-border bg-surface px-3 text-[13.5px] text-fg shadow-card outline-none transition-[border-color,box-shadow] hover:border-border-strong focus-visible:border-accent focus-visible:shadow-[0_0_0_3px_var(--ring)] data-[placeholder]:text-fg-3',
+          'inline-flex h-9 min-w-32 cursor-pointer items-center justify-between gap-2 rounded-[10px] border border-border bg-surface px-3 text-[13.5px] text-fg shadow-card outline-none transition-[border-color,box-shadow] hover:border-border-strong focus-visible:border-accent focus-visible:shadow-[0_0_0_3px_var(--ring)] data-[placeholder]:text-fg-3 disabled:cursor-not-allowed disabled:opacity-60',
           className,
         )}
       >

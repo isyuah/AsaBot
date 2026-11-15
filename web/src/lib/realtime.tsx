@@ -46,6 +46,17 @@ function applyFrame(
   pendingLogs: LogRecord[] | null,
 ) {
   switch (frame.type) {
+    case 'connections':
+      void client.invalidateQueries({ queryKey: ['connections'] })
+      void client.invalidateQueries({ queryKey: ['bots'] })
+      void client.invalidateQueries({ queryKey: ['bot'] })
+      void client.invalidateQueries({ queryKey: ['overview'] })
+      break
+    case 'policies':
+      void client.invalidateQueries({ queryKey: ['bot'] })
+      void client.invalidateQueries({ queryKey: ['pluginBots'] })
+      void client.invalidateQueries({ queryKey: ['group'] })
+      break
     case 'task':
       void client.invalidateQueries({ queryKey: ['tasks'] })
       break
@@ -54,6 +65,8 @@ function applyFrame(
       client.setQueryData<BotView[]>(['bots'], frame.overview.bots)
       break
     case 'bot':
+      void client.invalidateQueries({ queryKey: ['bot', frame.bot.platform, frame.bot.selfId] })
+      void client.invalidateQueries({ queryKey: ['pluginBots'] })
       client.setQueryData<BotView[]>(['bots'], (list) => upsertBot(list, frame.bot))
       client.setQueryData<Overview>(['overview'], (overview) =>
         overview ? { ...overview, bots: upsertBot(overview.bots, frame.bot) ?? overview.bots } : overview,
@@ -71,6 +84,8 @@ function applyFrame(
       else void client.invalidateQueries({ queryKey: ['plugins'] })
       void client.invalidateQueries({ queryKey: ['overview'] })
       void client.invalidateQueries({ queryKey: ['commands'] })
+      void client.invalidateQueries({ queryKey: ['bot'] })
+      void client.invalidateQueries({ queryKey: ['pluginBots'] })
       break
     }
     case 'message': {

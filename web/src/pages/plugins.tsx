@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
+  ArrowLeft,
   ArrowUpCircle,
+  Bot as BotIcon,
   FileUp,
   FlaskConical,
   MoreHorizontal,
@@ -20,22 +22,13 @@ import {
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useMemo, useState } from 'react'
 import { toast } from 'sonner'
+import { CompatibilityInfo } from '../components/bot-plugins.tsx'
 import { PackageMarket } from '../components/market.tsx'
 import { hasUpdate, UninstallDialog, UpdateButton, UploadDialog } from '../components/plugin-manage.tsx'
 import { SchemaForm } from '../components/schema-form.tsx'
 import { Button } from '../components/ui/button.tsx'
-import { Sheet } from '../components/ui/dialog.tsx'
 import { Input } from '../components/ui/input.tsx'
-import {
-  Menu,
-  MenuItem,
-  MenuSeparator,
-  PageTabs,
-  Segmented,
-  TabPanel,
-  Tabs,
-  Tooltip,
-} from '../components/ui/misc.tsx'
+import { Menu, MenuItem, MenuSeparator, PageTabs, Segmented, Tooltip } from '../components/ui/misc.tsx'
 import {
   Badge,
   Card,
@@ -49,10 +42,11 @@ import { Select } from '../components/ui/select.tsx'
 import { Switch } from '../components/ui/switch.tsx'
 import { ApiError, api } from '../lib/api.ts'
 import { groupPath } from '../lib/groups.ts'
+import { botPath, invalidatePolicies, pluginPath } from '../lib/management.ts'
 import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
-import { isValidId, usePlatforms } from '../lib/platform.ts'
-import { Link, navigate } from '../lib/router.tsx'
-import type { PluginGroupSetting, PluginStateName, PluginView } from '../lib/types.ts'
+import { isValidId } from '../lib/platform.ts'
+import { Link, navigate, usePath } from '../lib/router.tsx'
+import type { BotView, PluginGroupSetting, PluginStateName, PluginView } from '../lib/types.ts'
 import { playgroundDraft } from '../lib/ui-state.ts'
 import { cn } from '../lib/utils.ts'
 
@@ -105,7 +99,6 @@ export function PluginsPage() {
   const plugins = useQuery({ queryKey: ['plugins'], queryFn: api.plugins })
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState<string | null>(null)
   const [view, setView] = useState<'installed' | 'market'>('installed')
   const [uploading, setUploading] = useState(false)
   const [removing, setRemoving] = useState<PluginView | null>(null)
@@ -150,8 +143,6 @@ export function PluginsPage() {
       failed: data.filter((plugin) => plugin.state === 'failed').length,
     }
   }, [plugins.data])
-
-  const current = plugins.data?.find((plugin) => plugin.name === selected)
 
   return (
     <>
@@ -310,7 +301,7 @@ export function PluginsPage() {
                   <PluginCard
                     key={plugin.name}
                     plugin={plugin}
-                    onOpen={() => setSelected(plugin.name)}
+                    onOpen={() => navigate(pluginPath(plugin.name))}
                     onToggle={(enabled) =>
                       action.mutate({ name: plugin.name, action: enabled ? 'enable' : 'disable' })
                     }
@@ -324,17 +315,10 @@ export function PluginsPage() {
         )}
       </AnimatePresence>
 
-      <PluginSheet
-        plugin={current}
-        open={current !== undefined}
-        onOpenChange={(open) => !open && setSelected(null)}
-        onUninstall={(plugin) => setRemoving(plugin)}
-      />
       <UploadDialog open={uploading} onOpenChange={setUploading} />
       <UninstallDialog
         plugin={removing}
         onClose={() => {
-          if (removing && removing.name === selected) setSelected(null)
           setRemoving(null)
         }}
       />
@@ -465,104 +449,196 @@ function PluginCard({
   )
 }
 
-type SheetTab = 'overview' | 'config' | 'commands' | 'groups'
-
-function PluginSheet({
-  plugin,
-  open,
-  onOpenChange,
-  onUninstall,
-}: {
-  plugin: PluginView | undefined
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onUninstall: (plugin: PluginView) => void
-}) {
-  const [tab, setTab] = useState<SheetTab>('overview')
+export function PluginDetailPage() {
+  const parts = usePath().split('/').filter(Boolean).map(decodeURIComponent)
+  const name = parts[1] ?? ''
+  const tab = parts[2] ?? 'overview'
+  const plugins = useQuery({ queryKey: ['plugins'], queryFn: api.plugins })
+  const [removing, setRemoving] = useState<PluginView | null>(null)
   const { action } = usePluginMutations()
+  if (plugins.error) return <ErrorState error={plugins.error} onRetry={() => void plugins.refetch()} />
+  if (!plugins.data) return <Skeleton className="h-64 rounded-xl" />
+  const plugin = plugins.data.find((item) => item.name === name)
+  if (!plugin)
+    return (
+      <EmptyState
+        icon={<Puzzle />}
+        title="插件不存在或已卸载"
+        action={<Button onClick={() => navigate('/plugins')}>返回插件列表</Button>}
+      />
+    )
   return (
-    <Sheet
-      open={open}
-      onOpenChange={(next) => {
-        onOpenChange(next)
-        if (!next) setTab('overview')
-      }}
-      title={
-        plugin && (
-          <span className="flex items-center gap-2">
+    <>
+      <Link
+        to="/plugins"
+        className="mb-4 inline-flex items-center gap-1.5 text-[13px] text-fg-3 hover:text-fg"
+      >
+        <ArrowLeft className="size-3.5" />
+        插件列表
+      </Link>
+      <PageHeader
+        title={
+          <span className="flex items-center gap-3">
             {plugin.name}
             <Badge tone={stateMeta[plugin.state].tone} dot>
               {stateMeta[plugin.state].label}
             </Badge>
           </span>
-        )
-      }
-      subtitle={plugin?.description}
-      headerExtra={
-        plugin && (
+        }
+        description={plugin.description}
+        actions={
           <>
-            <Tooltip content="重载插件">
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="重载插件"
-                loading={action.isPending && action.variables?.action === 'reload'}
-                onClick={() => action.mutate({ name: plugin.name, action: 'reload' })}
-              >
-                <RotateCw className="size-4" />
-              </Button>
-            </Tooltip>
+            <Button loading={action.isPending} onClick={() => action.mutate({ name, action: 'reload' })}>
+              <RotateCw className="size-3.5" />
+              重载
+            </Button>
             <Switch
-              aria-label="启用插件"
+              aria-label="全局启用插件"
               checked={plugin.enabled}
-              onCheckedChange={(enabled) =>
-                action.mutate({ name: plugin.name, action: enabled ? 'enable' : 'disable' })
-              }
+              disabled={name === 'admin' || action.isPending}
+              onCheckedChange={(enabled) => action.mutate({ name, action: enabled ? 'enable' : 'disable' })}
             />
           </>
-        )
-      }
-    >
-      {plugin && (
-        <Tabs
-          value={tab}
-          onChange={setTab}
-          className="flex h-full flex-col"
-          tabs={[
-            { value: 'overview', label: '概览' },
-            { value: 'config', label: '配置' },
-            { value: 'commands', label: '命令', count: plugin.commands.length },
-            { value: 'groups', label: '群开关' },
-          ]}
-        >
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={tab}
-              initial={{ opacity: 0, x: 8 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -8 }}
-              transition={{ duration: 0.16 }}
-              className="px-6 py-5"
-            >
-              <TabPanel value="overview" forceMount hidden={tab !== 'overview'}>
-                {tab === 'overview' && (
-                  <OverviewTab plugin={plugin} onUninstall={() => onUninstall(plugin)} />
+        }
+      />
+      <div className="mb-5 flex flex-wrap gap-4 text-[13px]">
+        <Link to={`/logs?plugin=${encodeURIComponent(name)}`} className="text-accent">
+          查看日志
+        </Link>
+        <Link to={`/tasks?plugin=${encodeURIComponent(name)}`} className="text-accent">
+          查看任务
+        </Link>
+      </div>
+      <PageTabs
+        value={tab}
+        onChange={(value) => navigate(pluginPath(name, value))}
+        tabs={[
+          { value: 'overview', label: '概览' },
+          { value: 'config', label: '全局配置' },
+          { value: 'commands', label: '命令' },
+          { value: 'bots', label: '机器人' },
+          { value: 'groups', label: '群组' },
+        ]}
+        className="mb-5 overflow-x-auto"
+      />
+      <Card className="p-5 sm:p-6">
+        {tab === 'overview' && (
+          <>
+            <OverviewTab plugin={plugin} onUninstall={() => setRemoving(plugin)} />
+            <CapabilityRequirements plugin={plugin} />
+          </>
+        )}
+        {tab === 'config' && (
+          <>
+            <p className="mb-4 text-[13px] text-fg-3">
+              这里的配置是默认值，机器人与群组可分别覆盖。
+              <Link to={pluginPath(name, 'bots')} className="ml-1 text-accent">
+                查看机器人覆盖
+              </Link>
+            </p>
+            <ConfigTab plugin={plugin} />
+          </>
+        )}
+        {tab === 'commands' && <CommandsTab plugin={plugin} />}
+        {tab === 'bots' && <PluginBots plugin={plugin} />}
+        {tab === 'groups' && <GroupsTab plugin={plugin} />}
+      </Card>
+      <UninstallDialog plugin={removing} onClose={() => setRemoving(null)} />
+    </>
+  )
+}
+
+function CapabilityRequirements({ plugin }: { plugin: PluginView }) {
+  return (
+    <section className="mt-6 border-t border-border pt-5">
+      <h2 className="text-sm font-semibold">机器人能力要求</h2>
+      {!plugin.capabilities ? (
+        <p className="mt-2 text-[13px] text-fg-3">插件未声明能力要求。</p>
+      ) : (
+        <>
+          <p className="mt-2 text-[12.5px] text-fg-3">
+            能力缺失会提示，不影响启用。各机器人的匹配情况可在“机器人”中查看。
+          </p>
+          {(['required', 'optional'] as const).map((kind) => (
+            <div className="mt-4" key={kind}>
+              <h3 className="mb-2 text-[12px] text-fg-3">{kind === 'required' ? '必须能力' : '可选能力'}</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(plugin.capabilities?.[kind] ?? {}).flatMap(([category, names]) =>
+                  names.map((name) => (
+                    <Badge key={`${category}:${name}`}>
+                      <span className="text-fg-3">{category}</span>
+                      {name}
+                    </Badge>
+                  )),
                 )}
-              </TabPanel>
-              <TabPanel value="config" forceMount hidden={tab !== 'config'}>
-                {tab === 'config' && <ConfigTab plugin={plugin} />}
-              </TabPanel>
-              <TabPanel value="commands" forceMount hidden={tab !== 'commands'}>
-                {tab === 'commands' && <CommandsTab plugin={plugin} />}
-              </TabPanel>
-              <TabPanel value="groups" forceMount hidden={tab !== 'groups'}>
-                {tab === 'groups' && <GroupsTab plugin={plugin} />}
-              </TabPanel>
-            </motion.div>
-          </AnimatePresence>
-        </Tabs>
+              </div>
+            </div>
+          ))}
+        </>
       )}
-    </Sheet>
+    </section>
+  )
+}
+
+function PluginBots({ plugin }: { plugin: PluginView }) {
+  const client = useQueryClient()
+  const applications = useQuery({
+    queryKey: ['pluginBots', plugin.name],
+    queryFn: () => api.pluginBots(plugin.name),
+  })
+  const toggle = useMutation({
+    mutationFn: ({ bot, enabled }: { bot: BotView; enabled: boolean }) =>
+      api.botPlugin(bot, plugin.name, { enabled }),
+    onSuccess: () => invalidatePolicies(client),
+  })
+  if (applications.error)
+    return <ErrorState error={applications.error} onRetry={() => void applications.refetch()} />
+  if (!applications.data) return <Skeleton className="h-32" />
+  if (!applications.data.length)
+    return (
+      <EmptyState
+        icon={<BotIcon />}
+        title="还没有机器人"
+        action={<Button onClick={() => navigate('/bots/connections/new')}>添加连接</Button>}
+      />
+    )
+  return (
+    <ul className="divide-y divide-border">
+      {applications.data.map(({ bot, application }) => (
+        <li key={`${bot.platform}:${bot.selfId}`} className="py-4 first:pt-0 last:pb-0">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <Link to={botPath(bot)} className="text-sm font-medium hover:text-accent">
+                {bot.nickname || bot.selfId}
+              </Link>
+              <p className="mt-1 break-all font-mono text-[11.5px] text-fg-3">
+                {bot.platform} · {bot.selfId}
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <Link
+                to={botPath(bot, `plugins/${encodeURIComponent(plugin.name)}`)}
+                className="text-[12.5px] text-accent"
+              >
+                配置与继承
+              </Link>
+              <Switch
+                aria-label={`在 ${bot.nickname ?? bot.selfId} 上启用`}
+                checked={application.overrideEnabled ?? true}
+                disabled={toggle.isPending}
+                onCheckedChange={(enabled) => toggle.mutate({ bot, enabled })}
+              />
+            </div>
+          </div>
+          <CompatibilityInfo value={application.compatibility} />
+          {application.override && (
+            <p className="mt-2 text-[12px] text-fg-3">
+              配置已覆盖：{Object.keys(application.override).join('、')}
+            </p>
+          )}
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -624,6 +700,17 @@ function OverviewTab({ plugin, onUninstall }: { plugin: PluginView; onUninstall:
         )}
         <InfoRow label="命令">{plugin.commands.length} 条</InfoRow>
         <InfoRow label="可配置">{plugin.configSchema ? '是' : '否'}</InfoRow>
+        {plugin.depends && plugin.depends.length > 0 && (
+          <InfoRow label="依赖插件">
+            <span className="inline-flex flex-wrap justify-end gap-2">
+              {plugin.depends.map((name) => (
+                <Link key={name} to={pluginPath(name)} className="text-accent">
+                  {name}
+                </Link>
+              ))}
+            </span>
+          </InfoRow>
+        )}
         {plugin.provides.length > 0 && (
           <InfoRow label="提供服务">
             <ServiceList services={plugin.provides.map((name) => ({ name, optional: false }))} />
@@ -770,9 +857,10 @@ function GroupsTab({ plugin }: { plugin: PluginView }) {
     queryFn: () => api.pluginGroups(plugin.name),
   })
   const [groupId, setGroupId] = useState('')
-  const platforms = usePlatforms()
-  const [platform, setPlatform] = useState('')
-  const effectivePlatform = platform || platforms[0] || ''
+  const bots = useQuery({ queryKey: ['bots'], queryFn: api.bots })
+  const [selectedBot, setSelectedBot] = useState('')
+  const effectiveBot =
+    bots.data?.find((bot) => `${bot.platform}:${bot.selfId}` === selectedBot) ?? bots.data?.[0]
   const set = useMutation({
     mutationFn: ({ groupKey, enabled }: { groupKey: string; enabled: boolean }) =>
       api.setPluginGroup(plugin.name, groupKey, { enabled }),
@@ -796,24 +884,28 @@ function GroupsTab({ plugin }: { plugin: PluginView }) {
         {plugin.configSchema && '按群覆盖配置请到“群组”页面中打开对应的群。'}
       </p>
       <form
-        className="flex gap-2"
+        className="flex flex-wrap gap-2"
         onSubmit={(event) => {
           event.preventDefault()
           const id = groupId.trim()
           if (!isValidId(id)) return toast.error('请输入群 ID')
-          if (!effectivePlatform) return toast.error('没有已连接的平台，无法确定群所属的平台')
-          set.mutate({ groupKey: `${effectivePlatform}:${id}`, enabled: false })
+          if (!effectiveBot) return toast.error('请先添加机器人')
+          set.mutate({
+            groupKey: `${effectiveBot.platform}:${effectiveBot.selfId}:group:${id}`,
+            enabled: false,
+          })
           setGroupId('')
         }}
       >
-        {platforms.length > 1 && (
-          <Select
-            aria-label="平台"
-            value={effectivePlatform}
-            onValueChange={setPlatform}
-            options={platforms.map((item) => ({ value: item, label: item }))}
-          />
-        )}
+        <Select
+          aria-label="机器人"
+          value={effectiveBot ? `${effectiveBot.platform}:${effectiveBot.selfId}` : ''}
+          onValueChange={setSelectedBot}
+          options={(bots.data ?? []).map((bot) => ({
+            value: `${bot.platform}:${bot.selfId}`,
+            label: `${bot.nickname || bot.selfId} · ${bot.platform}`,
+          }))}
+        />
         <Input
           icon={<Users />}
           placeholder="群 ID"
@@ -858,7 +950,7 @@ function GroupsTab({ plugin }: { plugin: PluginView }) {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-[13px] text-fg">
-                      {item.groupKey.split(':').slice(1).join(':')}
+                      {item.groupKey.split(':').slice(3).join(':')}
                     </span>
                     {item.config !== undefined && (
                       <Link to={groupPath(item.groupKey)}>
@@ -866,7 +958,9 @@ function GroupsTab({ plugin }: { plugin: PluginView }) {
                       </Link>
                     )}
                   </div>
-                  <div className="text-[11.5px] text-fg-3">{item.groupKey.split(':')[0]}</div>
+                  <div className="text-[11.5px] text-fg-3">
+                    {item.groupKey.split(':').slice(0, 2).join(' · ')}
+                  </div>
                 </div>
                 <div className="flex items-center gap-3">
                   <span

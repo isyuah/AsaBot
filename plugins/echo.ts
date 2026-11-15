@@ -15,15 +15,16 @@ export default definePlugin({
       .option('times', '-n, --times <n:integer>', { default: 1, description: '重复次数，最多 5 次' })
       .cooldown('2s', { scope: 'user' })
       .example('/echo -n 2 你好')
-      .action(({ args, options }) => {
+      .action(({ session, args, options }) => {
+        const config = ctx.configFor(session)
         if (options.times < 1 || options.times > 5) return '重复次数必须在 1 到 5 之间'
-        if (plainText(args.text).length > ctx.config.maxLen) return `文本不能超过 ${ctx.config.maxLen} 字`
+        if (plainText(args.text).length > config.maxLen) return `文本不能超过 ${config.maxLen} 字`
         // rest 保留消息段，图片、@ 等内容也可以原样复读。
         return Array.from({ length: options.times }, () => args.text).flat()
       })
 
     ctx.on('notice.member.join', async (event) => {
-      if (ctx.config.welcome)
+      if (ctx.configFor(event).welcome)
         await event.bot.sendGroup(event.groupId, [seg.text('欢迎 '), seg.at(event.userId)])
     })
   },

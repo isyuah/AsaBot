@@ -683,6 +683,7 @@ export class PluginManager {
     entry.state.capabilities = definition.capabilities
     entry.state.version = definition.version
     entry.state.description = definition.description
+    entry.state.depends = definition.depends
     const dependencies = serviceDependencies(definition.inject)
     entry.state.inject = [
       ...dependencies.required.map((name) => ({ name, optional: false })),

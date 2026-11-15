@@ -4,6 +4,88 @@ import { type Context, compatibility, definePlugin, z } from '../src/index.ts'
 import { createTestApp } from '../src/testing/index.ts'
 
 describe('bot policies', () => {
+  it('exposes isolated policies, capability hints and inherited configuration through the panel', async () => {
+    const t = await createTestApp({
+      config: { server: { port: 0, panelPassword: 'panel-secret' } },
+      plugins: [
+        definePlugin({
+          name: 'panel-scope',
+          config: z.object({ count: z.number().positive().default(1) }),
+          capabilities: {
+            required: { actions: ['missingAction'] },
+            optional: { segments: ['example:card'] },
+          },
+          setup() {},
+        }),
+      ],
+    })
+    const second = new VirtualAdapter(t.app, { selfId: 'second' })
+    await second.start()
+    try {
+      const base = `http://127.0.0.1:${t.app.server?.address()?.port}/api/panel`
+      const login = await fetch(`${base}/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'panel-secret' }),
+      })
+      const cookie = login.headers.get('set-cookie')?.split(';')[0]
+      if (!cookie) throw new Error('Panel login failed')
+      const request = (path: string, value?: unknown) =>
+        fetch(`${base}${path}`, {
+          method: value === undefined ? 'GET' : 'PUT',
+          headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+          ...(value === undefined ? {} : { body: JSON.stringify(value) }),
+        })
+      const policyPath = '/bots/virtual/10000/plugins/panel-scope'
+      expect((await request('/bots/virtual/10000/admins', { admins: ['20'] })).status).toBe(200)
+      t.app.policies.load()
+      expect(t.app.isBotAdmin({ platform: 'virtual', selfId: '10000', userId: '20' })).toBe(true)
+      expect(t.app.isBotAdmin({ platform: 'virtual', selfId: 'second', userId: '20' })).toBe(false)
+      expect((await request(policyPath, { enabled: false, config: { count: 0 } })).status).toBe(400)
+      expect(t.app.plugins.isEnabledOnBot('panel-scope', t.mock.bot)).toBe(true)
+      const updated = await request(policyPath, { enabled: false, config: { count: 2 } })
+      expect(updated.status).toBe(200)
+      expect(await updated.json()).toMatchObject({
+        state: 'active',
+        botEnabled: false,
+        effectiveConfig: { count: 2 },
+        configSources: { count: 'bot' },
+        compatibility: {
+          required: [{ kind: 'actions', name: 'missingAction' }],
+          optional: [{ kind: 'segments', name: 'example:card' }],
+        },
+      })
+      const applications = await (await request('/plugins/panel-scope/bots')).json()
+      expect(applications).toContainEqual(
+        expect.objectContaining({
+          bot: expect.objectContaining({ selfId: 'second' }),
+          application: expect.objectContaining({ botEnabled: true, effectiveConfig: { count: 1 } }),
+        }),
+      )
+      const groupKey = encodeURIComponent('virtual:10000:group:10')
+      expect(
+        (await request(`/plugins/panel-scope/groups/${groupKey}`, { config: { count: 3 } })).status,
+      ).toBe(200)
+      const group = await (await request(`/groups/${groupKey}`)).json()
+      expect(group.plugins).toContainEqual(
+        expect.objectContaining({
+          name: 'panel-scope',
+          inheritedConfig: { count: 2 },
+          effectiveConfig: { count: 3 },
+          configSources: { count: 'group' },
+        }),
+      )
+      expect(await (await request(policyPath, { enabled: null, config: null })).json()).toMatchObject({
+        botEnabled: true,
+        effectiveConfig: { count: 1 },
+        configSources: { count: 'default' },
+      })
+    } finally {
+      await second.stop()
+      await t.dispose()
+    }
+  })
+
   it('isolates administrators, group rules and plugin callbacks for bots on the same platform', async () => {
     const plugin = definePlugin({
       name: 'scoped',

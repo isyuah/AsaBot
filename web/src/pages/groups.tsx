@@ -9,13 +9,12 @@ import {
   Settings2,
   ShieldCheck,
   TerminalSquare,
-  Undo2,
   Users,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { SchemaForm } from '../components/schema-form.tsx'
+import { ScopedConfig } from '../components/scoped-config.tsx'
 import { Button } from '../components/ui/button.tsx'
 import { Sheet } from '../components/ui/dialog.tsx'
 import { Input } from '../components/ui/input.tsx'
@@ -23,12 +22,12 @@ import { TabPanel, Tabs } from '../components/ui/misc.tsx'
 import { Badge, Card, EmptyState, ErrorState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
 import { Select } from '../components/ui/select.tsx'
 import { Switch } from '../components/ui/switch.tsx'
-import { ApiError, api } from '../lib/api.ts'
+import { api } from '../lib/api.ts'
 import { groupPath } from '../lib/groups.ts'
 import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
-import { isValidId, platformName, usePlatforms } from '../lib/platform.ts'
+import { isValidId, platformName } from '../lib/platform.ts'
 import { navigate, usePath } from '../lib/router.tsx'
-import type { AccessEntry, GroupDetail, GroupView, PluginView } from '../lib/types.ts'
+import type { AccessEntry, GroupDetail, GroupView } from '../lib/types.ts'
 import { cn } from '../lib/utils.ts'
 
 /** `/groups/<encoded key>` opens that group's sheet, so other pages can deep-link to it. */
@@ -48,9 +47,10 @@ export function GroupsPage() {
   })
   const [query, setQuery] = useState('')
   const [adding, setAdding] = useState('')
-  const platforms = usePlatforms()
-  const [platform, setPlatform] = useState('')
-  const effectivePlatform = platform || platforms[0] || ''
+  const bots = useQuery({ queryKey: ['bots'], queryFn: api.bots })
+  const [selectedBot, setSelectedBot] = useState('')
+  const effectiveBot =
+    bots.data?.find((bot) => `${bot.platform}:${bot.selfId}` === selectedBot) ?? bots.data?.[0]
 
   const filtered = useMemo(() => {
     const keyword = query.trim().toLowerCase()
@@ -90,19 +90,20 @@ export function GroupsPage() {
             event.preventDefault()
             const id = adding.trim()
             if (!isValidId(id)) return toast.error('请输入群 ID')
-            if (!effectivePlatform) return toast.error('没有已连接的平台，无法确定群所属的平台')
+            if (!effectiveBot) return toast.error('请先添加机器人')
             setAdding('')
-            navigate(groupPath(`${effectivePlatform}:${id}`))
+            navigate(groupPath(`${effectiveBot.platform}:${effectiveBot.selfId}:group:${id}`))
           }}
         >
-          {platforms.length > 1 && (
-            <Select
-              aria-label="平台"
-              value={effectivePlatform}
-              onValueChange={setPlatform}
-              options={platforms.map((item) => ({ value: item, label: platformName(item) }))}
-            />
-          )}
+          <Select
+            aria-label="机器人"
+            value={effectiveBot ? `${effectiveBot.platform}:${effectiveBot.selfId}` : ''}
+            onValueChange={setSelectedBot}
+            options={(bots.data ?? []).map((bot) => ({
+              value: `${bot.platform}:${bot.selfId}`,
+              label: `${bot.nickname || bot.selfId} · ${bot.platform}`,
+            }))}
+          />
           <Input
             icon={<Users />}
             placeholder="按群 ID 打开"
@@ -174,11 +175,7 @@ function GroupRow({ group }: { group: GroupView }) {
         <div className="mt-0.5 flex items-center gap-2 text-[11.5px] text-fg-3">
           <span className="font-mono">{group.groupId}</span>
           <span>{platformName(group.platform)}</span>
-          {group.bots.length > 0 ? (
-            <span>{group.bots.length} 个机器人在群内</span>
-          ) : (
-            <span>机器人不在群内</span>
-          )}
+          {group.bots.length > 0 ? <span>机器人 {group.selfId}</span> : <span>机器人不在群内</span>}
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
@@ -310,8 +307,7 @@ function PluginsTab({ detail, groupKey }: { detail: GroupDetail; groupKey: strin
   return (
     <div className="space-y-4">
       <p className="text-[13px] leading-relaxed text-fg-3">
-        关闭后，插件在这个群的命令、监听器和中间件都会被跳过。配置覆盖只替换你修改过的顶层配置项，其余沿用全局配置；只有通过{' '}
-        <code className="font-mono text-[12px]">ctx.configFor</code> 读取配置的插件代码会按群生效。
+        插件开关与配置仅应用于这台机器人的当前群。配置按全局、机器人、群组逐层继承，保存覆盖后立即生效。
       </p>
       <ul className="space-y-2">
         {detail.plugins.map((item) => {
@@ -354,7 +350,15 @@ function PluginsTab({ detail, groupKey }: { detail: GroupDetail; groupKey: strin
                     className="overflow-hidden"
                   >
                     <div className="border-t border-border bg-surface-2/40 px-4 py-4">
-                      <OverrideForm plugin={plugin} groupKey={groupKey} override={item.override} />
+                      <ScopedConfig
+                        plugin={plugin}
+                        inherited={item.inheritedConfig}
+                        effective={item.effectiveConfig}
+                        override={item.override}
+                        sources={item.configSources ?? {}}
+                        save={(config) => api.setPluginGroup(plugin.name, groupKey, { config })}
+                        onSaved={invalidate}
+                      />
                     </div>
                   </motion.div>
                 )}
@@ -363,75 +367,6 @@ function PluginsTab({ detail, groupKey }: { detail: GroupDetail; groupKey: strin
           )
         })}
       </ul>
-    </div>
-  )
-}
-
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
-
-/** Edits a group's config override: the form shows the effective values and only changed top-level keys are saved. */
-function OverrideForm({
-  plugin,
-  groupKey,
-  override,
-}: {
-  plugin: PluginView
-  groupKey: string
-  override: Record<string, unknown> | undefined
-}) {
-  const invalidate = useGroupInvalidation(groupKey)
-  const [issues, setIssues] = useState<Record<string, string>>({})
-  const global = (plugin.config ?? {}) as Record<string, unknown>
-  const value = useMemo(() => ({ ...global, ...override }), [global, override])
-  const save = useMutation({
-    mutationFn: (config: Record<string, unknown> | null) =>
-      api.setPluginGroup(plugin.name, groupKey, { config }),
-    meta: { silent: true },
-    onSuccess: (_result, config) => {
-      setIssues({})
-      toast.success(config === null ? '已清除这个群的配置覆盖' : '已保存这个群的配置覆盖')
-      invalidate()
-    },
-    onError: (error) => {
-      if (error instanceof ApiError && error.status === 400) {
-        setIssues(
-          Object.fromEntries(
-            error.issues.map((issue) => [
-              issue.path.replace(/^(?:plugins\.[^.]+\.)?config\.?/, ''),
-              issue.message,
-            ]),
-          ),
-        )
-      } else toast.error(error.message)
-    },
-  })
-  if (!plugin.configSchema) return null
-  return (
-    <div className="space-y-3">
-      {override && (
-        <div className="flex items-center justify-between gap-3 rounded-lg bg-accent-soft px-3 py-2 text-[12.5px] text-accent-soft-fg">
-          <span>已覆盖：{Object.keys(override).join('、')}</span>
-          <Button variant="ghost" size="sm" loading={save.isPending} onClick={() => save.mutate(null)}>
-            <Undo2 className="size-3.5" />
-            全部恢复为全局配置
-          </Button>
-        </div>
-      )}
-      <SchemaForm
-        schema={plugin.configSchema}
-        value={value}
-        issues={issues}
-        saving={save.isPending}
-        note="只保存与全局配置不同的顶层配置项，立即生效，不重载插件"
-        submitLabel="保存覆盖"
-        onSubmit={(next) => {
-          const record = (next ?? {}) as Record<string, unknown>
-          const diff = Object.fromEntries(
-            Object.entries(record).filter(([key, item]) => !same(item, global[key])),
-          )
-          save.mutate(Object.keys(diff).length > 0 ? diff : null)
-        }}
-      />
     </div>
   )
 }
@@ -498,7 +433,11 @@ function CommandsTab({ detail, groupKey }: { detail: GroupDetail; groupKey: stri
 function AccessTab({ group }: { group: GroupView }) {
   const client = useQueryClient()
   const invalidate = useGroupInvalidation(group.groupKey)
-  const entry = (list: 'block' | 'allow'): AccessEntry => ({ list, subject: 'group', key: group.groupKey })
+  const entry = (list: 'block' | 'allow'): AccessEntry => ({
+    list,
+    subject: 'group',
+    key: `${group.platform}:${group.groupId}`,
+  })
   const run = useMutation({
     mutationFn: async ({ add, remove }: { add?: AccessEntry; remove?: AccessEntry }) => {
       if (remove) await api.removeAcl(remove)
@@ -526,6 +465,9 @@ function AccessTab({ group }: { group: GroupView }) {
   ]
   return (
     <div className="space-y-3">
+      <p className="text-[13px] text-fg-3">
+        访问控制按平台和群共享，会同时影响其他机器人收到的这个群的事件。
+      </p>
       {options.map((option) => {
         const active = current === option.list
         return (
