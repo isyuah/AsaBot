@@ -23,7 +23,7 @@ npm install
 npm run dev
 ```
 
-按提示选择 bot 模板和目录；使用自定义目录时，将上面的 `cd` 改为对应路径。首次启动后打开 <http://127.0.0.1:5140>，输入终端显示的一次性设置码，按向导设置面板密码、超管和聊天平台连接。`npm run dev` 会开启插件热重载，正式运行使用 `npm start`。
+按提示选择 bot 模板和目录；使用自定义目录时，将上面的 `cd` 改为对应路径。首次启动后打开 <http://127.0.0.1:5140>，输入终端显示的一次性设置码并设置面板密码，再到「机器人 → 连接」添加平台连接。框架管理员在「设置」中添加，机器人管理员在具体机器人的设置中添加。`npm run dev` 会开启插件热重载，正式运行使用 `npm start`。
 
 默认数据保存在 `data/`，配置保存在 `asabot.config.yaml`。向导将面板密码写入配置文件，之后可以改成环境变量引用。更多连接和备份说明见 [部署文档](docs/DEPLOY.md)。
 
@@ -33,10 +33,11 @@ npm run dev
 
 | 配置项 | 用途 |
 | --- | --- |
-| `log`、`timezone`、`dataDir`、`superusers` | 日志级别和可选的轮转文件、时区、数据目录、超管 ID 列表 |
+| `log`、`timezone`、`dataDir`、`superusers` | 日志、时区、数据目录、框架管理员 `{ platform, selfId, userId }` 列表 |
 | `command` | 前缀、@机器人触发方式，以及错误和权限提示 |
 | `dispatch` | 处理器超时、忽略自身消息、prompt 默认和最大超时 |
-| `adapters.onebot11` | 正向 WS 地址、反向 WS token、API 超时、重连和发送队列；支持多个账号 |
+| `connections` | 独立连接 `{ id, name, adapter, enabled, config }`，每条连接分别配置、启停与重连 |
+| `adapterModules` | 已安装的外部适配器包名，启动时加载 |
 | `pluginLoader` | 插件目录和热重载开关；`auto` 在 `NODE_ENV` 不是 `production` 时开启 |
 | `packages` | 插件包目录、npm registry、npm 可执行文件和安装超时时间 |
 | `plugins.<name>.enabled` | 插件全局开关，缺省为 `true` |
@@ -44,6 +45,16 @@ npm run dev
 | `server` | HTTP 监听地址和端口、面板密码、对外 API token；密码或 token 为空时分别关闭对应功能 |
 
 时长可以写毫秒数或 `10s`、`5m`、`1h30m` 等字符串。内置插件也使用 `plugins` 配置。通过管理命令修改全局插件开关时会写回配置文件；按群开关和访问控制保存在 SQLite 中。
+
+每个飞书应用单独创建一条连接；OneBot 正向连接和反向监听也分别创建。反向监听可接入多个机器人，地址为 `ws://主机:5140/connections/<连接ID>/onebot/v11/ws`。旧的根配置 `adapters` 已移除，现有配置需改为 `connections`，详见示例配置。
+
+## 开发和加载适配器
+
+适配器可以独立开发成 ESM npm 包。通过 `@asabot/core` 导入 `defineAdapter` 和类型，默认导出适配器定义，声明 `id`、`platform`、名称、版本、连接方式、能力、配置 schema 以及 `create(config, host)`。驱动实现 `start()`、`stop()` 和 `reconfigure(config)`；框架在调用前校验配置，每条连接分别创建实例。实现可参考 [内置注册](src/adapters/index.ts) 与 [AdapterHost 契约](src/core/adapter.ts)。
+
+驱动通过 host 注册和注销 Bot、发送事件及上报连接状态；通过 `prepareOutgoing`、`invokeApi` 接入统一发送钩子与 API 管线。被动 WebSocket 使用 `registerUpgrade`，框架自动加上连接 ID 路径前缀。停止时需要回收连接、监听器和在途请求。
+
+在运行 AsaBot 的项目目录通过包管理器安装适配器包，再将真实包名加入 `adapterModules`，重启后即可在「适配器」页面查看并添加连接。适配器包和业务插件包使用各自的注册契约。
 
 ## 内置插件
 
@@ -69,6 +80,10 @@ await session.send(seg.image(image))
 
 ## 管理面板与对外 API
 
+「机器人」分别展示账号和连接。连接尚未登录或登录失败时也会保留状态、异常及重试时间；进入机器人详情可管理该机器人的插件应用、群规则和管理员。「适配器」展示版本、来源、实现能力和配置字段。
+
+插件详情包含概览、全局配置、命令、机器人和群组，可查看每台机器人的能力匹配与配置来源，并跳转到该插件的日志和任务。机器人级开关限制该插件的事件、命令、发送钩子、API 拦截及后台 Bot API 调用；插件实例、服务、定时器和任务调度仍是全局资源。
+
 配置非空的 `server.panelPassword` 可启用面板，配置 `server.apiToken` 可启用对外 API；配置值可以用 `${ASABOT_PANEL_PASSWORD}` 等语法引用环境变量或 `.env`。两者相互独立；都为空且未配置反向 WebSocket 时不监听 HTTP 端口。默认地址为 `http://127.0.0.1:5140`。安装的框架包已包含面板，访问该地址即可。面板登录会创建 7 天有效的会话 cookie，进程重启后需要重新登录。
 
 对外 API 使用 `Authorization: Bearer <token>`。例如，在设置 `ASABOT_API_TOKEN` 的 shell 中：
@@ -91,6 +106,7 @@ curl -X POST http://127.0.0.1:5140/api/v1/send \
 | `/plugin list` | 超管 | 查看插件状态和失败原因；`-p` 翻页 |
 | `/plugin enable <name>`、`/plugin disable <name>`、`/plugin reload <name>` | 超管 | 管理全局插件 |
 | `/plugin on <name>`、`/plugin off <name>` | 群主、群管理员或超管 | 在当前群开启或关闭插件；不能在群内关闭 `admin` |
+| `/bot plugin on <name>`、`/bot plugin off <name>` | 机器人管理员或框架管理员 | 在当前机器人开启或关闭插件 |
 | `/acl list` | 超管 | 查看访问控制列表；`-p` 翻页 |
 | `/acl block user <用户>`、`/acl allow user <用户>` | 超管 | 屏蔽或允许用户，用户可用 ID 或 @用户 |
 | `/acl block group [群]`、`/acl allow group [群]` | 超管 | 屏蔽或允许群；省略群 ID 时使用当前群 |
@@ -155,7 +171,7 @@ export default definePlugin({
 | `ctx.command(declaration)` | 注册命令并链式设置选项、权限和 action |
 | `ctx.match(pattern, handler, options)` | 按字符串、正则或函数匹配消息 |
 | `ctx.filter(predicate)`、`ctx.platform(...names)` | 只在符合条件的事件中启用注册的处理器 |
-| `ctx.configFor(session)` | 获取当前群合并并校验后的插件配置 |
+| `ctx.configFor(session / bot / groupKey)` | 获取继承机器人与群覆盖并校验后的插件配置 |
 | `ctx.route(app => ...)` | 注册插件的 Hono HTTP 路由，插件卸载时回收 |
 | `ctx.panel.page`、`ctx.panel.route`、`ctx.panel.push` | 注册面板页面、受面板认证保护的数据接口和实时事件 |
 | `ctx.cron`、`ctx.interval`、`ctx.timeout` | 注册定时任务 |
@@ -364,11 +380,22 @@ Web 面板的「任务中心」支持筛选、分页、查看参数和执行历�
 
 ### 按群开关与热重载
 
-`ctx.platform('onebot11').filter(event => groupKeyOf(event) === 'onebot11:123').command('hello')` 只在对应平台和群生效；`groupKeyOf` 从 `@asabot/core` 导入，过滤条件可以链式组合。过滤上下文支持注册观察者、中间件、命令和匹配器，资源仍随插件卸载回收。
+插件可在 `definePlugin` 中声明平台能力要求，例如：
 
-声明配置 schema 的插件可以在处理器中调用 `ctx.configFor(session)` 读取按群配置；也可传入 `platform:groupId` 字符串。群覆盖项浅合并到全局配置的顶层，再由 schema 校验；私聊返回全局配置。
+```ts
+capabilities: {
+  required: { actions: ['sendForward'] },
+  optional: { segments: ['image'], textStyles: ['bold'] },
+},
+```
 
-群主、群管理员或超管可在群内发送 `/plugin off echo` 和 `/plugin on echo`，只影响当前平台和群；该插件的观察者、中间件、命令和匹配器都会受开关影响。全局启停由超管使用 `/plugin disable echo` 和 `/plugin enable echo`。
+面板按机器人的实际能力展示缺失的必须和可选项；这些声明用于兼容性提示，仍可启用和执行。服务依赖 `inject.required` 缺失则阻止加载，普通插件依赖 `depends` 用于加载顺序和级联重载。平台应用是否获得具体权限，仍在平台侧配置。
+
+`ctx.platform('onebot11').filter(event => groupKeyOf(event) === 'onebot11:10000:group:123').command('hello')` 只在指定机器人和群生效；`groupKeyOf` 从 `@asabot/core` 导入，过滤条件可以链式组合。过滤上下文支持注册观察者、中间件、命令和匹配器，资源仍随插件卸载回收。
+
+声明配置 schema 的插件可以调用 `ctx.configFor(session)`、`ctx.configFor(bot)`，或传入 `platform:selfId:group:groupId` 群键。配置按全局原始输入 → 机器人覆盖 → 当前机器人的群覆盖递归合并，对象逐字段合并，数组整体替换，最后执行 schema 解析与默认值填充；私聊也应用机器人覆盖。`ctx.config` 始终是全局配置。保存父级配置会先校验所有受影响的子级，有任何校验失败则不写入；清除覆盖即可恢复继承。
+
+群主、群管理员、机器人管理员或框架管理员可在群内发送 `/plugin off echo` 和 `/plugin on echo`，只影响当前机器人在该群的行为。机器人管理员可用 `/bot plugin off echo` 和 `/bot plugin on echo` 管理本机器人。全局启停、安装与卸载由框架管理员操作；`Session.isSuperuser` 对应框架管理员，`Session.isBotAdmin` 和 `bot.admin` 对应机器人管理权限。
 
 默认在非 production 环境监听插件目录，修改入口及其相对导入的文件后自动重载；也可用 `/plugin reload <name>` 手动重载。新代码导入失败时旧实例继续运行；删除入口文件会卸载插件并将其从列表中移除，依赖它的插件进入 failed 状态，入口恢复后自动重新协调。Node 的 ESM 缓存不能清除，频繁热重载会保留旧模块并逐渐增加内存占用，长时间开发后可重启进程。
 

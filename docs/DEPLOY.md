@@ -6,7 +6,7 @@ AsaBot 支持 OneBot 11 协议，可以连接已有的 OneBot 11 服务；NapCat
 
 需要 Node.js 24 或更高版本及 pnpm。以下命令在仓库根目录执行，Windows PowerShell 的复制命令为 `Copy-Item asabot.config.example.yaml asabot.config.yaml`。
 
-也可以先安装依赖、构建面板并直接运行 `pnpm start`，由首次运行向导生成配置。配置文件不存在，或者面板密码和适配器均为空时，控制台 stderr 会显示一次性设置码；打开 `http://127.0.0.1:5140`，输入设置码并设置至少 8 位的面板密码、超管和可选连接。设置码只在当前进程有效，重启后会重新生成。向导将密码明文写入配置文件；之后建议将 `server.panelPassword` 改成 `${ASABOT_PANEL_PASSWORD}`，并通过环境变量或 `.env` 提供密码。
+也可以先安装依赖、构建面板并直接运行 `pnpm start`，由首次运行向导生成配置。配置文件不存在，或者面板密码和连接均为空时，控制台 stderr 会显示一次性设置码；打开 `http://127.0.0.1:5140`，输入设置码并设置至少 8 位的面板密码；进入面板后在「机器人 → 连接」添加连接，在「设置」中添加框架管理员。设置码只在当前进程有效，重启后会重新生成。向导将密码明文写入配置文件；之后建议将 `server.panelPassword` 改成 `${ASABOT_PANEL_PASSWORD}`，并通过环境变量或 `.env` 提供密码。
 
 首次生成配置时可用 `ASABOT_HOST` 和 `ASABOT_PORT` 设置监听地址和端口，默认是 `127.0.0.1` 和 `5140`；这两个变量不会覆盖已有配置。
 
@@ -16,7 +16,7 @@ cp asabot.config.example.yaml asabot.config.yaml
 pnpm --filter web build
 ```
 
-编辑配置文件，根据实际接入方式配置 `adapters.onebot11`。默认面板只监听 `127.0.0.1:5140`。设置面板密码、按需设置 API token 及连接 token，然后以生产模式启动：
+编辑配置文件，根据实际接入方式配置根级 `connections`。默认面板只监听 `127.0.0.1:5140`。设置面板密码、按需设置 API token 及连接 token，然后以生产模式启动：
 
 ```sh
 export NODE_ENV=production
@@ -84,9 +84,14 @@ OneBot 实现开启 OneBot 11 WebSocket 服务端，AsaBot 主动连接。将 Do
 
 ```yaml
 connections:
-  - type: forward
-    url: ws://host.docker.internal:3001
-    accessToken: ${ONEBOT_TOKEN}
+  - id: onebot-main
+    name: OneBot 主连接
+    adapter: onebot11
+    enabled: true
+    config:
+      type: forward
+      url: ws://host.docker.internal:3001
+      accessToken: ${ONEBOT_TOKEN}
 ```
 
 直接运行 Node 且服务在本机时，地址可用 `ws://127.0.0.1:3001`。在容器中 `127.0.0.1` 指向容器自身；Docker Desktop 的宿主机可用 `host.docker.internal`，本仓库 Compose 也为 Linux 配置了 `host-gateway`。宿主机服务还需监听容器能访问的地址并允许相应连接。如果服务在远程主机，填写其可达地址，优先使用 `wss://`。
@@ -98,15 +103,17 @@ connections:
 AsaBot 接收连接，OneBot 实现主动连接。配置：
 
 ```yaml
-adapters:
-  onebot11:
-    connections: []
-    reverse:
-      enabled: true
+connections:
+  - id: onebot-reverse
+    name: OneBot 反向监听
+    adapter: onebot11
+    enabled: true
+    config:
+      type: reverse
       accessToken: ${ONEBOT_REVERSE_TOKEN}
 ```
 
-在 OneBot 实现中配置 OneBot 11 Universal WebSocket 客户端，地址填 `ws://<host>:5140/onebot/v11/ws`，token 与 `ONEBOT_REVERSE_TOKEN` 一致。对端需发送 `X-Self-ID`；多个账号可以连接同一地址。Compose 默认只在宿主机本地发布端口，远程客户端需通过反向代理访问，或将端口发布到受控网络接口。在 TLS 代理后使用 `wss://<域名>/onebot/v11/ws`。
+在 OneBot 实现中配置 OneBot 11 Universal WebSocket 客户端，地址填 `ws://<host>:5140/connections/onebot-reverse/onebot/v11/ws`，token 与 `ONEBOT_REVERSE_TOKEN` 一致。对端需发送 `X-Self-ID`；多个账号可以连接同一地址。Compose 默认只在宿主机本地发布端口，远程客户端需通过反向代理访问，或将端口发布到受控网络接口。在 TLS 代理后使用 `wss://<域名>/connections/onebot-reverse/onebot/v11/ws`。
 
 ## HTTPS 反向代理
 

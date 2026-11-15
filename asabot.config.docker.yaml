@@ -7,7 +7,7 @@ log:
   #   maxFiles: 5
 # timezone: Asia/Shanghai # 省略时使用环境变量 TZ 或系统时区
 dataDir: /app/data
-# 按需填写超管用户 ID（字符串）
+# 框架管理员绑定平台、机器人和用户 ID；也可在面板设置中添加
 superusers: []
 
 command:
@@ -25,18 +25,23 @@ packages:
   npm: npm
   installTimeout: 5m
 
-adapters:
-  onebot11:
-    # 按需添加正向连接，token 由环境变量提供
-    connections: []
-    # connections:
-    #   - type: forward
-    #     url: ws://host.docker.internal:3001
-    #     accessToken: ${ONEBOT_TOKEN}
-    # 按需启用反向连接，token 由环境变量提供
-    reverse:
-      enabled: false
-      accessToken: ${ONEBOT_REVERSE_TOKEN:-}
+adapterModules: []
+# 可在面板「机器人 → 连接」中添加，或参考下列配置
+connections: []
+# connections:
+#   - id: onebot-main
+#     name: OneBot 主连接
+#     adapter: onebot11
+#     enabled: true
+#     config:
+#       type: forward
+#       url: ws://host.docker.internal:3001
+#       accessToken: ${ONEBOT_TOKEN}
+#   - id: onebot-reverse
+#     name: OneBot 反向监听
+#     adapter: onebot11
+#     enabled: true
+#     config: { type: reverse, accessToken: '${ONEBOT_REVERSE_TOKEN:-}' }
 
 server:
   host: 0.0.0.0

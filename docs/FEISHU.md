@@ -5,18 +5,23 @@
 ## 配置
 
 ```yaml
-adapters:
-  feishu:
-    accounts:
-      - appId: ${FEISHU_APP_ID}
-        appSecret: ${FEISHU_APP_SECRET}
-    apiTimeout: 30s
-    mediaMaxBytes: 20971520
-    dedupCapacity: 10000
-    dedupTtl: 10m
+connections:
+  - id: feishu-main
+    name: 飞书主机器人
+    adapter: feishu
+    enabled: true
+    config:
+      appId: ${FEISHU_APP_ID}
+      appSecret: ${FEISHU_APP_SECRET}
+      apiTimeout: 30s
+      mediaMaxBytes: 20971520
+      dedupCapacity: 10000
+      dedupTtl: 10m
 ```
 
-在 `.env` 或运行环境设置凭据。可添加多个账号，App ID 不能重复；移除账号关闭对应连接，更新凭据重建对应连接，其他账号保持运行。面板遮蔽 App Secret。
+在 `.env` 或运行环境设置凭据。也可以在面板「机器人 → 连接 → 添加连接」选择飞书。每个应用单独创建一条连接，App ID 不能重复；独立修改、停用或删除连接，其他连接保持运行。连接详情可查看登录前异常、重试时间并手动重连，App Secret 会遮蔽。成功登录后展示平台返回的机器人名称和头像。
+
+机器人管理员在「机器人 → 对应机器人 → 设置」中填写该应用下的用户 open_id；框架管理员在「设置」中填写平台、机器人 open_id 和用户 open_id。不要把 App ID 当作机器人 ID。
 
 ## 开放平台设置
 
@@ -98,6 +103,11 @@ ctx.on('notice.feishu.card.action', (event) => {
 中立 `seg.button(label, {command:'/命令'})` 和 `bot.feishu.commandButton(label, command)` 生成带签名的命令按钮。点击后使用点击者身份进入正常命令管线，仍检查前缀、权限、ACL、冷却和群开关。其他 value、伪造签名以及表单提交均不触发命令。签名绑定应用凭据和机器人，轮换 App Secret 后需重新发送旧命令按钮。
 
 ## 联调
+
+1. 打开「机器人 → 连接」，确认飞书连接为在线，再进入关联机器人核对名称和头像。
+2. 在机器人「插件」中关闭一个业务插件，测试它不再响应；重新启用后恢复。全局插件详情的「机器人」页可以查看各机器人的应用和能力匹配。
+3. 在全局、机器人和群配置中分别修改字段，核对有效配置与「字段来源」，再用「恢复继承」清除覆盖。
+4. 在机器人设置中添加当前应用的用户 open_id，验证 `/bot plugin off <name>` 可用，而全局 `/plugin disable <name>` 仍需框架管理员。
 
 - 私聊命令、群内 @命令；核对身份、toMe 与引用回复。
 - 文字、图片、文件、富文本、混合消息及逐条发送记录。

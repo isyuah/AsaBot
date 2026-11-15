@@ -80,7 +80,7 @@ export const docPages: DocPage[] = [
         nl +
         '2. 输入当前进程的一次性设置码，设置面板密码和超管。' +
         nl +
-        '3. 按向导配置聊天平台连接。OneBot 11 的两种接入方式见[连接聊天平台](/docs/connections)。' +
+        '3. 完成向导后，在「机器人 → 连接」添加平台连接。OneBot 11 的两种接入方式见[连接聊天平台](/docs/connections)。' +
         nl +
         '4. 在机器人的群聊或私聊中发送 `/help` 或 `/ping`，查看回复。',
       '设置码仅在当前进程中有效。向导将配置保存到 `asabot.config.yaml`；之后可以将面板密码改成[环境变量引用](/docs/configuration#环境变量)。',
@@ -139,7 +139,7 @@ export const docPages: DocPage[] = [
     content: md(
       '## 接入方式',
       section(deployment, '# 部署 AsaBot', '## 直接用 Node.js 运行'),
-      '连接配置写在 `asabot.config.yaml` 的 `adapters.onebot11` 下。正向连接由 AsaBot 连接平台，反向连接由平台连接 AsaBot；部署在容器中时，还需要留意宿主机和容器的网络地址。',
+      '连接可以在面板「机器人 → 连接」管理，也可以写在 `asabot.config.yaml` 的根级 `connections` 中，每条连接指定独立 ID、适配器和配置。正向连接由 AsaBot 连接平台，反向连接由平台连接 AsaBot；部署在容器中时，还需要留意宿主机和容器的网络地址。',
       section(deployment, '## 连接 OneBot 11 服务', '## HTTPS 反向代理'),
       '## 排查连接问题',
       '- **连接被拒绝**：检查对端服务地址、端口和监听接口；容器中的 `127.0.0.1` 指向容器自身。' +

@@ -76,9 +76,9 @@ docs/
 
 文件 `asabot.config.yaml`（git 忽略；仓库提交 `asabot.config.example.yaml`）。启动时自动加载 `.env`（若存在）。
 
-- `adapters` 段：核心 schema 只把它当作 `Record<string, unknown>`，每个适配器在注册表中提供自己的 zod schema 并校验自己那一段，错误路径带上 `adapters.<name>.` 前缀。出现未注册的适配器名时报错，并列出可用的适配器。
+- `connections` 数组：每条连接有独立 id、名称、adapter、enabled 和 config；核心校验公共结构，注册的适配器定义校验 config。`adapterModules` 指定启动时从项目安装目录加载的额外适配器包。
 - 字符串标量支持 `${VAR}` 与 `${VAR:-default}` 插值；变量缺失且无默认值 → 启动失败并指出变量名与配置路径。
-- 整体用 zod 校验；失败时输出可读的路径化错误，例如 `onebot11.connections[0].url: Invalid URL`。
+- 整体用 zod 校验；失败时输出可读的路径化错误，例如 `connections.primary.config.url: Invalid URL`。
 - 时长字段接受 `'10s' | '5m' | '1h30m' | '1d'` 或毫秒数。
 - **写回**（M3 起）：基于 `yaml` 的 Document AST 修改指定路径，保留注释与 `${VAR}` 原文，原子写入（写临时文件后 rename）。
 
@@ -91,7 +91,7 @@ log:
     maxFiles: 5
 timezone: Asia/Shanghai     # IANA 时区；cron 和“今日”统计都按它计算。省略时取环境变量 TZ，再没有就用系统时区
 dataDir: ./data
-superusers: ['10001']       # 平台用户 ID（字符串）
+superusers: [{ platform: onebot11, selfId: "10000", userId: "10001" }]
 
 command:
   prefixes: ['/']
@@ -106,18 +106,19 @@ dispatch:
   promptTimeout: 60s        # session.prompt 默认超时
   maxPromptTimeout: 30m
 
-adapters:                   # 每个键是一个已注册的适配器；配置结构由适配器自己的 schema 定义和校验
-  onebot11:
-    apiTimeout: 30s
-    reconnect: { minDelay: 1s, maxDelay: 60s }
-    connections:
-      - type: forward
-        url: ws://127.0.0.1:3001
-        accessToken: ${ONEBOT_TOKEN:-}
-    reverse:                  # enabled 为 true 时接受反向连接（OneBot 实现主动连 AsaBot），地址为 ws://<server>/onebot/v11/ws
-      enabled: false
-      accessToken: ${ONEBOT_REVERSE_TOKEN:-}
-    sendQueue: { interval: 500ms, jitter: 300ms, maxPending: 100 }   # M5
+adapterModules: []
+connections:
+  - id: onebot-main
+    name: OneBot 主连接
+    adapter: onebot11
+    enabled: true
+    config:
+      type: forward
+      url: ws://127.0.0.1:3001
+      accessToken: ${ONEBOT_TOKEN:-}
+      apiTimeout: 30s
+      reconnect: { minDelay: 1s, maxDelay: 60s }
+      sendQueue: { interval: 500ms, jitter: 300ms, maxPending: 100 }
 
 pluginLoader:
   dirs: [./plugins]
@@ -259,7 +260,7 @@ interface AdapterHost {
 
 `start()` 只负责发起连接，不等待上线；连接失败不抛出，而是进入重连。
 
-**适配器注册表**：`src/adapters/index.ts` 导出 `adapters: Record<string, AdapterDefinition>`，其中 `AdapterDefinition = { configSchema: ZodType; create(config, host): Adapter }`。`bootstrap` 遍历 `config.adapters`，逐个查表、校验、创建。新增协议只需在注册表加一项。
+**适配器注册表**：`src/adapters/index.ts` 导出内置 `AdapterDefinition[]`，bootstrap 与外部包使用同一契约注册到 Connections。每条连接按自己的适配器定义校验、创建独立驱动；包通过 `defineAdapter()` 默认导出元数据、schema 和 create，无需修改核心。
 
 **AdapterHost 的服务能力**：除了 emit 和注册 Bot，host 还提供 `registerUpgrade(path, handler)`，供需要被动接受 WebSocket 连接的适配器（例如 OneBot 的反向 WS）注册路径。通用 HTTP 服务只负责把对应路径的 upgrade 交给 handler，本身不包含任何协议代码。只要有适配器注册了 upgrade 路径，HTTP 服务就会启动。连接方式等展示信息由适配器通过 `host.setBotInfo(bot, { connection, url? })` 提供，`connection` 是自由文本（如 `正向 WS`、`反向 WS`），面板原样展示。
 
@@ -307,7 +308,7 @@ interface AdapterHost {
 **会话与传输分离**：把现在 `OneBotConnection` 中与传输无关的部分抽成 `OneBotSession`，包括 API 的 echo 配对与超时、入站帧处理、事件转换、Bot 生命周期、活性检测（ping/pong 和 heartbeat）、发送队列。正向连接 = 客户端 socket + 退避重连 + 一个 OneBotSession；反向连接 = 服务端接受的 socket + 一个 OneBotSession，不负责重连（由对端的 OneBot 实现负责）。两者行为一致，不允许出现两份重复的协议实现。
 
 **反向 WS**
-- 只要 `onebot11.reverse.enabled` 为 true，HTTP 服务就会启动（即使面板和对外 API 都没开），并在 `/onebot/v11/ws` 接受升级。
+- 只要某条启用连接的 `adapter` 为 onebot11 且 `config.type` 为 reverse，HTTP 服务就会启动（即使面板和对外 API 都没开），并在 `/connections/<id>/onebot/v11/ws` 接受升级。
 - 鉴权：`Authorization: Bearer <token>`，或查询参数 `access_token`（OneBot 11 规范允许）。`reverse.accessToken` 为空时不校验，同时在启动时记一条 warn：“反向 WS 未设置 token”。校验失败返回 401。
 - 账号识别：必须带 `X-Self-ID`（纯数字），缺失时返回 400。只支持 `X-Client-Role: Universal`（主流实现的默认值）或不带这个头；`API` 和 `Event` 拆分连接返回 400，并写明原因。
 - 握手成功后照样调用 `get_login_info`。返回的 user_id 与 `X-Self-ID` 不一致时关闭连接（1008），记 warn。
@@ -496,7 +497,7 @@ export default definePlugin({
 - 热重载通过“入口文件路径 → 插件名”的映射定位插件。
 
 **按群开关与黑白名单**（替换 M2 中的默认钩子）
-- 群的标识 `groupKey` 为 `${platform}:${groupId}`，与具体是哪个机器人账号无关。私聊事件不受按群开关影响。带 groupId 的通知事件同样受按群开关约束。
+- 群的标识 `groupKey` 为 `${platform}:${selfId}:group:${groupId}`，隶属于指定机器人。私聊事件不受按群开关影响。带 groupId 的通知事件同样受按群开关约束。
 - 访问控制表 `access_list(list, subject, key)`：
   - `list` 取值 `'block' | 'allow'`，`subject` 取值 `'user' | 'group'`，`key` 为 `${platform}:${id}`。
   - block 中的用户或群，事件一律丢弃。
@@ -590,7 +591,7 @@ t.app; t.mock; await t.dispose()
 ## 18. HTTP 服务（M4）
 
 **总体**
-- 基于 `hono` + `@hono/node-server`，单端口（`server.host` / `server.port`，默认 `127.0.0.1:5140`）。WebSocket 升级统一由 `ws` 的 `noServer` 模式在 node server 的 `upgrade` 事件上按路径分发：面板推送 `/api/panel/ws`，以及 M5 的反向 WS `/onebot/v11/ws`。
+- 基于 `hono` + `@hono/node-server`，单端口（`server.host` / `server.port`，默认 `127.0.0.1:5140`）。WebSocket 升级统一由 `ws` 的 `noServer` 模式在 node server 的 `upgrade` 事件上按路径分发：面板推送 `/api/panel/ws`，以及 M5 的反向 WS `/connections/<id>/onebot/v11/ws`。
 - 代码放在 `src/server/`，由 `bootstrap.ts` 组装。`core` 不依赖 server。App 只为 server 提供数据和操作的接口（插件管理、存储、统计、日志订阅、调试台）。
 - 面板和对外 API 各自独立启用：`server.panelPassword` 为空时不提供面板 API 和静态页面；`server.apiToken` 为空时不提供 `/api/v1/*`。两者都为空、并且也没有反向 WS 连接时，不监听端口。
 - 所有 JSON 错误响应统一为 `{ "error": { "code": string, "message": string, "issues"?: [{ "path": string, "message": string }] } }`，状态码遵循 HTTP 语义（400 参数错误、401 未登录、404 不存在、409 冲突、429 限流、500 内部错误）。错误信息不得包含堆栈。
@@ -923,56 +924,19 @@ export default definePlugin({ name: 'shop', inject: ['coins'], setup(ctx) { cons
 
 **C4 面板设置（修订 4、7、18、19）**
 
-可以在面板里编辑的范围：
-| 配置 | 生效方式 |
-|---|---|
-| `superusers` | 立即生效 |
-| `command.*` | 立即生效 |
-| `adapters.<platform>` | 立即生效：重新配置适配器，见下文 |
-| `timezone` | 写回配置，重启后生效 |
-
-`dataDir`、`pluginLoader`、`packages`、`server`（端口、密码、API token）、`log.file` 不在面板中编辑。这些项改错可能导致面板自身无法访问，或者数据目录错位，仍然通过修改配置文件来调整。
-
-**接口**
-- `GET /settings` 返回：
-  ```ts
-  {
-    superusers: string[]
-    timezone: string
-    command: { prefixes: string[]; mentionAsPrefix: boolean; privateRequirePrefix: boolean; replyOnError: boolean; replyOnDenied: boolean }
-    adapters: Record<string, { value: unknown; schema: JSONSchema }>   // 已配置的适配器
-    available: string[]                                                // 注册表中所有可用的适配器平台
-    restartRequired: string[]                                          // 已写回但要重启才生效的项，例如 ['timezone']
-  }
-  ```
-  - `adapters.*.value` 取配置文件中的**原始值**，也就是插值之前的值，因此 `${ONEBOT_TOKEN}` 这类引用会原样显示。
-  - `schema` 用 `z.toJSONSchema(definition.configSchema, { io: 'input' })` 生成。
-- 敏感字段：键名为 `accessToken`、`token`、`password`、`apiToken` 时：
-  - 原始值是 `${…}` 引用的，原样返回；
-  - 原始值是非空字面量的，返回占位符 `********`；
-  - PUT 时该位置仍然是占位符，表示保持原值不变。
-- `PUT /settings`：请求体是上面可编辑字段的部分集合，其中 `adapters` 的值为 `null` 时表示移除该适配器。处理步骤：
-  1. 合并到原始配置，还原占位符；
-  2. 对整份配置做插值，再用 `configSchema` 和各适配器的 schema 校验；失败时返回 400 `BAD_REQUEST`，`issues` 指出具体路径；
-  3. 写回 YAML，只改动变化的键，保留注释（复用 `writeConfigValue`）；
-  4. 应用到运行中的 App；
-  5. 返回与 GET 相同的结构。
-- 没有 `configPath` 时（例如测试），修改只在内存中生效。
-- 设置的修改与插件管理一样串行执行。
-
-**适配器热更新**
-- `Adapter` 接口新增 `reconfigure(config: unknown): Promise<void>`，参数已经过注册表 schema 校验。
-- OneBot 适配器的实现：关闭所有连接、停止反向连接的接收，换上新配置后重新启动。Bot 实例按 selfId 保留，遵守第 7 节“同一 selfId 只对应一个 Bot 实例”。状态会先变为 offline 再变回 online，`bot.offline` / `bot.online` 照常派发。
-- 新增一个平台时，创建并启动对应的适配器；移除一个平台时，停止它的适配器并注销它的所有 Bot。
-- App 新增 `reconfigureAdapters(next: Record<string, unknown>)`，供设置接口调用。
-- **配置形状（修订 8.1）**：OneBot 的 `reverse` 改为带默认值的 `{ enabled: boolean（默认 false）, accessToken: string（默认 ''） }`，不再用“对象存在即启用”的写法，这样表单可以直接用开关表示。适配器配置的 JSON Schema 中，每个有默认值的字段都带 `default`，每个字段都带中文的 `title` 和 `description`（zod 的 `.meta()`），面板直接用作标签、说明和占位值。
+- `GET /settings` 返回 `{ superusers: { platform, selfId, userId }[], timezone, command, restartRequired }`，`PUT /settings` 接受其中可编辑字段。管理员和命令立即生效，时区重启后生效。
+- `dataDir`、`pluginLoader`、`packages`、`server`、`log.file` 通过配置文件修改。
+- 连接从设置页移至「机器人 → 连接」。`GET /adapters` 返回加载的适配器元数据、来源、实现能力及 JSON Schema；`GET /connections` 返回持久连接与实际运行状态。`POST /connections`、`PUT /connections/:id`、`DELETE /connections/:id` 管理单条记录，`POST /connections/:id/reconnect` 手动重连。
+- 表单使用插值前的原始配置，保留 `${VAR}` 引用；常见敏感字段及 schema.writeOnly 字面量遮蔽为 `********`，保存占位符时保持原值。
+- 所有保存先插值并校验，再原子写回 YAML，保留注释，然后应用到运行实例。写入与插件管理串行执行；没有 configPath 时只更新内存。
+- Adapter.reconfigure 接收已校验的单条连接配置，仅重配对应驱动。OneBot 按 selfId 保留 Bot 实例；删除连接回收驱动与升级路径。反向监听使用连接 ID 作为路径命名空间。
 
 **首次运行向导**
 - **触发条件**（只在 `main.ts` 中判断，`createApp` 和测试不受影响）：
   - `ASABOT_CONFIG`（或默认路径）指向的配置文件不存在；
-  - 或者配置中 `server.panelPassword` 为空、`adapters` 也为空。
+  - 或者配置中 `server.panelPassword` 为空、`connections` 也为空。
 - **生成配置**：文件不存在时，先生成一份最小配置，然后进入设置模式。
-  - 文件内容包括注释（指向 `asabot.config.example.yaml`）、`superusers: []`、`adapters: {}`，以及 `server` 的 host、port、`panelPassword: ''`。
+  - 文件内容包括注释（指向 `asabot.config.example.yaml`）、`superusers: []`、`connections: []`、`adapterModules: []`，以及 `server` 的 host、port、`panelPassword: ''`。
   - host 和 port 取环境变量 `ASABOT_HOST`、`ASABOT_PORT`，缺省为 `127.0.0.1` 和 `5140`。这两个变量只在生成配置时使用。
   - Docker 镜像设置 `ASABOT_HOST=0.0.0.0`。
 - **设置码**：进入设置模式时生成一次性设置码，格式为 `XXXX-XXXX`，使用不含易混淆字符的 base32 字母表。
@@ -982,11 +946,11 @@ export default definePlugin({ name: 'shop', inject: ['coins'], setup(ctx) { cons
   - `GET /session` 返回 `{ authenticated: false, setup: true }`；
   - 除了 `/session`、`/setup` 和静态页面以外，面板 API 一律返回 401；
   - 对外 API 不启用。
-- **`POST /setup { code, password, superusers, adapters? }`**：
+- **`POST /setup { code, password, superusers }`**：
   - 设置码用常量时间比较，失败次数计入登录限流；
   - `password` 至少 8 个字符；
-  - 处理顺序：写回配置（`server.panelPassword` 以明文写入配置文件，与手写配置相同；文档建议之后改用环境变量引用）→ 应用适配器配置 → 退出设置模式 → 设置登录 cookie 并返回 `{ ok: true }`。
-- **面板向导的步骤**：设置码 → 面板密码 → 超管 → 首个连接（可跳过；OneBot 正向 WS 填 URL 和 token，选反向则展示需要在 OneBot 实现中填写的地址）→ 完成后进入概览页。
+  - 处理顺序：写回配置（`server.panelPassword` 以明文写入配置文件，与手写配置相同；文档建议之后改用环境变量引用）→ 应用管理员与密码 → 退出设置模式 → 设置登录 cookie 并返回 `{ ok: true }`。
+- **面板向导的步骤**：设置码 → 面板密码 → 进入概览页；连接与管理员在对应管理页添加。
 
 **D4 插件市场（修订 20.2、20.5）**
 - **搜索**：`GET /packages/search?q=&from=&sort=`，其中 `sort` 取 `relevance`（默认）、`updated` 或 `name`。
@@ -1140,19 +1104,19 @@ targetSchema                                    // zod：接受上面的字符�
 ```ts
 ctx.filter(predicate: (event: DispatchEvent) => boolean): FilteredContext
 ctx.platform(...names: string[]): FilteredContext
-groupKeyOf(event): string | undefined           // `${platform}:${groupId}`；没有 groupId 时为 undefined
+groupKeyOf(event): string | undefined           // `${platform}:${selfId}:group:${groupId}`；没有 groupId 时为 undefined
 ```
 - `FilteredContext` 只提供 `on`、`middleware`、`command`、`match`、`filter`、`platform`。多次过滤是“且”的关系。资源仍然归原插件所有，随插件卸载回收。
 - 实现方式：`Scope` 新增可选的 `filter`。观察者、中间件、命令、匹配器在执行前都检查它；`listCommands`、help 和相似命令提示也按它过滤。
 - 带过滤的命令仍然占用全局的命令路径，两个插件不能用互不相交的过滤条件注册同名命令。
 
 **按群配置覆盖**
-- `ctx.configFor(target: string | { platform: string; groupId?: string }): Readonly<Config>`：返回该群的有效配置。
-  - 字符串参数表示 groupKey。传入私聊会话（没有 groupId）时，返回全局配置。
-- **覆盖方式**：只覆盖顶层键。有效配置等于 `schema.parse({ ...全局配置的原始输入, ...覆盖项 })`，结果按 groupKey 缓存，配置变更时失效。
+- `ctx.configFor(target: string | { platform: string; selfId: string; groupId?: string }): Readonly<Config>`：返回该群的有效配置。
+  - 字符串参数为 `platform:selfId:group:groupId`。私聊会话应用机器人覆盖。
+- **覆盖方式**：按全局原始输入、机器人、群逐层递归合并对象，数组替换，再 schema.parse，填充默认值。结果按插件和作用域缓存，配置变更时失效。
 - **存储**：新表 `plugin_group_config(plugin, group_key, config)`，config 为 JSON，通过新增一步 core 迁移创建。purge 时删除该插件的行。
 - 修改覆盖项不会重载插件，只有通过 `configFor` 读取的代码会生效；插件在 setup 中读取的全局配置不受影响。
-- 全局配置变更导致某个群的合并结果不再有效时：该群回落到全局配置，并且每个群只记一次 warn。
+- 全局或机器人配置保存前校验所有受影响子级，任意失败则拒绝保存。
 - **PluginManager**：
   - `getGroupConfig(name, groupKey)`；
   - `setGroupConfig(name, groupKey, override | null)`：先对合并结果做校验，失败抛 `PluginConfigError`，带上字段路径；
@@ -1304,7 +1268,7 @@ ctx.panel.push(topic: string, data: unknown)        // 通过面板实时推送�
 
 - **`GET /groups`** 返回 `GroupView[]`：
   ```ts
-  { groupKey, platform, groupId, name?, bots: string[], rules: { plugins: number; configs: number; commands: number }, access?: 'block' | 'allow' }
+  { groupKey, platform, selfId, groupId, name?, bots: string[], rules: { plugins: number; configs: number; commands: number }, access?: 'block' | 'allow' }
   ```
   - 群列表合并两个来源：在线 Bot 的群列表（缓存 5 分钟，`?refresh=1` 时强制刷新），以及在 `plugin_group_state`、`plugin_group_config`、`command_group_state` 中出现过的 groupKey。
 - **`GET /groups/:groupKey`** 返回：
@@ -1465,7 +1429,7 @@ type HttpInit = RequestInit & { timeout?: Duration; proxy?: boolean | string; ma
 
 ## 飞书第二适配器
 
-- `adapters.feishu.accounts[{appId,appSecret}]` 支持多个国内飞书企业自建应用，使用官方 SDK 长连接。SDK ready/reconnecting/error 驱动机器人状态，关闭和重配置回收连接并隔离旧回调。
+- `connections` 中每条飞书记录配置独立 appId/appSecret，支持多个国内飞书企业自建应用，使用官方 SDK 长连接。SDK ready/reconnecting/error 驱动机器人状态，关闭和重配置回收连接并隔离旧回调。
 - 平台 ID 为机器人/用户 open_id、群 chat_id；平台专属 API 和类型从 `@asabot/core/feishu` 导出，核心保持协议无关。
 - 收发文本、提及、引用、富文本、图片和文件；媒体统一限制超时和大小。混合消息按原顺序拆分，逐条记录发送，返回最后 ID。成员、机器人进退群与撤回事件按可用身份信息映射，事件使用有界 TTL 去重。
 - 配置、权限和真实联调步骤见 [FEISHU.md](FEISHU.md)。本轮不增加业务内置插件。

@@ -28,7 +28,7 @@ services:
     # networks:
     #   - default
     #   - onebot_shared
-    # 反向连接：在 OneBot 实现中填写 ws://<host>:5140/onebot/v11/ws。
+    # 反向连接：在 OneBot 实现中填写 ws://<host>:5140/connections/<连接ID>/onebot/v11/ws。
     # 默认端口只发布到本机；远程连接需配置可达的端口或反向代理。
 
 # networks:
