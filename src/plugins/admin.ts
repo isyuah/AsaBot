@@ -85,6 +85,19 @@ export function createAdminPlugin(app: App) {
     setup(ctx) {
       const log = ctx.logger
       ctx
+        .command('whoami')
+        .description('查看自己的用户 ID 和管理权限')
+        .action(({ session }) =>
+          [
+            `平台：${session.platform}`,
+            `机器人 ID：${session.selfId}`,
+            `用户 ID：${session.userId}`,
+            `机器人管理员：${session.isBotAdmin ? '是' : '否'}`,
+            `框架管理员：${session.isSuperuser ? '是' : '否'}`,
+          ].join('\n'),
+        )
+
+      ctx
         .command('plugin scan')
         .description('重新扫描插件目录')
         .permission('superuser')

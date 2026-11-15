@@ -281,6 +281,17 @@ export class FeishuBotImpl implements FeishuBot {
       last = { messageId: response.message_id }
       this.sentMessageIds.add(last.messageId)
       const context = dispatchContext.getStore()
+      this.host.logger.info(
+        {
+          platform: this.platform,
+          selfId: this.selfId,
+          messageId: last.messageId,
+          messageType: target.type,
+          ...(target.type === 'group' ? { groupId: target.id } : { userId: target.id }),
+          ...(context?.eventId ? { eventId: context.eventId } : {}),
+        },
+        'Feishu message sent',
+      )
       this.host.emit({
         id: randomUUID(),
         platform: this.platform,

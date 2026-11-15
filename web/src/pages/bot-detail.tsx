@@ -17,16 +17,21 @@ import type { BotView, ChannelTarget, JsonSchema } from '../lib/types.ts'
 import { CapabilityPanel, GroupList, SendDialog } from './bots.tsx'
 import { ConnectionStatus } from './connections.tsx'
 
-const adminSchema: JsonSchema = {
-  type: 'object',
-  properties: {
-    admins: {
-      type: 'array',
-      title: '机器人管理员',
-      items: { type: 'string' },
-      description: '填写这个机器人所属平台的用户 ID，仅能管理本机器人的插件开关和群规则。',
+function adminSchema(platform: string): JsonSchema {
+  return {
+    type: 'object',
+    properties: {
+      admins: {
+        type: 'array',
+        title: '机器人管理员',
+        items: { type: 'string' },
+        description:
+          platform === 'feishu'
+            ? '填写当前飞书应用下的用户 open_id（ou_ 开头），不是 user_id。可发送 whoami 命令查看。'
+            : '填写这个机器人所属平台的用户 ID，可发送 whoami 命令查看。仅能管理本机器人的插件开关和群规则。',
+      },
     },
-  },
+  }
 }
 const tabs = [
   { value: 'overview', label: '概览' },
@@ -39,6 +44,7 @@ export function BotDetailPage({ path }: { path: string }) {
   const fadeUp = useFadeUp()
   const parts = path.split('/').filter(Boolean).map(decodeURIComponent)
   const identity = { platform: parts[1] ?? '', selfId: parts[2] ?? '' }
+  const schema = useMemo(() => adminSchema(identity.platform), [identity.platform])
   const tab = parts[3] ?? 'overview'
   const client = useQueryClient()
   const detail = useQuery({
@@ -161,7 +167,7 @@ export function BotDetailPage({ path }: { path: string }) {
               <Card className="p-6">
                 <h2 className="mb-4 text-sm font-semibold">管理员</h2>
                 <SchemaForm
-                  schema={adminSchema}
+                  schema={schema}
                   value={adminValue}
                   issues={{}}
                   saving={saveAdmins.isPending}

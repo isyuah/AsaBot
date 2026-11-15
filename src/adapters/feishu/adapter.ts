@@ -82,6 +82,10 @@ class Account {
 
   async start(): Promise<void> {
     if (this.closed) return
+    this.host.logger.info(
+      { platform: 'feishu', appId: this.config.appId },
+      'Connecting Feishu long connection',
+    )
     this.host.connection?.update({ state: 'connecting' })
     const lifecycle: FeishuLifecycle = {
       ready: () => {
@@ -94,6 +98,10 @@ class Account {
       },
       reconnecting: () => {
         if (this.transport === transport && !this.closed) {
+          this.host.logger.info(
+            { platform: 'feishu', appId: this.config.appId, selfId: this.bot?.selfId },
+            'Reconnecting Feishu long connection',
+          )
           this.status('connecting')
           this.host.connection?.update({ state: 'connecting' })
         }
@@ -172,6 +180,10 @@ class Account {
     const previous = bot.status
     bot.status = state
     if (state === 'online' || previous === 'online') {
+      const fields = { platform: 'feishu', appId: this.config.appId, selfId: bot.selfId }
+      if (state === 'online') this.host.logger.info(fields, 'Feishu bot online')
+      else if (this.closed) this.host.logger.info(fields, 'Feishu bot offline (stopping)')
+      else this.host.logger.warn(fields, 'Feishu bot offline')
       const common = {
         id: randomUUID(),
         platform: 'feishu',
@@ -216,6 +228,10 @@ class Account {
         if (this.closed || this.bot !== bot) return {}
         try {
           const event = baseSchema.parse(raw)
+          this.host.logger.debug(
+            { platform: 'feishu', selfId: bot.selfId, event: type, eventId: event.event_id },
+            'Feishu event received',
+          )
           const now = Date.now()
           for (const [key, entry] of this.seen) {
             if (entry.expires > now) break
@@ -278,28 +294,42 @@ class Account {
       if (this.closed || this.bot !== bot) return {}
       this.messages.set(message.message_id, { userId: user, ...(groupId ? { groupId } : {}) })
       while (this.messages.size > 1000) this.messages.delete(this.messages.keys().next().value as string)
-      this.host.emit(
-        createSession(
-          {
-            ...base(raw),
-            ...channel,
-            messageId: message.message_id,
-            userId: user,
-            time: z.coerce.number().finite().positive().parse(message.create_time),
-            message: incomingMessage(
-              message.message_type,
-              message.content,
-              message.mentions,
-              message.parent_id,
-            ),
-            sender,
-            isSuperuser: this.host.isSuperuser({ platform: 'feishu', selfId: bot.selfId, userId: user }),
-            isBotAdmin: this.host.isBotAdmin({ platform: 'feishu', selfId: bot.selfId, userId: user }),
-            sentMessageIds: bot.sentMessageIds,
-          },
-          this.host.sessionServices,
-        ),
+      const session = createSession(
+        {
+          ...base(raw),
+          ...channel,
+          messageId: message.message_id,
+          userId: user,
+          time: z.coerce.number().finite().positive().parse(message.create_time),
+          message: incomingMessage(
+            message.message_type,
+            message.content,
+            message.mentions,
+            message.parent_id,
+          ),
+          sender,
+          isSuperuser: this.host.isSuperuser({ platform: 'feishu', selfId: bot.selfId, userId: user }),
+          isBotAdmin: this.host.isBotAdmin({ platform: 'feishu', selfId: bot.selfId, userId: user }),
+          sentMessageIds: bot.sentMessageIds,
+        },
+        this.host.sessionServices,
       )
+      this.host.logger.info(
+        {
+          platform: 'feishu',
+          selfId: bot.selfId,
+          eventId: session.id,
+          messageId: session.messageId,
+          messageType: session.messageType,
+          userId: user,
+          ...(groupId ? { groupId } : {}),
+          isBotAdmin: session.isBotAdmin,
+          isSuperuser: session.isSuperuser,
+          preview: [...redactText(session.text, this.config)].slice(0, 200).join(''),
+        },
+        'Feishu message received',
+      )
+      this.host.emit(session)
       return {}
     })
     for (const [type, join] of [

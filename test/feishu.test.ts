@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { createServer } from 'node:http'
+import { Writable } from 'node:stream'
 import { EventDispatcher } from '@larksuiteoapi/node-sdk'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -17,7 +18,8 @@ import {
   isFeishuCardAction,
 } from '../src/adapters/feishu/index.ts'
 import { incomingMessage, readMedia } from '../src/adapters/feishu/message.ts'
-import { definePlugin, seg, z } from '../src/index.ts'
+import { createLogger, getRecentLogs } from '../src/core/logger.ts'
+import { definePlugin, plainText, seg, z } from '../src/index.ts'
 import { createTestApp } from '../src/testing/index.ts'
 
 const account = { appId: 'cli_0123456789abcdef', appSecret: 'test-app-secret' }
@@ -126,6 +128,95 @@ function commandValue(bot: FeishuBot, command: string): Record<string, unknown> 
 }
 
 describe('Feishu adapter', () => {
+  it('reports the canonical user identity without admin permission and reflects saved bot admins', async () => {
+    const t = await fixture()
+    const replies: string[] = []
+    t.app.events.on('bot.message.sent', (event) => replies.push(plainText(event.message)))
+    const receive = async () => {
+      await t.transport.receive('im.message.receive_v1', {
+        ...message('/whoami', { group: false }),
+        sender: {
+          sender_id: { open_id: 'ou_user', user_id: 'employee-123' },
+          sender_type: 'user',
+        },
+      })
+      await t.app.whenIdle()
+    }
+    try {
+      t.app.policies.setAdmins(t.bot, ['employee-123'])
+      await receive()
+      expect(replies.at(-1)).toContain('用户 ID：ou_user')
+      expect(replies.at(-1)).toContain('机器人管理员：否')
+      t.app.policies.setAdmins(t.bot, ['ou_user'])
+      await receive()
+      expect(replies.at(-1)).toContain('机器人管理员：是')
+      expect(replies.at(-1)).toContain('框架管理员：否')
+    } finally {
+      await t.dispose()
+    }
+  })
+
+  it('records lifecycle and deduplicated message identities at info level with redacted previews', async () => {
+    const t = await fixture()
+    let output = ''
+    const log = createLogger({
+      pretty: false,
+      destination: new Writable({
+        write(chunk, _encoding, callback) {
+          output += chunk.toString()
+          callback()
+        },
+      }),
+    })
+    const info = vi.spyOn(t.app.logger, 'info').mockImplementation(log.info.bind(log))
+    const warn = vi.spyOn(t.app.logger, 'warn').mockImplementation(log.warn.bind(log))
+    try {
+      t.transport.lifecycle.reconnecting()
+      t.transport.lifecycle.ready()
+      const incoming = message(`token=private-value ${account.appSecret} ${'😀'.repeat(220)}`, {
+        group: false,
+      })
+      await t.transport.receive('im.message.receive_v1', incoming)
+      await t.transport.receive('im.message.receive_v1', incoming)
+      await t.app.whenIdle()
+      const received = getRecentLogs().filter(
+        (record) => record.eventId === incoming.event_id && record.msg === 'Feishu message received',
+      )
+      expect(received).toHaveLength(1)
+      expect(received[0]).toMatchObject({
+        level: 30,
+        platform: 'feishu',
+        selfId: t.bot.selfId,
+        userId: 'ou_user',
+        messageId: incoming.message.message_id,
+        isBotAdmin: false,
+      })
+      expect([...String(received[0]?.preview)]).toHaveLength(200)
+      const sent = await t.bot.sendPrivate('ou_user', 'test')
+      expect(getRecentLogs()).toContainEqual(
+        expect.objectContaining({
+          level: 30,
+          msg: 'Feishu message sent',
+          platform: 'feishu',
+          selfId: t.bot.selfId,
+          userId: 'ou_user',
+          messageId: sent.messageId,
+        }),
+      )
+      await t.adapter.stop()
+      expect(output).toContain('Reconnecting Feishu long connection')
+      expect(output).toContain('Feishu bot online')
+      expect(output).toContain('Feishu bot offline (stopping)')
+      expect(output).toContain('[Redacted]')
+      expect(output).not.toContain(account.appSecret)
+      expect(output).not.toContain('private-value')
+    } finally {
+      info.mockRestore()
+      warn.mockRestore()
+      await t.dispose()
+    }
+  })
+
   it('keeps the bot avatar returned with its identity', async () => {
     const t = await fixture()
     try {
