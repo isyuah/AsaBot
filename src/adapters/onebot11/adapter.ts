@@ -121,13 +121,15 @@ function platformId(value: unknown): string {
   return String(value)
 }
 
+export const onebotCapabilities = {
+  segments: ['text', 'at', 'face', 'image', 'audio', 'video', 'file', 'reply', 'forward', 'onebot11:*'],
+  textStyles: [],
+  actions: [...botActions, 'getAvatarUrl'],
+}
+
 class OneBotBotImpl implements OneBotBot {
   readonly platform = 'onebot11'
-  readonly capabilities = {
-    segments: ['text', 'at', 'face', 'image', 'audio', 'video', 'file', 'reply', 'forward', 'onebot11:*'],
-    textStyles: [],
-    actions: [...botActions, 'getAvatarUrl'],
-  }
+  readonly capabilities = onebotCapabilities
   readonly onebot: OneBotApi
   readonly sentMessageIds = new LruSet<string>(1_000)
   private currentStatus: 'connecting' | 'online' | 'offline' = 'connecting'
@@ -941,6 +943,7 @@ class OneBotSession {
 }
 
 class OneBotConnection {
+  private readonly host: AdapterHost
   private readonly session: OneBotSession
   private readonly config: OneBotConnectionConfig
   private readonly options: ConnectionOptions
@@ -955,6 +958,7 @@ class OneBotConnection {
     options: ConnectionOptions,
     adapter: OneBotAdapter,
   ) {
+    this.host = host
     this.config = config
     this.options = options
     this.backoff = options.reconnect.minDelay
@@ -994,6 +998,7 @@ class OneBotConnection {
 
   private connect(): void {
     if (this.stopped) return
+    this.host.connection?.update({ state: 'connecting' })
     this.options.logger.debug({ url: sanitizedUrl(this.config.url) }, 'Connecting OneBot forward WebSocket')
     let socket: WebSocket
     try {
@@ -1005,11 +1010,16 @@ class OneBotConnection {
         { reason: errorReason(error, this.config.accessToken), url: sanitizedUrl(this.config.url) },
         'Failed to create OneBot WebSocket',
       )
+      this.host.connection?.update({ state: 'retrying', error: errorReason(error, this.config.accessToken) })
       this.scheduleReconnect()
       return
     }
     socket.on('error', (error: Error & { code?: string }) => {
       if (!this.stopped) {
+        this.host.connection?.update({
+          state: 'retrying',
+          error: errorReason(error, this.config.accessToken),
+        })
         this.options.logger.warn(
           {
             reason: errorReason(error, this.config.accessToken),
@@ -1037,6 +1047,7 @@ class OneBotConnection {
       this.options.reconnect.maxDelay,
       Math.max(this.options.reconnect.minDelay, base * 2),
     )
+    this.host.connection?.update({ state: 'retrying', nextRetryAt: Date.now() + delay })
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined
       this.connect()
@@ -1233,6 +1244,7 @@ export class OneBotAdapter implements Adapter {
     this.stopped = false
     if (this.reverseEnabled) {
       this.registerReverse()
+      this.host.connection?.update({ state: 'waiting' })
       if (this.reverseToken === '') this.options.logger.warn('反向 WS 未设置 token')
     }
     for (const connection of this.connections) {

@@ -82,6 +82,7 @@ class Account {
 
   async start(): Promise<void> {
     if (this.closed) return
+    this.host.connection?.update({ state: 'connecting' })
     const lifecycle: FeishuLifecycle = {
       ready: () => {
         if (this.transport !== transport || this.closed) return
@@ -89,9 +90,13 @@ class Account {
         clearTimeout(this.reconnect)
         this.reconnect = undefined
         this.status('online')
+        this.host.connection?.update({ state: 'online' })
       },
       reconnecting: () => {
-        if (this.transport === transport && !this.closed) this.status('connecting')
+        if (this.transport === transport && !this.closed) {
+          this.status('connecting')
+          this.host.connection?.update({ state: 'connecting' })
+        }
       },
       error: (error) => {
         if (this.transport !== transport || this.closed) return
@@ -147,14 +152,17 @@ class Account {
       'Feishu connection failed; retrying',
     )
     if (this.reconnect) return
-    this.reconnect = setTimeout(
-      () => {
-        this.reconnect = undefined
-        this.disconnect()
-        void this.start()
-      },
-      Math.min(60_000, 1000 * 2 ** Math.min(6, this.failures++)),
-    )
+    const delay = Math.min(60_000, 1000 * 2 ** Math.min(6, this.failures++))
+    this.host.connection?.update({
+      state: 'retrying',
+      error: redactText(error instanceof Error ? error.message : String(error), this.config),
+      nextRetryAt: Date.now() + delay,
+    })
+    this.reconnect = setTimeout(() => {
+      this.reconnect = undefined
+      this.disconnect()
+      void this.start()
+    }, delay)
     this.reconnect.unref()
   }
 

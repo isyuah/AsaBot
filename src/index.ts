@@ -5,6 +5,7 @@ export interface Services extends Record<never, never> {}
 export { createApp } from './bootstrap.ts'
 export type {
   Adapter,
+  AdapterDefinition,
   AdapterHost,
   BeforeSend,
   BotInfo,
@@ -13,6 +14,7 @@ export type {
   PreparedOutgoing,
   UpgradeHandler,
 } from './core/adapter.ts'
+export { defineAdapter } from './core/adapter.ts'
 export { App } from './core/app.ts'
 export type {
   Bot,
@@ -42,6 +44,7 @@ export {
   configSchema,
 } from './core/config/schema.ts'
 export { writeConfigValue } from './core/config/write.ts'
+export type { ConnectionConfig, ConnectionState } from './core/connections.ts'
 export type { ApiCall, ApiInterceptor } from './core/dispatch/api.ts'
 export { Dispatcher } from './core/dispatch/dispatcher.ts'
 export type { DispatchTrace, TraceStep } from './core/dispatch/trace.ts'

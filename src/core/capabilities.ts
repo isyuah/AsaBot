@@ -1,4 +1,19 @@
+import { z } from 'zod'
 import type { BotCapabilities } from './bot.ts'
+
+export const capabilitySchema = z
+  .object({
+    segments: z.array(z.string()),
+    textStyles: z.array(z.enum(['bold', 'italic', 'underline', 'strike', 'code', 'spoiler'])),
+    actions: z.array(z.string()),
+  })
+  .strict()
+export const requirementsSchema = z
+  .object({
+    required: capabilitySchema.partial().optional(),
+    optional: capabilitySchema.partial().optional(),
+  })
+  .strict()
 
 export interface CapabilityRequirements {
   required?: Partial<BotCapabilities>

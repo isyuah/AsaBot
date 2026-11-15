@@ -1,5 +1,4 @@
 import type { AddressInfo } from 'node:net'
-import { isDeepStrictEqual } from 'node:util'
 import type { Hono } from 'hono'
 import type { Logger } from 'pino'
 import type {
@@ -13,6 +12,7 @@ import type {
 import { type Bot, BotRegistry, type SendResult } from './bot.ts'
 import { BotPolicies } from './bot-policies.ts'
 import type { Config } from './config/schema.ts'
+import { Connections } from './connections.ts'
 import { type ApiCall, ApiInterceptors } from './dispatch/api.ts'
 import { Dispatcher } from './dispatch/dispatcher.ts'
 import { OutgoingHooks } from './dispatch/outgoing.ts'
@@ -96,6 +96,7 @@ export class App implements AdapterHost {
   readonly tasks: TaskService
   readonly sessionServices: SessionServices
   readonly events: CoreEvents
+  readonly connections: Connections
   readonly bots = new BotRegistry()
   readonly policies: BotPolicies
   readonly storage: Storage
@@ -108,8 +109,6 @@ export class App implements AdapterHost {
   private serverFactory?: () => ServerService
   private serverStarting?: Promise<void>
   private readonly adapters: Adapter[] = []
-  private readonly managedAdapters = new Map<string, { adapter: Adapter; config: unknown }>()
-  private adapterFactory?: (platform: string, config: unknown) => Adapter
   private readonly botInfo = new WeakMap<Bot, BotInfo>()
   private readonly upgrades = new Map<string, UpgradeHandler>()
   private readonly untrackedBots = new WeakSet<Bot>()
@@ -129,6 +128,7 @@ export class App implements AdapterHost {
     options: { configPath?: string; packages?: PackageOptions; setupCode?: string } = {},
   ) {
     this.config = config
+    this.connections = new Connections(this)
     this.configPath = options.configPath
     this.setupCode = options.setupCode
     this.logger = logger
@@ -308,42 +308,6 @@ export class App implements AdapterHost {
     }
   }
 
-  configureAdapters(factory: (platform: string, config: unknown) => Adapter): void {
-    this.adapterFactory = factory
-  }
-
-  useConfiguredAdapter(adapter: Adapter, config: unknown): void {
-    this.managedAdapters.set(adapter.platform, { adapter, config })
-    this.useAdapter(adapter)
-  }
-
-  async reconfigureAdapters(next: Record<string, unknown>): Promise<void> {
-    if (this.state === 'stopped') throw new Error('Cannot reconfigure a stopped App')
-    for (const [platform, current] of this.managedAdapters) {
-      if (!Object.hasOwn(next, platform)) {
-        await current.adapter.stop()
-        this.adapters.splice(this.adapters.indexOf(current.adapter), 1)
-        this.managedAdapters.delete(platform)
-      }
-    }
-    for (const [platform, config] of Object.entries(next)) {
-      const current = this.managedAdapters.get(platform)
-      if (current) {
-        if (!isDeepStrictEqual(current.config, config)) {
-          await current.adapter.reconfigure(config)
-          current.config = config
-        }
-      } else {
-        if (!this.adapterFactory) throw new Error('Adapter factory is not configured')
-        const adapter = this.adapterFactory(platform, config)
-        this.managedAdapters.set(platform, { adapter, config })
-        this.adapters.push(adapter)
-        if (this.state === 'running') await adapter.start()
-      }
-    }
-    this.config.adapters = next
-  }
-
   emit(event: AnyEvent): void {
     if (this.state === 'stopped') return
     void this.dispatcher.dispatch(event).catch((error: unknown) => {
@@ -436,6 +400,7 @@ export class App implements AdapterHost {
       throw error
     }
     this.state = 'running'
+    await this.connections.start()
     for (const adapter of this.adapters) {
       try {
         await adapter.start()
@@ -464,6 +429,7 @@ export class App implements AdapterHost {
     await this.whenIdle()
     await this.plugins.stop()
     this.tasks.stop()
+    await this.connections.stop()
     for (const adapter of this.adapters) {
       try {
         await adapter.stop()

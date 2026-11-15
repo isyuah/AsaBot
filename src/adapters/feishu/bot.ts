@@ -46,23 +46,25 @@ const chatSchema = z.object({
   user_manager_id_list: z.array(z.string()).default([]),
 })
 
+export const feishuCapabilities = {
+  segments: ['text', 'at', 'reply', 'image', 'file', 'markdown', 'button', 'feishu:card'],
+  textStyles: ['bold', 'italic', 'underline', 'strike', 'code'] as const,
+  actions: [
+    'sendPrivate',
+    'sendGroup',
+    'getSelf',
+    'getGroupList',
+    'getGroupMember',
+    'getGroupMembers',
+    'getMessage',
+    'deleteMessage',
+    'call',
+  ],
+}
+
 export class FeishuBotImpl implements FeishuBot {
   readonly platform = 'feishu'
-  readonly capabilities = {
-    segments: ['text', 'at', 'reply', 'image', 'file', 'markdown', 'button', 'feishu:card'],
-    textStyles: ['bold', 'italic', 'underline', 'strike', 'code'] as const,
-    actions: [
-      'sendPrivate',
-      'sendGroup',
-      'getSelf',
-      'getGroupList',
-      'getGroupMember',
-      'getGroupMembers',
-      'getMessage',
-      'deleteMessage',
-      'call',
-    ],
-  }
+  readonly capabilities = feishuCapabilities
   status: Bot['status'] = 'connecting'
   readonly selfId: string
   readonly nickname: string

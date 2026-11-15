@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -13,9 +14,11 @@ import type { App, ServerService } from '../core/app.ts'
 import { type Bot, supports } from '../core/bot.ts'
 import { commandOverrideSchema, logLevelSchema } from '../core/config/schema.ts'
 import { deleteConfigValue, writeConfigValue } from '../core/config/write.ts'
+import { connectionSchema } from '../core/connections.ts'
 import type { DispatchEvent } from '../core/dispatch/types.ts'
-import { NoBotOnlineError, PluginConfigError } from '../core/errors.ts'
+import { ConfigError, NoBotOnlineError, PluginConfigError } from '../core/errors.ts'
 import type { MessageSentEvent } from '../core/event/index.ts'
+import { groupIdentity } from '../core/identity.ts'
 import { getRecentLogs, subscribeLogs } from '../core/logger.ts'
 import { plainText } from '../core/message/index.ts'
 import type { PackageOperation } from '../core/plugin/packages.ts'
@@ -45,7 +48,7 @@ import {
   settingsInput,
   setupInput,
 } from './settings.ts'
-import { botView, commandView, overview, pluginView } from './views.ts'
+import { botPluginView, botView, commandView, overview, panelBots, pluginView } from './views.ts'
 
 type Env = { Bindings: HttpBindings }
 type ServerContext = Context<Env>
@@ -314,6 +317,7 @@ export class HttpServer implements ServerService {
         return failure(c, new HttpError(400, 'BAD_REQUEST', 'Plugin configuration is invalid', error.issues))
       if (error instanceof SettingsValidationError)
         return failure(c, new HttpError(400, 'BAD_REQUEST', 'Configuration is invalid', error.issues))
+      if (error instanceof ConfigError) return failure(c, new HttpError(400, 'BAD_REQUEST', error.message))
       if (error instanceof SetupCodeError)
         return failure(c, new HttpError(401, 'UNAUTHORIZED', 'Invalid setup code'))
       if (error instanceof ManagementError)
@@ -507,12 +511,93 @@ export class HttpServer implements ServerService {
     }
     panel.all('/ext/:name', forwardPanelPlugin)
     panel.all('/ext/:name/*', forwardPanelPlugin)
-    panel.get('/bots', (c) => c.json(this.app.bots.list().map((bot) => botView(this.app, bot))))
+    panel.get('/bots', (c) => c.json(panelBots(this.app).map((bot) => botView(this.app, bot))))
+    panel.get('/adapters', (c) => c.json(this.app.connections.catalog()))
+    panel.get('/connections', async (c) => c.json(await this.settings.connections()))
+    panel.post('/connections', async (c) => {
+      const input = await body(
+        c,
+        connectionSchema.extend({ id: connectionSchema.shape.id.default(randomUUID) }),
+      )
+      if (this.app.config.connections.some((item) => item.id === input.id))
+        throw new HttpError(409, 'CONFLICT', 'Connection ID already exists')
+      return c.json(await this.settings.saveConnection(input), 201)
+    })
+    panel.put('/connections/:id', async (c) => {
+      const id = c.req.param('id')
+      if (!this.app.config.connections.some((item) => item.id === id))
+        throw new HttpError(404, 'NOT_FOUND', 'Connection not found')
+      const input = await body(c, connectionSchema.omit({ id: true }))
+      return c.json(await this.settings.saveConnection({ ...input, id }))
+    })
+    panel.delete('/connections/:id', async (c) =>
+      c.json(await this.settings.removeConnection(c.req.param('id'))),
+    )
+    panel.post('/connections/:id/reconnect', async (c) => {
+      await this.app.plugins.serial(() => this.app.connections.reconnect(c.req.param('id')))
+      return c.json(await this.settings.connections())
+    })
+    const requireBot = (platform: string, selfId: string) => {
+      const bot = panelBots(this.app).find((item) => item.platform === platform && item.selfId === selfId)
+      if (!bot) throw new HttpError(404, 'NOT_FOUND', 'Bot not found')
+      return bot
+    }
+    panel.get('/bots/:platform/:selfId', (c) => {
+      const bot = requireBot(c.req.param('platform'), c.req.param('selfId'))
+      return c.json({
+        bot: botView(this.app, bot),
+        admins: this.app.policies.admins(bot),
+        plugins: this.app.plugins.list().map((plugin) => botPluginView(this.app, bot, plugin.name)),
+      })
+    })
+    panel.put('/bots/:platform/:selfId/admins', async (c) => {
+      const bot = requireBot(c.req.param('platform'), c.req.param('selfId'))
+      const { admins } = await body(
+        c,
+        z.object({ admins: z.array(z.string().trim().min(1)).max(100) }).strict(),
+      )
+      this.app.policies.setAdmins(bot, admins)
+      return c.json({ admins: this.app.policies.admins(bot) })
+    })
+    panel.put('/bots/:platform/:selfId/plugins/:name', async (c) => {
+      const bot = requireBot(c.req.param('platform'), c.req.param('selfId'))
+      const name = c.req.param('name')
+      this.requirePlugin(name)
+      const input = await body(
+        c,
+        z
+          .object({
+            enabled: z.boolean().nullable().optional(),
+            config: z.record(z.string(), z.unknown()).nullable().optional(),
+          })
+          .strict(),
+      )
+      if (input.config !== undefined) this.app.plugins.setBotConfig(name, bot, input.config)
+      if (input.enabled !== undefined) this.app.plugins.setBotEnabled(name, bot, input.enabled)
+      return c.json(botPluginView(this.app, bot, name))
+    })
+    panel.get('/plugins/:name/bots', (c) => {
+      const name = c.req.param('name')
+      this.requirePlugin(name)
+      return c.json(
+        panelBots(this.app).map((bot) => ({
+          bot: botView(this.app, bot),
+          application: botPluginView(this.app, bot, name),
+        })),
+      )
+    })
     panel.get('/groups', async (c) => c.json(await this.groups.list(c.req.query('refresh') === '1')))
     panel.get('/groups/:groupKey', async (c) => {
       const groupKey = c.req.param('groupKey')
-      const group = (await this.groups.list()).find((item) => item.groupKey === groupKey)
-      if (!group) throw new HttpError(404, 'NOT_FOUND', 'Group not found')
+      if (!/^[^:\s]+:[^:\s]+:group:[^\s]+$/.test(groupKey))
+        throw new HttpError(400, 'BAD_REQUEST', 'Invalid group key')
+      const identity = groupIdentity(groupKey)
+      const group = (await this.groups.list()).find((item) => item.groupKey === groupKey) ?? {
+        ...identity,
+        groupKey,
+        bots: [],
+        rules: { plugins: 0, configs: 0, commands: 0 },
+      }
       return c.json({
         group,
         plugins: this.app.plugins.list().map((plugin) => {
@@ -522,6 +607,19 @@ export class HttpServer implements ServerService {
             enabled: this.app.storage.isGroupEnabled(plugin.name, groupKey),
             configurable: plugin.configSchema !== undefined,
             ...(override === undefined ? {} : { override }),
+            ...(plugin.configSchema && this.app.plugins.getConfig(plugin.name) !== undefined
+              ? {
+                  effectiveConfig: this.app.plugins.configFor(plugin.name, groupKey),
+                  inheritedConfig: this.app.plugins.configFor(plugin.name, {
+                    platform: identity.platform,
+                    selfId: identity.selfId,
+                  }),
+                  configSources: this.app.plugins.configSources(plugin.name, {
+                    ...identity,
+                    groupId: group.groupId,
+                  }),
+                }
+              : {}),
           }
         }),
         commands: this.app.dispatcher.registeredCommands().map((command) => ({
@@ -659,8 +757,8 @@ export class HttpServer implements ServerService {
           ),
       )
       const groupKey = c.req.param('groupKey')
-      if (!/^[^:\s]+:[^\s]+$/.test(groupKey))
-        throw new HttpError(400, 'BAD_REQUEST', 'Expected groupKey in platform:id format')
+      if (!/^[^:\s]+:[^:\s]+:group:[^\s]+$/.test(groupKey))
+        throw new HttpError(400, 'BAD_REQUEST', 'Expected groupKey in platform:selfId:group:id format')
       if (input.config !== undefined) this.app.plugins.setGroupConfig(name, groupKey, input.config)
       if (input.enabled !== undefined) this.app.plugins.setGroupEnabled(name, groupKey, input.enabled)
       return c.json({ ok: true })
@@ -828,6 +926,8 @@ export class HttpServer implements ServerService {
     const unsubscribePanelEvents = this.app.subscribePanelEvents((event) =>
       push({ type: 'plugin-event', ...event }),
     )
+    const unsubscribePolicies = this.app.policies.subscribe(() => push({ type: 'policies' }))
+    const unsubscribeConnections = this.app.connections.subscribe(() => push({ type: 'connections' }))
     const unsubscribeTasks = this.app.tasks.subscribe((id) => push({ type: 'task', id }))
     const ping = setInterval(() => {
       if (client.readyState !== WebSocket.OPEN) return
@@ -861,6 +961,8 @@ export class HttpServer implements ServerService {
       unsubscribeEvents()
       unsubscribePanelEvents()
       unsubscribeTasks()
+      unsubscribeConnections()
+      unsubscribePolicies()
     })
   }
 

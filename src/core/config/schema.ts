@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { z } from 'zod'
+import { connectionSchema } from '../connections.ts'
 import { actorIdentitySchema } from '../identity.ts'
 import { parseDuration } from '../utils/duration.ts'
 
@@ -159,7 +160,8 @@ export const configSchema = z
     superusers: z.array(actorIdentitySchema).default([]),
     command: commandSchema.default(() => commandSchema.parse({})),
     dispatch: dispatchSchema.default(() => dispatchSchema.parse({})),
-    adapters: z.record(z.string(), z.unknown()).default({}),
+    adapterModules: z.array(z.string().min(1)).default([]),
+    connections: z.array(connectionSchema).default([]),
     pluginLoader: pluginLoaderSchema.default(() => pluginLoaderSchema.parse({})),
     packages: packagesSchema.default(() => packagesSchema.parse({})),
     tasks: tasksSchema.default(() => tasksSchema.parse({})),

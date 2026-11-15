@@ -10,8 +10,9 @@ log:
 # timezone: Asia/Shanghai
 # 数据库及插件数据目录
 dataDir: ./data
-# 超管用户 ID，必须用引号保留为字符串
-superusers: ["10001"]
+# 框架管理员必须绑定平台、机器人 ID 和该平台的用户 ID
+superusers: []
+# - { platform: onebot11, selfId: "10000", userId: "10001" }
 
 command:
   # 命令前缀，可配置多个
@@ -39,40 +40,35 @@ dispatch:
   # 插件设置的提问超时上限
   maxPromptTimeout: 30m
 
-adapters:
-  # 飞书长连接，可与 OneBot 同时启用，详见 docs/FEISHU.md。
-  # feishu:
-  #   accounts:
-  #     - appId: ${FEISHU_APP_ID}
-  #       appSecret: ${FEISHU_APP_SECRET}
-  #   apiTimeout: 30s
-  #   mediaMaxBytes: 20971520
-  onebot11:
-    # 调用 OneBot API 的超时时间
-    apiTimeout: 30s
-    reconnect:
-      # 断线重连的最短等待时间
-      minDelay: 1s
-      # 断线重连的最长等待时间
-      maxDelay: 60s
-    connections:
-      # OneBot 11 正向 WebSocket 服务端
-      - type: forward
-        # OneBot 服务端地址；Docker 部署时注意端口和网络
-        url: ws://127.0.0.1:3001
-        # 从环境变量或 .env 读取 token；未设置时为空
-        accessToken: ${ONEBOT_TOKEN:-}
-    # OneBot 实现可以主动连接 AsaBot
-    reverse:
-      enabled: false
-      accessToken: ${ONEBOT_REVERSE_TOKEN:-}
-    sendQueue:
-      # 同一个账号相邻两次发送消息的最短间隔；0 表示不限速
-      interval: 500ms
-      # 在间隔上增加 0 到此值之间的随机抖动
-      jitter: 300ms
-      # 等待发送的消息上限；断线时排队消息会被拒绝
-      maxPending: 100
+# 额外适配器先通过 pnpm add 安装，再登记包名；重启后加载
+adapterModules: []
+connections:
+  - id: onebot-main
+    name: OneBot 主连接
+    adapter: onebot11
+    enabled: true
+    config:
+      type: forward
+      url: ws://127.0.0.1:3001
+      accessToken: ${ONEBOT_TOKEN:-}
+      apiTimeout: 30s
+      reconnect: { minDelay: 1s, maxDelay: 60s }
+      sendQueue: { interval: 500ms, jitter: 300ms, maxPending: 100 }
+  # 反向连接地址：ws://主机:5140/connections/onebot-reverse/onebot/v11/ws
+  # - id: onebot-reverse
+  #   name: OneBot 反向监听
+  #   adapter: onebot11
+  #   enabled: true
+  #   config: { type: reverse, accessToken: '${ONEBOT_REVERSE_TOKEN:-}' }
+  # - id: feishu-main
+  #   name: 飞书主机器人
+  #   adapter: feishu
+  #   enabled: true
+  #   config:
+  #     appId: ${FEISHU_APP_ID}
+  #     appSecret: ${FEISHU_APP_SECRET}
+  #     apiTimeout: 30s
+  #     mediaMaxBytes: 20971520
 
 pluginLoader:
   # 从这些目录加载插件入口文件

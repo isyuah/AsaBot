@@ -78,10 +78,9 @@ describe('first-run setup', () => {
         code: running.code,
         password,
         superusers: [{ platform: 'virtual', selfId: '10000', userId: '42' }],
-        adapters: { onebot11: { reverse: { enabled: true } } },
       })
       expect(response.status).toBe(200)
-      expect(running.app.getUpgrade('/onebot/v11/ws')).toBeDefined()
+      expect(running.app.config.connections).toEqual([])
       expect(await response.json()).toEqual({ ok: true })
       const cookie = response.headers.get('set-cookie')?.split(';')[0]
       if (!cookie) throw new Error('Missing session cookie')
@@ -114,7 +113,7 @@ describe('first-run setup', () => {
       join(dir, 'config.yaml'),
       stringify({
         superusers: [],
-        adapters: {},
+        connections: [],
         server: { host: '127.0.0.1', port: 0, panelPassword: '', apiToken },
       }),
     )

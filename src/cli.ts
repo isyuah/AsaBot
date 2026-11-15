@@ -6,6 +6,7 @@ import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import { stringify } from 'yaml'
+import { loadAdapterModules } from './adapters/loader.ts'
 import { createApp } from './bootstrap.ts'
 import type { App } from './core/app.ts'
 import { loadConfig } from './core/config/load.ts'
@@ -91,7 +92,7 @@ export async function loadMainConfig(configPath: string): Promise<{ config: Conf
       configPath,
       `# 完整配置示例见 asabot.config.example.yaml\n${stringify({
         superusers: [],
-        adapters: {},
+        connections: [],
         server: { host, port, panelPassword: '' },
       })}`,
       { encoding: 'utf8', flag: 'wx' },
@@ -99,7 +100,7 @@ export async function loadMainConfig(configPath: string): Promise<{ config: Conf
   }
 
   const config = await loadConfig(configPath)
-  const setup = missing || (!config.server.panelPassword && Object.keys(config.adapters).length === 0)
+  const setup = missing || (!config.server.panelPassword && config.connections.length === 0)
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
   const characters = setup ? [...randomBytes(8)].map((byte) => alphabet[byte & 31]).join('') : ''
   const setupCode = setup ? `${characters.slice(0, 4)}-${characters.slice(4)}` : undefined
@@ -123,7 +124,11 @@ async function start(configOption: string | undefined, dev: boolean): Promise<vo
   const configPath = configOption ?? (process.env.ASABOT_CONFIG || './asabot.config.yaml')
   const { config, setupCode } = await loadMainConfig(configPath)
   if (dev) config.pluginLoader.hotReload = true
-  const app = createApp(config, { configPath, setupCode })
+  const app = createApp(config, {
+    configPath,
+    setupCode,
+    adapters: await loadAdapterModules(config.adapterModules),
+  })
   installProcessHandlers(app)
   app.logger.info({ configPath }, 'Starting AsaBot')
   await app.start()

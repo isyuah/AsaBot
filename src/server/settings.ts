@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import { adapters } from '../adapters/index.ts'
 import type { App } from '../core/app.ts'
 import {
   formatIssuePath,
@@ -9,6 +8,8 @@ import {
 } from '../core/config/load.ts'
 import { type Config, configSchema } from '../core/config/schema.ts'
 import { writeConfigValue } from '../core/config/write.ts'
+import { type ConnectionConfig, connectionSchema } from '../core/connections.ts'
+import { ConfigError } from '../core/errors.ts'
 import { actorIdentitySchema } from '../core/identity.ts'
 import { constantTimeEqual } from '../core/utils/security.ts'
 
@@ -32,7 +33,6 @@ export const settingsInput = z
     superusers: z.array(actorIdentitySchema).optional(),
     timezone: z.string().optional(),
     command: commandInput.optional(),
-    adapters: z.record(z.string(), z.unknown()).optional(),
   })
   .strict()
 
@@ -45,7 +45,6 @@ export const setupInput = z
       .min(8)
       .refine((value) => !value.includes('${'), 'Password must not contain "${"'),
     superusers: z.array(actorIdentitySchema),
-    adapters: z.record(z.string(), z.unknown()).optional(),
   })
   .strict()
 
@@ -68,9 +67,12 @@ function isRecord(value: unknown): value is ConfigRecord {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
-function merge(previous: unknown, next: unknown, path: (string | number)[] = []): unknown {
+function merge(previous: unknown, next: unknown, path: (string | number)[] = [], schema?: unknown): unknown {
   const key = path.at(-1)
-  if (typeof key === 'string' && sensitive.has(key) && next === placeholder) {
+  if (
+    ((typeof key === 'string' && sensitive.has(key)) || (isRecord(schema) && schema.writeOnly === true)) &&
+    next === placeholder
+  ) {
     if (typeof previous !== 'string') {
       throw new SettingsValidationError([
         { path: formatIssuePath(path), message: 'No existing value to preserve' },
@@ -80,13 +82,23 @@ function merge(previous: unknown, next: unknown, path: (string | number)[] = [])
   }
   if (Array.isArray(next))
     return next.map((item, index) =>
-      merge(Array.isArray(previous) ? previous[index] : undefined, item, [...path, index]),
+      merge(
+        Array.isArray(previous) ? previous[index] : undefined,
+        item,
+        [...path, index],
+        isRecord(schema) ? schema.items : undefined,
+      ),
     )
   if (isRecord(next)) {
     const result: ConfigRecord = isRecord(previous) ? { ...previous } : {}
     for (const [name, value] of Object.entries(next)) {
       Object.defineProperty(result, name, {
-        value: merge(isRecord(previous) ? previous[name] : undefined, value, [...path, name]),
+        value: merge(
+          isRecord(previous) ? previous[name] : undefined,
+          value,
+          [...path, name],
+          property(schema, name),
+        ),
         enumerable: true,
         configurable: true,
         writable: true,
@@ -97,17 +109,24 @@ function merge(previous: unknown, next: unknown, path: (string | number)[] = [])
   return next
 }
 
-function mask(value: unknown, key = ''): unknown {
-  if (typeof value === 'string' && sensitive.has(key)) {
+function property(schema: unknown, name: string): unknown {
+  return isRecord(schema) && isRecord(schema.properties) ? schema.properties[name] : undefined
+}
+
+function mask(value: unknown, key = '', schema?: unknown): unknown {
+  if (typeof value === 'string' && (sensitive.has(key) || (isRecord(schema) && schema.writeOnly === true))) {
     return value && !reference.test(value) ? placeholder : value
   }
-  if (Array.isArray(value)) return value.map((item) => mask(item))
+  if (Array.isArray(value))
+    return value.map((item) => mask(item, '', isRecord(schema) ? schema.items : undefined))
   if (isRecord(value))
-    return Object.fromEntries(Object.entries(value).map(([name, item]) => [name, mask(item, name)]))
+    return Object.fromEntries(
+      Object.entries(value).map(([name, item]) => [name, mask(item, name, property(schema, name))]),
+    )
   return value
 }
 
-function validate(raw: unknown): { config: Config; adapters: Record<string, unknown> } {
+function validate(raw: unknown, app: App): { config: Config } {
   let interpolated: unknown
   try {
     interpolated = interpolateConfigValues(raw)
@@ -122,29 +141,14 @@ function validate(raw: unknown): { config: Config; adapters: Record<string, unkn
       result.error.issues.map((issue) => ({ path: formatIssuePath(issue.path), message: issue.message })),
     )
   }
-  const parsed: Record<string, unknown> = {}
-  const issues: { path: string; message: string }[] = []
-  for (const [name, value] of Object.entries(result.data.adapters)) {
-    const definition = Object.hasOwn(adapters, name) ? adapters[name] : undefined
-    if (!definition) {
-      issues.push({
-        path: formatIssuePath(['adapters', name]),
-        message: `Unknown adapter; available: ${Object.keys(adapters).join(', ')}`,
-      })
-      continue
-    }
-    const adapter = definition.configSchema.safeParse(value)
-    if (adapter.success) parsed[name] = adapter.data
-    else
-      issues.push(
-        ...adapter.error.issues.map((issue) => ({
-          path: formatIssuePath(['adapters', name, ...issue.path]),
-          message: issue.message,
-        })),
-      )
+  try {
+    app.connections.validate(result.data.connections)
+  } catch (error) {
+    if (error instanceof ConfigError)
+      throw new SettingsValidationError([{ path: 'connections', message: error.message }])
+    throw error
   }
-  if (issues.length) throw new SettingsValidationError(issues)
-  return { config: result.data, adapters: parsed }
+  return { config: result.data }
 }
 
 export class SettingsService {
@@ -171,24 +175,12 @@ export class SettingsService {
 
   async get() {
     const raw = await this.raw()
-    const { config } = validate(raw)
-    const configured = isRecord(raw.adapters) ? raw.adapters : {}
+    const { config } = validate(raw, this.app)
     const { overrides: _overrides, ...command } = config.command
     return {
       superusers: config.superusers,
       timezone: config.timezone,
       command,
-      adapters: Object.fromEntries(
-        Object.entries(configured).map(([name, value]) => {
-          const definition = adapters[name]
-          if (!definition) throw new Error('Validated adapter is missing from registry')
-          return [
-            name,
-            { value: mask(value), schema: z.toJSONSchema(definition.configSchema, { io: 'input' }) },
-          ]
-        }),
-      ),
-      available: Object.keys(adapters),
       restartRequired: config.timezone === this.app.config.timezone ? [] : ['timezone'],
     }
   }
@@ -197,16 +189,10 @@ export class SettingsService {
     return this.app.plugins.serial(async () => {
       const previous = await this.raw()
       const next = merge(previous, input) as ConfigRecord
-      if (input.adapters) {
-        const configured = next.adapters as ConfigRecord
-        for (const [name, value] of Object.entries(input.adapters))
-          if (value === null) delete configured[name]
-      }
-      const validated = validate(next)
+      const validated = validate(next, this.app)
       await this.persist(previous, next)
       this.app.config.superusers = validated.config.superusers
       this.app.config.command = validated.config.command
-      await this.app.reconfigureAdapters(validated.adapters)
       return this.get()
     })
   }
@@ -218,15 +204,64 @@ export class SettingsService {
       const previous = await this.raw()
       const next = merge(previous, {
         superusers: input.superusers,
-        ...(input.adapters === undefined ? {} : { adapters: input.adapters }),
       }) as ConfigRecord
       next.server = { ...(isRecord(next.server) ? next.server : {}), panelPassword: input.password }
-      const validated = validate(next)
+      const validated = validate(next, this.app)
       await this.persist(previous, next)
       this.app.config.server.panelPassword = validated.config.server.panelPassword
       this.app.config.superusers = validated.config.superusers
-      await this.app.reconfigureAdapters(validated.adapters)
       this.app.setupCode = undefined
+    })
+  }
+
+  async connections() {
+    const raw = await this.raw()
+    const records = z.array(connectionSchema).parse(raw.connections ?? [])
+    return this.app.connections.list().map((state) => {
+      const config = records.find((record) => record.id === state.id)
+      const schema = this.app.connections
+        .catalog()
+        .find((adapter) => adapter.id === state.adapter)?.configSchema
+      return { ...state, config: mask(config?.config, '', schema) }
+    })
+  }
+
+  saveConnection(input: ConnectionConfig): Promise<unknown> {
+    return this.app.plugins.serial(async () => {
+      const previous = await this.raw()
+      const records = z.array(connectionSchema).parse(previous.connections ?? [])
+      const old = records.find((record) => record.id === input.id)
+      const schema = this.app.connections
+        .catalog()
+        .find((adapter) => adapter.id === input.adapter)?.configSchema
+      const nextRecord = {
+        ...input,
+        config: merge(old?.adapter === input.adapter ? old.config : undefined, input.config, [], schema),
+      }
+      const next = {
+        ...previous,
+        connections: old
+          ? records.map((record) => (record.id === input.id ? nextRecord : record))
+          : [...records, nextRecord],
+      }
+      const { config } = validate(next, this.app)
+      await this.persist(previous, next)
+      this.app.config.connections = config.connections
+      await this.app.connections.apply(config.connections)
+      return this.connections()
+    })
+  }
+
+  removeConnection(id: string): Promise<unknown> {
+    return this.app.plugins.serial(async () => {
+      const previous = await this.raw()
+      const records = z.array(connectionSchema).parse(previous.connections ?? [])
+      const next = { ...previous, connections: records.filter((record) => record.id !== id) }
+      const { config } = validate(next, this.app)
+      await this.persist(previous, next)
+      this.app.config.connections = config.connections
+      await this.app.connections.apply(config.connections)
+      return this.connections()
     })
   }
 

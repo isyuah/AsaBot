@@ -10,7 +10,7 @@ import { OneBotAdapter } from '../src/adapters/onebot11/adapter.ts'
 import { onebot11Schema } from '../src/adapters/onebot11/config.ts'
 import { MockOneBot } from '../src/adapters/onebot11/testing.ts'
 import { createApp } from '../src/bootstrap.ts'
-import { App } from '../src/core/app.ts'
+import type { App } from '../src/core/app.ts'
 import type { Bot } from '../src/core/bot.ts'
 import { configSchema } from '../src/core/config/schema.ts'
 import { NotConnectedError, SendQueueFullError } from '../src/core/errors.ts'
@@ -50,30 +50,22 @@ async function setup(
     dataDir: directory,
     pluginLoader: { dirs: [], hotReload: false },
     server: { port: 0 },
-    adapters: {
-      onebot11: {
-        apiTimeout: 1_000,
-        reconnect: { minDelay: 15, maxDelay: 30 },
-        connections: options.forwardUrl ? [{ type: 'forward', url: options.forwardUrl }] : [],
-        reverse: { enabled: true, accessToken: options.token ?? 'reverse-secret' },
-        sendQueue: {
-          interval: options.interval ?? 0,
-          jitter: options.jitter ?? 0,
-          maxPending: options.maxPending ?? 100,
-        },
-      },
+  })
+  const settings = onebot11Schema.parse({
+    apiTimeout: 1_000,
+    reconnect: { minDelay: 15, maxDelay: 30 },
+    connections: options.forwardUrl ? [{ type: 'forward', url: options.forwardUrl }] : [],
+    reverse: { enabled: true, accessToken: options.token ?? 'reverse-secret' },
+    sendQueue: {
+      interval: options.interval ?? 0,
+      jitter: options.jitter ?? 0,
+      maxPending: options.maxPending ?? 100,
     },
   })
   const logger = options.logger ?? pino({ level: 'silent' })
-  let app: App
-  if (options.liveness) {
-    app = new App(config, logger)
-    const adapter = new OneBotAdapter(onebot11Schema.parse(config.adapters.onebot11), app, options.liveness)
-    app.useAdapter(adapter)
-    app.useServer(new HttpServer(app))
-  } else {
-    app = createApp(config, { logger })
-  }
+  const app = createApp(config, { logger })
+  app.useAdapter(new OneBotAdapter(settings, app, options.liveness))
+  app.useServer(new HttpServer(app))
   apps.push(app)
   await app.start()
   const port = app.server?.address()?.port

@@ -1494,3 +1494,14 @@ type HttpInit = RequestInit & { timeout?: Duration; proxy?: boolean | string; ma
 - `plugin_bot_policy` 保存机器人插件开关与配置覆盖。机器人插件停用影响事件、命令、发送前钩子、API 拦截和该插件的后台 Bot API 调用。插件实例、服务与任务调度仍为全局资源。
 - `ctx.config` 是全局配置；`ctx.configFor(botOrSession | groupKey)` 按全局原始配置 → 机器人覆盖 → 群覆盖递归合并对象、整体替换数组，再执行 schema 解析和默认值填充。删除覆盖项恢复继承。
 - 保存父级配置前校验所有受影响的子级有效配置，失败时拒绝写入；不再静默回落全局配置。本节替代 24.5 中的顶层覆盖及失效回落规则。
+
+
+## 独立连接与适配器注册
+
+- 根配置使用 `connections: [{ id, name, adapter, enabled, config }]`；`id` 在登录前已存在，每条记录拥有独立驱动、错误、状态变化和重试时间。飞书每个应用一条连接；OneBot 正向和反向分别建连接，反向监听允许多账号接入。根配置的旧 `adapters` 分组格式已移除。
+- 连接状态包括 disabled、connecting、waiting、online、retrying、error、offline；真实驱动通过可选 `AdapterHost.connection.update()` 上报。成功上线会保留最近一次错误及发生时间，便于排查，当前状态单独展示。
+- 反向接入点为 `/connections/<id>/onebot/v11/ws`。连接单独编辑、停用、重连和删除；同协议的其他连接不受影响。
+- 核心公开 `AdapterDefinition`、`defineAdapter()`。独立包默认导出适配器定义，包含 id、platform、name、version、description、connectionTypes、capabilities、configSchema 和 create。内置驱动与外部包使用同一注册契约。
+- 用户先用项目包管理器安装包，再在 `adapterModules` 中填写 npm 包名（可包含子路径），CLI 从项目工作目录按 Node import 条件解析并在启动时加载。程序化 `createApp` 可通过 options.adapters 注入定义。面板展示来源、schema 和实现能力，本轮不提供适配器市场或热升级。
+- 连接表单从 schema 生成；常见敏感字段及 schema 的 writeOnly 字段掩码返回，保留环境变量引用和 YAML 注释，错误返回也按 schema 脱敏。
+- 插件的机器人应用与群配置接口返回有效配置和字段来源（global、bot、group、default）。`connections` 和 `policies` 实时帧用于失效缓存并重新拉取真实数据，断线重连时统一刷新缓存。

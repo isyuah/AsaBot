@@ -206,6 +206,9 @@ describe('batch 4 panel server', () => {
         enabled: false,
         configurable: true,
         override: { count: 5 },
+        effectiveConfig: { count: 5 },
+        inheritedConfig: { count: 1 },
+        configSources: { count: 'group' },
       })
       expect(detail.commands).toContainEqual({ path: 'group-command', owner: 'group-rules', enabled: false })
       expect(groups).toHaveBeenCalledTimes(1)

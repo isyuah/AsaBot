@@ -4,6 +4,7 @@ import { lstat, mkdir, mkdtemp, readdir, realpath, rename, rm, stat, writeFile }
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { z } from 'zod'
 import type { App } from '../app.ts'
+import { requirementsSchema } from '../capabilities.ts'
 import { deleteConfigValue, writeConfigValue } from '../config/write.ts'
 import { groupKeyOf } from '../dispatch/types.ts'
 import { PluginConfigError, PluginError } from '../errors.ts'
@@ -74,6 +75,12 @@ function validateDefinition(value: unknown): PluginDefinition {
       throw new PluginError(`Invalid service dependencies for plugin "${value.name}"`)
     }
   }
+  if (
+    'capabilities' in value &&
+    value.capabilities !== undefined &&
+    !requirementsSchema.safeParse(value.capabilities).success
+  )
+    throw new PluginError(`Invalid capability requirements for plugin "${value.name}"`)
   return value as PluginDefinition
 }
 
@@ -280,6 +287,35 @@ export class PluginManager {
     const result = this.validateConfig(entry, this.rawConfig(name, destination))
     this.groupConfigCache.set(key, result)
     return result
+  }
+
+  configSources(name: string, target: BotIdentity & { groupId?: string }): Record<string, string> {
+    const key = groupKeyOf(target)
+    const layers = [
+      ['global', this.app.config.plugins[name]?.config],
+      ['bot', this.app.policies.plugin(target, name).config],
+      ['group', key === undefined ? undefined : this.app.storage.getGroupConfig(name, key)],
+    ] as const
+    const sources: Record<string, string> = {}
+    const walk = (value: unknown, path: string[]) => {
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        for (const [key, item] of Object.entries(value)) walk(item, [...path, key])
+        return
+      }
+      let source = 'default'
+      for (const [name, config] of layers) {
+        let current = config
+        for (const part of path)
+          current =
+            current !== null && typeof current === 'object' && Object.hasOwn(current, part)
+              ? (current as Record<string, unknown>)[part]
+              : undefined
+        if (current !== undefined) source = name
+      }
+      sources[path.join('.')] = source
+    }
+    walk(this.configFor(name, target), [])
+    return sources
   }
 
   private invalidateGroupConfigs(name: string): void {

@@ -1,7 +1,8 @@
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import type { Logger } from 'pino'
-import type { Bot, MessageTarget, SendResult } from './bot.ts'
+import type { z } from 'zod'
+import type { Bot, BotCapabilities, MessageTarget, SendResult } from './bot.ts'
 import type { ApiCall } from './dispatch/api.ts'
 import type { AnyEvent, SessionServices } from './event/index.ts'
 import type { ActorIdentity } from './identity.ts'
@@ -41,11 +42,20 @@ export interface Adapter {
 /** 适配器提供的机器人连接方式及可选地址。 */
 export interface BotInfo {
   connection: string
+  connectionId?: string
   url?: string
 }
 
 /** 框架提供给适配器的事件、机器人、发送和 API 服务。 */
 export interface AdapterHost {
+  readonly connection?: {
+    id: string
+    update(state: {
+      state: 'connecting' | 'waiting' | 'online' | 'retrying' | 'error' | 'offline'
+      error?: string
+      nextRetryAt?: number
+    }): void
+  }
   readonly logger: Logger
   readonly sessionServices: SessionServices
   readonly ignoreSelf: boolean
@@ -59,6 +69,28 @@ export interface AdapterHost {
   isBotAdmin(actor: ActorIdentity): boolean
   prepareOutgoing(input: OutgoingMessage): Promise<PreparedOutgoing>
   invokeApi(call: ApiCall, execute: (args: unknown[]) => Promise<unknown>): Promise<unknown>
+}
+
+/** 独立适配器包的公开契约；配置由框架在创建连接前校验。 */
+export interface AdapterDefinition {
+  id: string
+  platform: string
+  name: string
+  version: string
+  description: string
+  connectionTypes: string[]
+  capabilities: BotCapabilities
+  configSchema: z.ZodType
+  create(config: unknown, host: AdapterHost): Adapter
+}
+
+export function defineAdapter<T>(
+  definition: Omit<AdapterDefinition, 'configSchema' | 'create'> & {
+    configSchema: z.ZodType<T>
+    create(config: T, host: AdapterHost): Adapter
+  },
+): AdapterDefinition {
+  return { ...definition, create: (config, host) => definition.create(config as T, host) }
 }
 
 /** 处理 HTTP 升级请求的适配器回调。 */

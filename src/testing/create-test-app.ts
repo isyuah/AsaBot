@@ -56,13 +56,13 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
   const dataDir = await mkdtemp(join(tmpdir(), 'asabot-test-'))
   let app: App | undefined
   try {
-    if (options.config?.adapters && Object.keys(options.config.adapters).length > 0) {
+    if (options.config?.connections && options.config.connections.length > 0) {
       throw new Error('createTestApp uses the virtual adapter; external adapters cannot be configured')
     }
     const config = configSchema.parse({
       ...options.config,
       dataDir,
-      adapters: {},
+      connections: [],
       pluginLoader: {
         hotReload: false,
         ...options.config?.pluginLoader,

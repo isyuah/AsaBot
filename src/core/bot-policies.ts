@@ -5,10 +5,20 @@ import type { Storage } from './storage/index.ts'
 export class BotPolicies {
   private readonly adminUsers = new Map<string, Set<string>>()
   private readonly plugins = new Map<string, { enabled?: boolean; config?: Record<string, unknown> }>()
+  private readonly subscribers = new Set<() => void>()
   constructor(privateStorage: Storage) {
     this.storage = privateStorage
   }
   private readonly storage: Storage
+
+  subscribe(listener: () => void): () => void {
+    this.subscribers.add(listener)
+    return () => this.subscribers.delete(listener)
+  }
+
+  private publish(): void {
+    for (const listener of this.subscribers) listener()
+  }
 
   load(): void {
     this.adminUsers.clear()
@@ -46,6 +56,7 @@ export class BotPolicies {
       db.exec('ROLLBACK')
       throw error
     }
+    this.publish()
   }
   plugin(bot: BotIdentity, plugin: string): { enabled?: boolean; config?: Record<string, unknown> } {
     return this.plugins.get(JSON.stringify([botKey(bot), plugin])) ?? {}
@@ -73,6 +84,7 @@ export class BotPolicies {
         )
       this.plugins.set(JSON.stringify([botKey(bot), plugin]), policy)
     }
+    this.publish()
   }
   configured(plugin: string): (BotIdentity & { config: Record<string, unknown> })[] {
     return this.storage.db

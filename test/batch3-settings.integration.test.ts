@@ -35,21 +35,17 @@ function request(url: string, cookie: string, method = 'GET', data?: unknown): P
   })
 }
 
-interface SettingsView {
-  superusers: { platform: string; selfId: string; userId: string }[]
-  timezone: string
-  restartRequired: string[]
-  adapters: Record<
-    string,
-    {
-      value: { connections: { type: string; url: string; accessToken: string }[] }
-      schema: Record<string, unknown>
-    }
-  >
+interface ConnectionView {
+  id: string
+  name: string
+  adapter: string
+  enabled: boolean
+  state: string
+  config: { type: string; url?: string; accessToken?: string; apiTimeout?: unknown }
 }
 
-describe('batch 3 panel settings', () => {
-  it('preserves references, hidden values, validation paths and YAML comments', async () => {
+describe('panel settings and connection management', () => {
+  it('preserves secret references, hidden values and YAML comments in dedicated connection APIs', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'asabot-settings-'))
     const path = join(dir, 'config.yaml')
     const password = secret()
@@ -65,15 +61,23 @@ describe('batch 3 panel settings', () => {
         'pluginLoader: { dirs: [], hotReload: false }',
         `server: { port: 0, panelPassword: ${JSON.stringify(password)} }`,
         'timezone: UTC # retained timezone comment',
-        'adapters:',
-        '  onebot11:',
-        '    connections:',
-        '      - type: forward',
-        '        url: ws://127.0.0.1:1 # retained connection comment',
-        `        accessToken: \${ASABOT_BATCH3_REFERENCE}`,
-        '      - type: forward',
-        '        url: ws://127.0.0.1:2',
-        `        accessToken: ${JSON.stringify(literal)}`,
+        'connections:',
+        '  - id: first',
+        '    name: First',
+        '    adapter: onebot11',
+        '    enabled: false',
+        '    config:',
+        '      type: forward',
+        '      url: ws://127.0.0.1:1 # retained connection comment',
+        `      accessToken: \${ASABOT_BATCH3_REFERENCE}`,
+        '  - id: second',
+        '    name: Second',
+        '    adapter: onebot11',
+        '    enabled: false',
+        '    config:',
+        '      type: forward',
+        '      url: ws://127.0.0.1:2',
+        `      accessToken: ${JSON.stringify(literal)}`,
         '',
       ].join('\n'),
     )
@@ -82,67 +86,51 @@ describe('batch 3 panel settings', () => {
       await app.start()
       const url = `http://127.0.0.1:${app.server?.address()?.port}/api/panel`
       const cookie = await login(url, password)
-      const view = (await (await request(`${url}/settings`, cookie)).json()) as SettingsView
-      const onebot = view.adapters.onebot11
-      if (!onebot) throw new Error('Missing adapter settings')
-      expect(onebot.value.connections[0]?.accessToken).toBe(`\${ASABOT_BATCH3_REFERENCE}`)
-      expect(onebot.value.connections[1]?.accessToken).toBe('********')
-      expect(JSON.stringify(view).includes(literal)).toBe(false)
-      expect(JSON.stringify(view).includes(envSecret)).toBe(false)
-      const properties = onebot.schema.properties as Record<string, Record<string, unknown>>
-      for (const key of ['apiTimeout', 'reconnect', 'connections', 'reverse', 'sendQueue']) {
-        expect(typeof properties[key]?.title).toBe('string')
-        expect(typeof properties[key]?.description).toBe('string')
-        expect(Object.hasOwn(properties[key] ?? {}, 'default')).toBe(true)
-      }
-      const reconnect = properties.reconnect?.properties as Record<string, Record<string, unknown>>
-      expect(reconnect.minDelay?.default).toBe(1000)
-      expect(reconnect.maxDelay?.default).toBe(60_000)
-      const reverse = properties.reverse?.properties as Record<string, Record<string, unknown>>
-      expect(reverse.enabled?.default).toBe(false)
-      expect(reverse.accessToken?.default).toBe('')
-      const queue = properties.sendQueue?.properties as Record<string, Record<string, unknown>>
-      expect(queue.interval?.default).toBe(500)
-      expect(queue.jitter?.default).toBe(300)
-      expect(queue.maxPending?.default).toBe(100)
-      const items = properties.connections?.items as { properties: Record<string, Record<string, unknown>> }
-      for (const field of Object.values(items.properties)) {
-        expect(typeof field.title).toBe('string')
-        expect(typeof field.description).toBe('string')
-      }
-      expect(typeof items.properties.accessToken?.description).toBe('string')
-      expect(String(items.properties.accessToken?.description).includes(`\${环境变量}`)).toBe(true)
-      const updated = await request(`${url}/settings`, cookie, 'PUT', {
-        timezone: 'Asia/Shanghai',
-        adapters: { onebot11: onebot.value },
-      })
-      expect(updated.status).toBe(200)
-      const after = (await updated.json()) as SettingsView
-      expect(after.restartRequired).toEqual(['timezone'])
-      const source = await readFile(path, 'utf8')
-      expect(source.includes('# retained root comment')).toBe(true)
-      expect(source.includes('# retained timezone comment')).toBe(true)
-      expect(source.includes('# retained connection comment')).toBe(true)
-      const raw = parse(source) as { adapters: { onebot11: { connections: { accessToken: string }[] } } }
-      expect(raw.adapters.onebot11.connections[0]?.accessToken).toBe(`\${ASABOT_BATCH3_REFERENCE}`)
-      expect(raw.adapters.onebot11.connections[1]?.accessToken === literal).toBe(true)
-      const invalid = await request(`${url}/settings`, cookie, 'PUT', {
-        adapters: { onebot11: { connections: [{ type: 'forward', url: 'bad' }] } },
-      })
-      expect(invalid.status).toBe(400)
-      const failure = (await invalid.json()) as { error: { code: string; issues: { path: string }[] } }
-      expect(failure.error.code).toBe('BAD_REQUEST')
+      const records = (await (await request(`${url}/connections`, cookie)).json()) as ConnectionView[]
+      expect(records[0]?.config.accessToken).toBe(`\${ASABOT_BATCH3_REFERENCE}`)
+      expect(records[1]?.config.accessToken).toBe('********')
+      expect(JSON.stringify(records)).not.toContain(literal)
+      expect(JSON.stringify(records)).not.toContain(envSecret)
+      const second = records[1]
+      if (!second) throw new Error('Missing connection')
       expect(
-        failure.error.issues.some((issue) => issue.path === 'adapters.onebot11.connections[0].url'),
-      ).toBe(true)
-      expect((await readFile(path, 'utf8')) === source).toBe(true)
-      const invalidDuration = await request(`${url}/settings`, cookie, 'PUT', {
-        adapters: { onebot11: { apiTimeout: `\${ASABOT_BATCH3_REFERENCE}` } },
-      })
-      expect(invalidDuration.status).toBe(400)
-      expect((await invalidDuration.text()).includes(envSecret)).toBe(false)
+        (
+          await request(`${url}/connections/second`, cookie, 'PUT', {
+            name: second.name,
+            adapter: second.adapter,
+            enabled: second.enabled,
+            config: second.config,
+          })
+        ).status,
+      ).toBe(200)
+      const updated = await request(`${url}/settings`, cookie, 'PUT', { timezone: 'Asia/Shanghai' })
+      expect((await updated.json()).restartRequired).toEqual(['timezone'])
+      const source = await readFile(path, 'utf8')
+      for (const comment of [
+        '# retained root comment',
+        '# retained timezone comment',
+        '# retained connection comment',
+      ])
+        expect(source).toContain(comment)
+      const raw = parse(source) as { connections: { config: { accessToken: string } }[] }
+      expect(raw.connections[0]?.config.accessToken).toBe(`\${ASABOT_BATCH3_REFERENCE}`)
+      expect(raw.connections[1]?.config.accessToken).toBe(literal)
+      for (const config of [
+        { type: 'forward', url: 'bad' },
+        { ...second.config, apiTimeout: `\${ASABOT_BATCH3_REFERENCE}` },
+      ]) {
+        const invalid = await request(`${url}/connections/second`, cookie, 'PUT', {
+          name: second.name,
+          adapter: second.adapter,
+          enabled: false,
+          config,
+        })
+        expect(invalid.status).toBe(400)
+        expect(await invalid.text()).not.toContain(envSecret)
+        expect(await readFile(path, 'utf8')).toBe(source)
+      }
       const restored = await request(`${url}/settings`, cookie, 'PUT', { timezone: 'UTC' })
-      expect(((await restored.json()) as SettingsView).restartRequired).toEqual([])
+      expect((await restored.json()).restartRequired).toEqual([])
     } finally {
       await app.stop()
       if (previous === undefined) delete process.env.ASABOT_BATCH3_REFERENCE
@@ -184,7 +172,7 @@ describe('batch 3 panel settings', () => {
     }
   })
 
-  it('reconnects to a new endpoint without replacing the bot and removes a platform', async () => {
+  it('reconfigures one connection, disables it and creates an independent reverse listener', async () => {
     const first = new MockOneBot()
     const second = new MockOneBot()
     const dir = await mkdtemp(join(tmpdir(), 'asabot-reconfigure-'))
@@ -196,80 +184,54 @@ describe('batch 3 panel settings', () => {
         dataDir: dir,
         pluginLoader: { dirs: [], hotReload: false },
         server: { port: 0, panelPassword: password },
-        adapters: {
-          onebot11: {
-            connections: [{ type: 'forward', url: `${first.url}/?token=${queryToken}` }],
-            sendQueue: { interval: 0 },
+        connections: [
+          {
+            id: 'first',
+            name: 'First',
+            adapter: 'onebot11',
+            config: { type: 'forward', url: `${first.url}/?token=${queryToken}`, sendQueue: { interval: 0 } },
           },
-        },
+        ],
       }),
       { logger: createLogger({ level: 'debug', destination: { write: () => true } }) },
-    )
-    const events: string[] = []
-    app.events.on('bot.offline', () => {
-      events.push('offline')
-    })
-    app.events.on('bot.online', () => {
-      events.push('online')
-    })
-    app.plugins.register(
-      definePlugin({
-        name: 'reconfigure-check',
-        setup(ctx) {
-          ctx.command('check').action(() => 'response')
-        },
-      }),
     )
     try {
       await app.start()
       await vi.waitFor(() => expect(app.bots.get('onebot11', '10000')?.status).toBe('online'))
-      expect(JSON.stringify(getRecentLogs()).includes(queryToken)).toBe(false)
+      expect(JSON.stringify(getRecentLogs())).not.toContain(queryToken)
       const bot = app.bots.get('onebot11', '10000')
-      if (!bot) throw new Error('Bot did not connect')
-      events.length = 0
       const url = `http://127.0.0.1:${app.server?.address()?.port}/api/panel`
       const cookie = await login(url, password)
-      const response = await request(`${url}/settings`, cookie, 'PUT', {
-        adapters: { onebot11: { connections: [{ type: 'forward', url: second.url }] } },
-      })
-      expect(response.status).toBe(200)
-      await vi.waitFor(() => expect(bot.status).toBe('online'))
-      expect(app.bots.get('onebot11', '10000') === bot).toBe(true)
-      await vi.waitFor(() => expect(events).toEqual(['offline', 'online']))
-      await bot.sendPrivate('42', 'outgoing')
+      const input = {
+        name: 'First',
+        adapter: 'onebot11',
+        enabled: true,
+        config: { type: 'forward', url: second.url, sendQueue: { interval: 0 } },
+      }
+      expect((await request(`${url}/connections/first`, cookie, 'PUT', input)).status).toBe(200)
+      await vi.waitFor(() => expect(app.bots.get('onebot11', '10000')?.status).toBe('online'))
+      expect(app.bots.get('onebot11', '10000')).toBe(bot)
+      await bot?.sendPrivate('42', 'outgoing')
       await second.waitForCall('send_private_msg')
-      second.emitPrivateMessage({ userId: '42', message: '/check' })
-      await vi.waitFor(() =>
-        expect(
-          second.calls.some(
-            (call) => call.action === 'send_private_msg' && JSON.stringify(call.params).includes('response'),
-          ),
-        ).toBe(true),
-      )
-      expect((await request(`${url}/settings`, cookie, 'PUT', { adapters: { onebot11: null } })).status).toBe(
-        200,
-      )
+      expect(
+        (await request(`${url}/connections/first`, cookie, 'PUT', { ...input, enabled: false })).status,
+      ).toBe(200)
       expect(app.bots.get('onebot11', '10000')).toBeUndefined()
-      expect(
-        (await request(`${url}/settings`, cookie, 'PUT', { adapters: { onebot11: { connections: [] } } }))
-          .status,
-      ).toBe(200)
+      expect(app.connections.list()[0]?.state).toBe('disabled')
       expect(
         (
-          await request(`${url}/settings`, cookie, 'PUT', {
-            adapters: { onebot11: { reverse: { enabled: true } } },
+          await request(`${url}/connections`, cookie, 'POST', {
+            id: 'listener',
+            name: 'Listener',
+            adapter: 'onebot11',
+            config: { type: 'reverse', accessToken: 'test-token' },
           })
         ).status,
-      ).toBe(200)
-      expect(app.getUpgrade('/onebot/v11/ws')).toBeDefined()
-      expect(
-        (
-          await request(`${url}/settings`, cookie, 'PUT', {
-            adapters: { onebot11: { reverse: { enabled: false } } },
-          })
-        ).status,
-      ).toBe(200)
-      expect(app.getUpgrade('/onebot/v11/ws')).toBeUndefined()
+      ).toBe(201)
+      expect(app.getUpgrade('/connections/listener/onebot/v11/ws')).toBeDefined()
+      expect(app.connections.list().find((item) => item.id === 'listener')?.state).toBe('waiting')
+      expect((await request(`${url}/connections/listener`, cookie, 'DELETE', {})).status).toBe(200)
+      expect(app.getUpgrade('/connections/listener/onebot/v11/ws')).toBeUndefined()
     } finally {
       await app.stop()
       await Promise.all([first.close(), second.close()])

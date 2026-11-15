@@ -272,11 +272,11 @@ describe('HTTP service contract', () => {
     ).toEqual({ value: 1 })
     expect(
       await (
-        await request(url, cookie, '/plugins/panel-sample/groups/playground%3A10', 'PUT', { enabled: false })
+        await request(url, cookie, '/plugins/panel-sample/groups/virtual%3Aplayground%3Agroup%3A10', 'PUT', { enabled: false })
       ).json(),
     ).toEqual({ ok: true })
     expect(await (await request(url, cookie, '/plugins/panel-sample/groups')).json()).toEqual([
-      { groupKey: 'playground:10', enabled: false },
+      { groupKey: 'virtual:playground:group:10', enabled: false },
     ])
     expect(await (await request(url, cookie, '/plugins/panel-sample/disable', 'POST')).json()).toMatchObject({
       state: 'disabled',

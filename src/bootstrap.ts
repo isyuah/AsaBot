@@ -1,9 +1,8 @@
 import type { Logger } from 'pino'
 import { adapters } from './adapters/index.ts'
+import type { AdapterDefinition } from './core/adapter.ts'
 import { App } from './core/app.ts'
-import { formatIssuePath } from './core/config/load.ts'
 import type { Config } from './core/config/schema.ts'
-import { ConfigError } from './core/errors.ts'
 import { createLogger } from './core/logger.ts'
 import type { PackageOptions } from './core/plugin/packages.ts'
 import { createAdminPlugin } from './plugins/admin.ts'
@@ -19,6 +18,7 @@ export interface CreateAppOptions {
   configPath?: string
   packages?: PackageOptions
   setupCode?: string
+  adapters?: { definition: AdapterDefinition; source: string }[]
 }
 
 /** 根据已校验配置创建应用，注册内置插件和适配器；配置无效或适配器未知时抛出 ConfigError。 */
@@ -34,27 +34,9 @@ export function createApp(config: Config, options: CreateAppOptions = {}): App {
   app.plugins.register(http)
   app.plugins.register(history)
   app.plugins.register(longMessage)
-  app.configureAdapters((name, value) => {
-    const definition = adapters[name]
-    if (!definition) throw new ConfigError(`Unknown adapter "${name}"`)
-    return definition.create(value, app)
-  })
-  for (const [name, value] of Object.entries(config.adapters)) {
-    const definition = Object.hasOwn(adapters, name) ? adapters[name] : undefined
-    if (definition === undefined) {
-      throw new ConfigError(
-        `Unknown adapter "${name}". Available adapters: ${Object.keys(adapters).join(', ')}`,
-      )
-    }
-    const result = definition.configSchema.safeParse(value)
-    if (!result.success) {
-      const issues = result.error.issues.map(
-        (issue) => `${formatIssuePath(['adapters', name, ...issue.path])}: ${issue.message}`,
-      )
-      throw new ConfigError(`Configuration validation failed:\n${issues.join('\n')}`)
-    }
-    app.useConfiguredAdapter(definition.create(result.data, app), result.data)
-  }
+  for (const definition of adapters) app.connections.register(definition, 'builtin')
+  for (const { definition, source } of options.adapters ?? []) app.connections.register(definition, source)
+  app.connections.validate(config.connections)
   app.configureServer(() => new HttpServer(app))
   return app
 }
