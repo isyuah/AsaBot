@@ -850,16 +850,19 @@ session.sendForward(nodes): Promise<SendResult>          // 发到当前会话
 
 **A6 可持久化的一次性任务（修订 12、13、20.3）**
 ```ts
-const remind = ctx.task<{ channel: string; text: string }>('remind', async (payload, { signal, key, runAt }) => { … })
+const remind = ctx.task<{ channel: string; text: string }>('remind', async (payload, { signal, key, runAt, taskId, attempt }) => { … }, { retry: { maxRetries: 2, delay: '5s', maxDelay: '5m' }, timeout: '1m' })
 remind.schedule(payload, { at?: Date | number; delay?: Duration; key?: string }): string   // at 与 delay 必须且只能给一个；返回 key
 remind.cancel(key): boolean
-remind.list(): { key: string; runAt: number; payload: T }[]
+remind.list(): TaskRecord<T>[] // 未完成任务
+remind.get(key): TaskRecord<T> | undefined // 此逻辑键的最新任务
+remind.attempts(key): TaskAttempt[]
+remind.retry(key): boolean // 手动重试失败任务
 ```
-- **存储**：新表 `scheduled_tasks(plugin, name, key, run_at, payload)`，主键为 `(plugin, name, key)`，通过新增一步 core 迁移创建。`key` 缺省时用随机 UUID；用已存在的 key 再次调用 schedule 会覆盖原任务。`payload` 以 JSON 保存。
-- **装载**：`ctx.task` 注册处理函数时，立刻为该插件下该名称的所有行设置定时器。已经到期的任务（包括停机期间错过的）立即执行。延迟超过 setTimeout 的上限（2^31−1 毫秒）时分段设置。
-- **执行**：处理函数正常结束或抛出异常后，都删除这一行。异常带上插件名、任务名和 key 记 error。如果进程在执行中途退出，这一行仍然保留，下次启动会再执行一次，即**至少一次**语义。同一行在执行期间不会被重复触发。
-- **卸载**：插件卸载时清掉定时器并 abort `signal`，表中的行保留，插件重新激活后恢复。setup 完成后，如果表中有某个任务名的行、但插件没有注册这个名称，记一次 warn。
-- purge 时删除该插件的全部任务行（修订 20.3）。
+- **存储**：`tasks` 每次 schedule 生成独立 ID；`task_attempts` 保存每次执行结果。旧 `scheduled_tasks` 一次性迁移后删除。同一 `(plugin, name, key)` 的新任务取消旧任务并等待其回调结束，保留两者历史。
+- **装载**：应用级 TaskService 统一调度，插件 setup 成功后激活处理器。到期任务立即进入队列；未注册或未激活的处理器显示阻塞原因。全局并发默认 4，可用 `tasks.maxConcurrent` 配置。
+- **状态**：`pending → running → succeeded/failed/retry_wait`；取消及超时经过 `cancelling`，等待回调结束。超时和取消均通过 AbortSignal 协作；未退出的回调继续占用并发和同键锁，禁止重叠重试。
+- **重试与恢复**：自动重试默认关闭，插件显式传入 retry 开启指数退避。失败任务保留；手动重试保留 attempt 历史并重置失败重试额度。进程中断、插件卸载将本次 attempt 记为 interrupted，任务恢复 pending，不消耗业务重试额度。持久化任务为至少一次语义，插件应对外部副作用做幂等处理。
+- **生命周期与清理**：卸载时 abort 回调、解除处理器；旧回调完成后释放锁，不允许回写已恢复或 purge 的任务。终态默认保留 7 天、最多 10000 条，运行中和待执行任务不清理。purge 删除插件任务和尝试记录。
 - 任务时间是绝对时间戳，与 `timezone` 无关。
 
 **A9 发送前钩子（修订 7、12）**

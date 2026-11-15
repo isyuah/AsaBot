@@ -343,6 +343,22 @@ ctx.db.prepare('INSERT OR REPLACE INTO p_scores_best (user_id, score) VALUES (?,
 
 定时任务可以用 `ctx.cron('0 9 * * *', fn)`、`ctx.interval('10m', fn)` 或 `ctx.timeout('30s', fn)`。回调接收 `AbortSignal`，插件卸载时信号会中止并自动停止任务；同一任务上次尚未结束时会跳过本次，任务异常会记录日志。cron 默认使用配置的 `timezone`，也可用第三个参数 `{ timezone: 'Europe/London' }` 单独指定。
 
+需要重启恢复和执行历史的一次性任务使用 `ctx.task`：
+
+```ts
+const remind = ctx.task<{ target: string; text: string }>(
+  'remind',
+  async (payload, { signal }) => {
+    signal.throwIfAborted()
+    await ctx.send(payload.target, payload.text)
+  },
+  { retry: { maxRetries: 2, delay: '5s', maxDelay: '5m' }, timeout: '1m' },
+)
+remind.schedule({ target: 'onebot11:group:123456', text: '开会了' }, { delay: '10m', key: 'meeting' })
+```
+
+`at` 与 `delay` 二选一；同键 schedule 替换旧任务并等待旧回调退出。自动重试默认关闭，超时与取消通过 `signal` 协作。`get(key)` 查看最新状态，`attempts(key)` 查看执行历史，`retry(key)` 重试失败任务，`cancel(key)` 取消未完成任务。处理器在插件 setup 成功后开始执行；中断后恢复采用至少一次语义，涉及外部副作用时应自行保证幂等。全局默认并发 4，终态历史保留 7 天、最多 10000 条。
+
 ### 按群开关与热重载
 
 `ctx.platform('onebot11').filter(event => groupKeyOf(event) === 'onebot11:123').command('hello')` 只在对应平台和群生效；`groupKeyOf` 从 `@asabot/core` 导入，过滤条件可以链式组合。过滤上下文支持注册观察者、中间件、命令和匹配器，资源仍随插件卸载回收。

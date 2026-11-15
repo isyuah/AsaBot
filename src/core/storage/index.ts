@@ -37,6 +37,26 @@ const coreMigrations = [
     PRIMARY KEY (plugin, group_key));
    CREATE TABLE command_group_state (command TEXT NOT NULL, group_key TEXT NOT NULL, enabled INTEGER NOT NULL,
     PRIMARY KEY (command, group_key));`,
+  `CREATE TABLE tasks (
+     id TEXT PRIMARY KEY, plugin TEXT NOT NULL, name TEXT NOT NULL, key TEXT NOT NULL,
+     payload TEXT NOT NULL, state TEXT NOT NULL, run_at INTEGER NOT NULL, next_run_at INTEGER NOT NULL,
+     created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER,
+     attempt INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0,
+     policy TEXT NOT NULL, error TEXT, cancel_reason TEXT
+   );
+   CREATE INDEX tasks_due ON tasks(state, next_run_at);
+   CREATE INDEX tasks_key ON tasks(plugin, name, key, created_at DESC);
+   CREATE TABLE task_attempts (
+     id TEXT PRIMARY KEY, task_id TEXT NOT NULL, plugin TEXT NOT NULL, attempt INTEGER NOT NULL,
+     started_at INTEGER NOT NULL, finished_at INTEGER, outcome TEXT NOT NULL, error TEXT,
+     UNIQUE(task_id, attempt)
+   );
+   CREATE INDEX task_attempts_task ON task_attempts(task_id, attempt);
+   INSERT INTO tasks (id, plugin, name, key, payload, state, run_at, next_run_at, created_at, updated_at, policy)
+     SELECT lower(hex(randomblob(16))), plugin, name, key, payload, 'pending', run_at, run_at,
+       CAST(unixepoch('subsec') * 1000 AS INTEGER), CAST(unixepoch('subsec') * 1000 AS INTEGER),
+       '{"maxRetries":0,"delay":5000,"maxDelay":300000}' FROM scheduled_tasks;
+   DROP TABLE scheduled_tasks;`,
 ]
 
 /** SQLite 存储及插件状态、迁移和访问控制管理器。 */
@@ -285,7 +305,8 @@ export class Storage {
         'migrations',
         'plugin_group_state',
         'plugin_group_config',
-        'scheduled_tasks',
+        'task_attempts',
+        'tasks',
       ]) {
         db.prepare(`DELETE FROM ${table} WHERE plugin = ?`).run(owner)
       }

@@ -34,7 +34,7 @@ import type { KVStore } from '../storage/index.ts'
 import { type Target, targetSchema } from '../target.ts'
 import { type Duration, parseDuration } from '../utils/duration.ts'
 import { type PluginDefinition, serviceDependencies } from './definition.ts'
-import { PersistentTasks, type TaskHandle, type TaskHandler } from './tasks.ts'
+import { PersistentTasks, type TaskHandle, type TaskHandler, type TaskRegistrationOptions } from './tasks.ts'
 import type { PanelPageOptions, PluginStateEvent } from './types.ts'
 
 type Listener = (event: AnyEvent | PluginStateEvent, signal: AbortSignal) => unknown | Promise<unknown>
@@ -104,14 +104,7 @@ export class Context<Config = undefined> {
     this.scope = { owner: name, signal: this.controller.signal }
     this.scheduler = new Scheduler(this.childLogger, this.controller.signal, app.config.timezone)
     this.kv = app.storage.store(name, () => this.assertActive())
-    this.tasks = new PersistentTasks(
-      app.storage,
-      name,
-      this.controller.signal,
-      this.childLogger,
-      app.tasks,
-      () => this.assertActive(),
-    )
+    this.tasks = new PersistentTasks(app.tasks, name, this.controller.signal, () => this.assertActive())
   }
 
   /** 当前插件的唯一名称。 */
@@ -379,14 +372,14 @@ export class Context<Config = undefined> {
     return this.scheduler.timeout(duration, fn)
   }
   /** 注册可持久化任务并恢复待执行项；同名任务重复注册时抛错。 */
-  task<T>(name: string, handler: TaskHandler<T>): TaskHandle<T> {
+  task<T>(name: string, handler: TaskHandler<T>, options?: TaskRegistrationOptions): TaskHandle<T> {
     this.assertActive()
-    return this.tasks.register(name, handler)
+    return this.tasks.register(name, handler, options)
   }
 
-  /** 记录已有持久化任务中未注册处理器的名称。 */
-  warnUnregisteredTasks(): void {
-    this.tasks.warnUnregistered()
+  /** 在插件 setup 成功后激活持久化任务。 */
+  activateTasks(): void {
+    this.tasks.activate()
   }
   /** 注册插件卸载时的清理函数，并返回取消注册函数。 */
   onDispose(fn: Cleanup): Disposer {

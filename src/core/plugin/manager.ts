@@ -1092,8 +1092,8 @@ export class PluginManager {
       }
       entry.context = context
       entry.failure = undefined
-      context.warnUnregisteredTasks()
       this.setState(entry, 'active')
+      context.activateTasks()
     } catch (error) {
       await context?.dispose()
       entry.failure = 'setup'

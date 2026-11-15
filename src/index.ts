@@ -127,7 +127,19 @@ export { perm } from './core/permission.ts'
 export { Context, type FilteredContext } from './core/plugin/context.ts'
 export { definePlugin, type PluginDefinition } from './core/plugin/definition.ts'
 export { PluginManager } from './core/plugin/manager.ts'
-export type { TaskHandle, TaskHandler, TaskOptions } from './core/plugin/tasks.ts'
+export type {
+  TaskAttempt,
+  TaskHandle,
+  TaskHandler,
+  TaskOptions,
+  TaskOutcome,
+  TaskPolicy,
+  TaskQuery,
+  TaskRecord,
+  TaskRegistrationOptions,
+  TaskState,
+} from './core/plugin/tasks.ts'
+export { TaskConflictError } from './core/plugin/tasks.ts'
 export type { PanelPageOptions, PluginState, PluginStateEvent } from './core/plugin/types.ts'
 export type { CooldownScope } from './core/ratelimit.ts'
 export {

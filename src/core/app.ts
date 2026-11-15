@@ -34,7 +34,7 @@ import type { Sendable } from './message/index.ts'
 import { lowerMessage } from './message/lower.ts'
 import { PluginManager } from './plugin/manager.ts'
 import type { PackageOptions } from './plugin/packages.ts'
-import { TaskCoordinator } from './plugin/tasks.ts'
+import { TaskService } from './plugin/tasks.ts'
 import type { PanelPage, PluginStateEvent } from './plugin/types.ts'
 import { Storage } from './storage/index.ts'
 import { type Target, targetSchema } from './target.ts'
@@ -89,7 +89,7 @@ export class App implements AdapterHost {
   readonly dispatcher: Dispatcher
   readonly outgoing: OutgoingHooks
   readonly apiInterceptors = new ApiInterceptors()
-  readonly tasks = new TaskCoordinator()
+  readonly tasks: TaskService
   readonly sessionServices: SessionServices
   readonly events: CoreEvents
   readonly bots = new BotRegistry()
@@ -133,6 +133,7 @@ export class App implements AdapterHost {
     this.sessionServices = this.dispatcher
     this.events = new CoreEvents(this.dispatcher)
     this.storage = new Storage(config.dataDir, logger)
+    this.tasks = new TaskService(this.storage, config, logger)
     this.plugins = new PluginManager(this, options.configPath, options.packages)
     this.dispatcher.accessFilter = (event) => this.storage.allows(event)
     this.dispatcher.isEnabledFor = (owner, event) => this.plugins.isEnabledFor(owner, event)
@@ -400,9 +401,11 @@ export class App implements AdapterHost {
 
     this.storage.open()
     try {
+      this.tasks.start()
       await this.plugins.start()
     } catch (error) {
       await this.plugins.stop()
+      this.tasks.stop()
       this.storage.close()
       throw error
     }
@@ -434,6 +437,7 @@ export class App implements AdapterHost {
     this.shutdown.abort(new DOMException('App stopped', 'AbortError'))
     await this.whenIdle()
     await this.plugins.stop()
+    this.tasks.stop()
     for (const adapter of this.adapters) {
       try {
         await adapter.stop()

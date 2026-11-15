@@ -130,6 +130,14 @@ const pluginEntrySchema = z
   })
   .strict()
 
+const tasksSchema = z
+  .object({
+    maxConcurrent: z.number().int().min(1).default(4),
+    historyRetention: durationSchema.default(7 * 86_400_000),
+    maxHistory: z.number().int().nonnegative().default(10_000),
+  })
+  .strict()
+
 const serverSchema = z
   .object({
     host: z.string().min(1).default('127.0.0.1'),
@@ -153,6 +161,7 @@ export const configSchema = z
     adapters: z.record(z.string(), z.unknown()).default({}),
     pluginLoader: pluginLoaderSchema.default(() => pluginLoaderSchema.parse({})),
     packages: packagesSchema.default(() => packagesSchema.parse({})),
+    tasks: tasksSchema.default(() => tasksSchema.parse({})),
     plugins: z.record(z.string(), pluginEntrySchema).default({}),
     server: serverSchema.default(() => serverSchema.parse({})),
   })
