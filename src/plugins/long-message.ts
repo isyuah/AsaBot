@@ -109,6 +109,7 @@ export default definePlugin({
           return
         const config = ctx.configFor({
           platform: bot.platform,
+          selfId: bot.selfId,
           ...(target.type === 'group' ? { groupId: target.id } : {}),
         })
         const imageMarkdown = async (parts: Message): Promise<Message> => {

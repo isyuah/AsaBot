@@ -1,10 +1,13 @@
 import type { App } from '../core/app.ts'
 import type { GroupInfo } from '../core/bot.ts'
+import { groupKeyOf } from '../core/dispatch/types.ts'
+import { groupIdentity } from '../core/identity.ts'
 
 export interface GroupView {
   groupKey: string
   platform: string
   groupId: string
+  selfId: string
   name?: string
   bots: string[]
   rules: { plugins: number; configs: number; commands: number }
@@ -39,12 +42,16 @@ export class Groups {
         }
       }),
     )
-    const sources = new Map<string, { platform: string; groupId: string; name?: string; bots: Set<string> }>()
+    const sources = new Map<
+      string,
+      { platform: string; selfId: string; groupId: string; name?: string; bots: Set<string> }
+    >()
     for (const { bot, groups } of fetched) {
       for (const item of groups) {
-        const groupKey = `${bot.platform}:${item.groupId}`
+        const groupKey = groupKeyOf({ ...bot, groupId: item.groupId })
         const current = sources.get(groupKey) ?? {
           platform: bot.platform,
+          selfId: bot.selfId,
           groupId: item.groupId,
           ...(item.groupName === '' ? {} : { name: item.groupName }),
           bots: new Set<string>(),
@@ -56,21 +63,20 @@ export class Groups {
     }
     const summaries = this.app.storage.groupRuleSummaries()
     for (const rule of summaries) {
-      const separator = rule.groupKey.indexOf(':')
-      if (separator <= 0 || separator === rule.groupKey.length - 1) continue
-      const platform = rule.groupKey.slice(0, separator)
-      const groupId = rule.groupKey.slice(separator + 1)
-      if (!sources.has(rule.groupKey)) sources.set(rule.groupKey, { platform, groupId, bots: new Set() })
+      const { platform, selfId, groupId } = groupIdentity(rule.groupKey)
+      if (!sources.has(rule.groupKey))
+        sources.set(rule.groupKey, { platform, selfId, groupId, bots: new Set() })
     }
     const rules = new Map(summaries.map((item) => [item.groupKey, item]))
     return [...sources.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([groupKey, source]) => {
         const summary = rules.get(groupKey) ?? { plugins: 0, configs: 0, commands: 0 }
-        const access = this.app.storage.groupAccess(groupKey)
+        const access = this.app.storage.groupAccess(`${source.platform}:${source.groupId}`)
         return {
           groupKey,
           platform: source.platform,
+          selfId: source.selfId,
           groupId: source.groupId,
           ...(source.name === undefined ? {} : { name: source.name }),
           bots: [...source.bots].sort(),

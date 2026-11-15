@@ -7,6 +7,7 @@ import { scheduleTimeout } from '../dispatch/timer.ts'
 import type { Storage } from '../storage/index.ts'
 import { type Duration, parseDuration } from '../utils/duration.ts'
 import { redactText } from '../utils/redact.ts'
+import { pluginExecution } from './execution.ts'
 
 export const taskStates = [
   'pending',
@@ -552,13 +553,15 @@ export class TaskService {
     this.changed(task.id)
     void Promise.resolve()
       .then(() =>
-        registration.handler(task.payload, {
-          signal: execution.controller.signal,
-          taskId: task.id,
-          attempt: task.attempt + 1,
-          key: task.key,
-          runAt: task.runAt,
-        }),
+        pluginExecution.run(registration.plugin, () =>
+          registration.handler(task.payload, {
+            signal: execution.controller.signal,
+            taskId: task.id,
+            attempt: task.attempt + 1,
+            key: task.key,
+            runAt: task.runAt,
+          }),
+        ),
       )
       .then(
         () => this.persistResult(execution),

@@ -1,4 +1,5 @@
 import type { App } from '../core/app.ts'
+import { groupKeyOf } from '../core/dispatch/types.ts'
 import type { Session } from '../core/event/index.ts'
 import type { Message } from '../core/message/index.ts'
 import { isSegment, plainText } from '../core/message/index.ts'
@@ -63,7 +64,12 @@ export function createAdminPlugin(app: App) {
   }
 
   function changeAccess(list: AccessList, subject: AccessSubject, id: string, session: Session): string {
-    if (list === 'block' && subject === 'user' && app.isSuperuser(id)) return '不能屏蔽超管'
+    if (
+      list === 'block' &&
+      subject === 'user' &&
+      app.isSuperuser({ platform: session.platform, selfId: session.selfId, userId: id })
+    )
+      return '不能屏蔽超管'
     const key = `${session.platform}:${id}`
     try {
       app.storage.access.add(list, subject, key)
@@ -210,11 +216,27 @@ export function createAdminPlugin(app: App) {
             if (!session.groupId) return '只能在群里管理群插件'
             if (!enabled && args.name === 'admin') return '不能在群里关闭 admin 插件'
             try {
-              app.plugins.setGroupEnabled(args.name, `${session.platform}:${session.groupId}`, enabled)
+              app.plugins.setGroupEnabled(
+                args.name,
+                groupKeyOf({ ...session, groupId: session.groupId }),
+                enabled,
+              )
               return `已在本群${enabled ? '开启' : '关闭'}插件 ${args.name}`
             } catch (error) {
               return `群插件操作失败：${reason(error)}`
             }
+          })
+      }
+
+      for (const enabled of [true, false]) {
+        ctx
+          .command(`bot plugin ${enabled ? 'on' : 'off'} <name>`)
+          .description(`${enabled ? '开启' : '关闭'}当前机器人的插件`)
+          .permission('bot.admin')
+          .action(({ session, args }) => {
+            if (!enabled && args.name === 'admin') return '不能在聊天中关闭 admin 插件'
+            app.plugins.setBotEnabled(args.name, session, enabled)
+            return `已在本机器人${enabled ? '开启' : '关闭'}插件 ${args.name}`
           })
       }
 
@@ -265,7 +287,8 @@ export function createAdminPlugin(app: App) {
           if (args.list !== 'block' && args.list !== 'allow') return '列表类型必须是 block 或 allow'
           if (args.subject !== 'user' && args.subject !== 'group') return '对象类型必须是 user 或 group'
           try {
-            const key = `${session.platform}:${targetFromRest(args.subject, args.target, session)}`
+            const id = targetFromRest(args.subject, args.target, session)
+            const key = `${session.platform}:${id}`
             const found = app.storage.access.list(args.list, args.subject).some((entry) => entry.key === key)
             if (!found) return `没有找到 ${args.list} ${args.subject} ${key}`
             app.storage.access.remove(args.list, args.subject, key)

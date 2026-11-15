@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pino from 'pino'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { createApp } from '../src/bootstrap.ts'
 import { loadConfig } from '../src/core/config/load.ts'
 import { definePlugin, groupKeyOf, z } from '../src/index.ts'
@@ -35,7 +35,9 @@ describe('filtered contexts and group configuration', () => {
     const plugin = definePlugin({
       name: 'filtered',
       setup(ctx) {
-        const selected = ctx.platform('virtual').filter((event) => groupKeyOf(event) === 'virtual:10')
+        const selected = ctx
+          .platform('virtual')
+          .filter((event) => groupKeyOf(event) === 'virtual:10000:group:10')
         selected.on('message', () => {
           seen.push('observer')
         })
@@ -83,7 +85,7 @@ describe('filtered contexts and group configuration', () => {
     }
   })
 
-  it('merges raw top-level configuration, validates panel writes and falls back once per group', async () => {
+  it('merges nested raw configuration and rejects parent writes that invalidate a group', async () => {
     const plugin = definePlugin({
       name: 'groups',
       config: z
@@ -109,7 +111,7 @@ describe('filtered contexts and group configuration', () => {
     })
     try {
       const request = await panel(t.app)
-      const endpoint = '/plugins/groups/groups/virtual%3A10'
+      const endpoint = '/plugins/groups/groups/virtual%3A10000%3Agroup%3A10'
       const invalid = await request(endpoint, 'PUT', { enabled: false, config: { count: 'wrong' } })
       expect(invalid.status).toBe(400)
       expect(await invalid.json()).toMatchObject({
@@ -118,33 +120,30 @@ describe('filtered contexts and group configuration', () => {
       expect(await (await request('/plugins/groups/groups')).json()).toEqual([])
       expect((await request(endpoint, 'PUT', { config: { count: 2, nested: { x: 8 } } })).status).toBe(200)
       expect(await (await request('/plugins/groups/groups')).json()).toEqual([
-        { groupKey: 'virtual:10', config: { count: 2, nested: { x: 8 } } },
+        { groupKey: 'virtual:10000:group:10', config: { count: 2, nested: { x: 8 } } },
       ])
       expect((await request(endpoint, 'PUT', { enabled: true })).status).toBe(200)
       expect(await (await request('/plugins/groups/groups')).json()).toEqual([
-        { groupKey: 'virtual:10', enabled: true, config: { count: 2, nested: { x: 8 } } },
+        { groupKey: 'virtual:10000:group:10', enabled: true, config: { count: 2, nested: { x: 8 } } },
       ])
-      expect((await request('/plugins/status/groups/virtual%3A10', 'PUT', { config: {} })).status).toBe(400)
+      expect(
+        (await request('/plugins/status/groups/virtual%3A10000%3Agroup%3A10', 'PUT', { config: {} })).status,
+      ).toBe(400)
       expect(await t.say('/config', { group: '10' })).toEqual([
-        '{"mode":"a","count":2,"nested":{"x":8,"y":9}}',
+        '{"mode":"a","count":2,"nested":{"x":8,"y":2}}',
       ])
       expect(await t.say('/config', { group: null })).toEqual([
         '{"mode":"a","count":1,"nested":{"x":1,"y":2}}',
       ])
-      const warn = vi.spyOn(t.app.logger, 'warn')
-      await t.app.plugins.updateConfig('groups', { mode: 'b', count: 5, nested: { x: 3 } })
+      await expect(
+        t.app.plugins.updateConfig('groups', { mode: 'b', count: 5, nested: { x: 3 } }),
+      ).rejects.toThrow('count too small')
       expect(await t.say('/config', { group: '10' })).toEqual([
-        '{"mode":"b","count":5,"nested":{"x":3,"y":9}}',
+        '{"mode":"a","count":2,"nested":{"x":8,"y":2}}',
       ])
-      await t.say('/config', { group: '10' })
-      expect(
-        warn.mock.calls.filter(
-          (call) => call[1] === 'Group configuration invalid; using global configuration',
-        ),
-      ).toHaveLength(1)
       expect((await request(endpoint, 'PUT', { config: null })).status).toBe(200)
       expect(await (await request('/plugins/groups/groups')).json()).toEqual([
-        { groupKey: 'virtual:10', enabled: true },
+        { groupKey: 'virtual:10000:group:10', enabled: true },
       ])
     } finally {
       await t.dispose()
@@ -201,7 +200,11 @@ describe('command overrides', () => {
       await set('public', { cooldown: false, hidden: true })
       expect(await t.say('/public')).toEqual(['public'])
       expect((await t.say('/help public'))[0]).toContain('未找到可用命令')
-      await request('/commands/groups', 'PUT', { path: 'locked', groupKey: 'virtual:10', enabled: false })
+      await request('/commands/groups', 'PUT', {
+        path: 'locked',
+        groupKey: 'virtual:10000:group:10',
+        enabled: false,
+      })
       expect(await t.say('/locked', { group: '10' })).toEqual(['matcher'])
       expect(await t.say('/locked', { group: '11' })).toEqual(['locked'])
       const settings = await (await request('/settings')).json()

@@ -168,28 +168,30 @@ describe('batch 4 panel server', () => {
     if (port === undefined) throw new Error('Missing server')
     const { request } = await client(port)
     try {
-      await request('/plugins/group-rules/groups/virtual%3A20', 'PUT', {
+      await request('/plugins/group-rules/groups/virtual%3A10000%3Agroup%3A20', 'PUT', {
         enabled: false,
         config: { count: 5 },
       })
       await request('/commands/groups', 'PUT', {
         path: 'group-command',
-        groupKey: 'virtual:20',
+        groupKey: 'virtual:10000:group:20',
         enabled: false,
       })
       await request('/acl', 'POST', { list: 'block', subject: 'group', key: 'virtual:20' })
       expect(await (await request('/groups')).json()).toEqual([
         {
-          groupKey: 'virtual:10',
+          groupKey: 'virtual:10000:group:10',
           platform: 'virtual',
+          selfId: '10000',
           groupId: '10',
           name: 'Ten',
           bots: ['10000'],
           rules: { plugins: 0, configs: 0, commands: 0 },
         },
         {
-          groupKey: 'virtual:20',
+          groupKey: 'virtual:10000:group:20',
           platform: 'virtual',
+          selfId: '10000',
           groupId: '20',
           bots: [],
           rules: { plugins: 1, configs: 1, commands: 1 },
@@ -197,7 +199,7 @@ describe('batch 4 panel server', () => {
         },
       ])
       expect(warn).toHaveBeenCalled()
-      const detail = await (await request('/groups/virtual%3A20')).json()
+      const detail = await (await request('/groups/virtual%3A10000%3Agroup%3A20')).json()
       expect(detail.group.rules).toEqual({ plugins: 1, configs: 1, commands: 1 })
       expect(detail.plugins).toContainEqual({
         name: 'group-rules',
@@ -210,12 +212,12 @@ describe('batch 4 panel server', () => {
       groups.mockResolvedValue([{ groupId: '11', groupName: 'Eleven' }])
       expect(
         (await (await request('/groups')).json()).map((item: { groupKey: string }) => item.groupKey),
-      ).toContain('virtual:10')
+      ).toContain('virtual:10000:group:10')
       expect(
         (await (await request('/groups?refresh=1')).json()).map(
           (item: { groupKey: string }) => item.groupKey,
         ),
-      ).toEqual(['virtual:11', 'virtual:20'])
+      ).toEqual(['virtual:10000:group:11', 'virtual:10000:group:20'])
       expect(groups).toHaveBeenCalledTimes(2)
     } finally {
       await other.stop()

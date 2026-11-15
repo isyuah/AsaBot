@@ -147,6 +147,7 @@ describe('dispatch traces', () => {
             userId: label,
             sender: { userId: label, nickname: label },
             isSuperuser: false,
+            isBotAdmin: false,
             message: [seg.text(`/parallel ${label}`)],
           },
           app.sessionServices,

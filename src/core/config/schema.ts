@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { z } from 'zod'
+import { actorIdentitySchema } from '../identity.ts'
 import { parseDuration } from '../utils/duration.ts'
 
 export const durationSchema = z
@@ -66,7 +67,7 @@ export const commandOverrideSchema = z
   .object({
     enabled: z.boolean().optional(),
     aliases: z.array(z.string().trim().min(1)).optional(),
-    permission: z.enum(['everyone', 'superuser', 'group.admin', 'group.owner']).optional(),
+    permission: z.enum(['everyone', 'superuser', 'bot.admin', 'group.admin', 'group.owner']).optional(),
     cooldown: z
       .union([
         z.literal(false),
@@ -155,7 +156,7 @@ export const configSchema = z
       () => process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
     ),
     dataDir: z.string().min(1).default('./data'),
-    superusers: z.array(z.string()).default([]),
+    superusers: z.array(actorIdentitySchema).default([]),
     command: commandSchema.default(() => commandSchema.parse({})),
     dispatch: dispatchSchema.default(() => dispatchSchema.parse({})),
     adapters: z.record(z.string(), z.unknown()).default({}),

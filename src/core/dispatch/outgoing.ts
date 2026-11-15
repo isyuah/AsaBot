@@ -4,6 +4,7 @@ import type { BeforeSend, Delivery, OutgoingMessage } from '../adapter.ts'
 import type { SendResult } from '../bot.ts'
 import { SendBlockedError } from '../errors.ts'
 import type { Message } from '../message/index.ts'
+import { pluginExecution } from '../plugin/execution.ts'
 
 interface Hook {
   plugin: string
@@ -20,6 +21,8 @@ export class OutgoingHooks {
     this.logger = logger
   }
 
+  enabled: (owner: string, input: OutgoingMessage) => boolean = () => true
+
   add(plugin: string, handler: BeforeSend, priority: number): () => void {
     const hook = { plugin, handler, priority }
     this.hooks.push(hook)
@@ -33,7 +36,7 @@ export class OutgoingHooks {
     if (this.inHook.getStore()) return input.message
     let message = input.message
     for (const hook of [...this.hooks].sort((a, b) => b.priority - a.priority)) {
-      if (!this.hooks.includes(hook)) continue
+      if (!this.hooks.includes(hook) || !this.enabled(hook.plugin, input)) continue
       let timer: NodeJS.Timeout | undefined
       let blocked = false
       let timedOut = false
@@ -41,7 +44,9 @@ export class OutgoingHooks {
       try {
         const inputMessage: Message = message.map((segment) => ({ ...segment, data: { ...segment.data } }))
         const work = this.inHook.run(true, () =>
-          Promise.resolve().then(() => hook.handler({ ...input, message: inputMessage })),
+          pluginExecution.run(hook.plugin, () =>
+            Promise.resolve().then(() => hook.handler({ ...input, message: inputMessage })),
+          ),
         )
         void work.catch((error: unknown) => {
           if (timedOut) this.logger.error({ err: error, plugin: hook.plugin }, 'Before-send hook failed')
@@ -57,7 +62,8 @@ export class OutgoingHooks {
           this.logger.warn({ plugin: hook.plugin }, 'Before-send hook timed out')
         } else if (result === false) blocked = true
         else if (result !== undefined) {
-          if (!Array.isArray(result)) return result
+          if (!Array.isArray(result))
+            return { deliver: () => pluginExecution.run(hook.plugin, () => result.deliver()) }
           message = result
         }
       } catch (error) {

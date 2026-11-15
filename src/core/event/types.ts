@@ -76,6 +76,7 @@ export interface Session extends BaseEvent {
   readonly toMe: boolean
   /** 发送者是否为配置的超管。 */
   readonly isSuperuser: boolean
+  readonly isBotAdmin: boolean
   /** 向当前会话发送内容；发送失败时 Promise 拒绝。 */
   send(content: Sendable): Promise<SendResult>
   /** 回复当前消息；默认引用原消息，at 为 true 时在群内提及发送者。 */

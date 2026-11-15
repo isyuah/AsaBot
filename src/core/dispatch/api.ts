@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { type Bot, botActions } from '../bot.ts'
 import { UnsupportedError } from '../errors.ts'
+import { pluginExecution } from '../plugin/execution.ts'
 
 /** Bot API 拦截器接收的机器人、方法名和可修改参数。 */
 export interface ApiCall {
@@ -15,6 +16,7 @@ export type ApiInterceptor = (call: ApiCall, next: () => Promise<unknown>) => Pr
 interface Interceptor {
   handler: ApiInterceptor
   priority: number
+  owner?: string
 }
 
 export class ApiInterceptors {
@@ -22,8 +24,11 @@ export class ApiInterceptors {
   private readonly inInterceptor = new AsyncLocalStorage<boolean>()
   private readonly wrapped = new WeakSet<Bot>()
 
-  add(handler: ApiInterceptor, priority: number): () => void {
-    const interceptor = { handler, priority }
+  check: (call: ApiCall) => void = () => {}
+  enabled: (owner: string, bot: Bot) => boolean = () => true
+
+  add(handler: ApiInterceptor, priority: number, owner?: string): () => void {
+    const interceptor = { handler, priority, owner }
     this.interceptors.push(interceptor)
     return () => {
       const index = this.interceptors.indexOf(interceptor)
@@ -49,13 +54,20 @@ export class ApiInterceptors {
   }
 
   async invoke(call: ApiCall, execute: (args: unknown[]) => Promise<unknown>): Promise<unknown> {
+    this.check(call)
     if (this.inInterceptor.getStore()) return execute(call.args)
     const interceptors = [...this.interceptors].sort((a, b) => b.priority - a.priority)
     const dispatch = (index: number): Promise<unknown> => {
       const interceptor = interceptors[index]
       if (!interceptor) return execute(call.args)
-      if (!this.interceptors.includes(interceptor)) return dispatch(index + 1)
-      return interceptor.handler(call, () => dispatch(index + 1))
+      if (
+        !this.interceptors.includes(interceptor) ||
+        (interceptor.owner !== undefined && !this.enabled(interceptor.owner, call.bot))
+      )
+        return dispatch(index + 1)
+      return pluginExecution.run(interceptor.owner ?? 'core', () =>
+        interceptor.handler(call, () => dispatch(index + 1)),
+      )
     }
     return this.inInterceptor.run(true, () => dispatch(0))
   }

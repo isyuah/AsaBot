@@ -310,14 +310,14 @@ describe('plugins through the virtual adapter', () => {
       },
     })
     const t = await testApp({ plugins: [plugin] })
-    t.app.plugins.setGroupEnabled('guarded', 'virtual:10', false)
+    t.app.plugins.setGroupEnabled('guarded', 'virtual:10000:group:10', false)
     expect(await t.say('/guarded')).toEqual([])
     expect(observed).toBe(0)
     expect(middlewareRuns).toBe(0)
     expect(await t.say('match-trigger')).toEqual([])
     expect(await t.say('/guarded', { group: '11' })).toEqual(['allowed'])
     expect(await t.say('match-trigger', { group: '11' })).toEqual(['matched'])
-    t.app.plugins.setGroupEnabled('guarded', 'virtual:10', true)
+    t.app.plugins.setGroupEnabled('guarded', 'virtual:10000:group:10', true)
     const access = t.app.storage.access
     access.add('allow', 'user', 'virtual:20')
     access.add('allow', 'group', 'virtual:10')

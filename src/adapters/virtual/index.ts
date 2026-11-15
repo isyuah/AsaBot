@@ -324,7 +324,14 @@ export class VirtualAdapter implements Adapter {
         userId: options.user,
         message: typeof content === 'string' ? [seg.text(content)] : content,
         sender: { userId: options.user, nickname: options.nickname ?? options.user, role: options.role },
-        isSuperuser: options.superuser ?? this.host.isSuperuser(options.user),
+        isSuperuser:
+          options.superuser ??
+          this.host.isSuperuser({ platform: this.platform, selfId: this.bot.selfId, userId: options.user }),
+        isBotAdmin: this.host.isBotAdmin({
+          platform: this.platform,
+          selfId: this.bot.selfId,
+          userId: options.user,
+        }),
         sentMessageIds: this.bot.sentMessageIds,
         ...(options.group == null
           ? { messageType: 'private' as const }

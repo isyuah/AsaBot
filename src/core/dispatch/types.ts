@@ -13,8 +13,14 @@ export interface Scope {
 }
 
 /** 由平台和群 ID 生成群标识；没有群 ID 时返回 undefined。 */
-export function groupKeyOf(event: { platform: string; groupId?: string }): string | undefined {
-  return event.groupId === undefined ? undefined : `${event.platform}:${event.groupId}`
+export function groupKeyOf(event: { platform: string; selfId: string; groupId: string }): string
+export function groupKeyOf(event: { platform: string; selfId: string; groupId?: string }): string | undefined
+export function groupKeyOf(event: {
+  platform: string
+  selfId: string
+  groupId?: string
+}): string | undefined {
+  return event.groupId === undefined ? undefined : `${event.platform}:${event.selfId}:group:${event.groupId}`
 }
 
 /** 调用后注销对应资源的函数。 */

@@ -27,6 +27,8 @@ export type {
   UserInfo,
 } from './core/bot.ts'
 export { BotRegistry, supports } from './core/bot.ts'
+export type { CapabilityGap, CapabilityRequirements, Compatibility } from './core/capabilities.ts'
+export { compatibility } from './core/capabilities.ts'
 export type { CommandDefinition, OptionDefinition, OptionSettings } from './core/command/builder.ts'
 export { CommandBuilder } from './core/command/builder.ts'
 export type { ArgumentSettings, ArgumentType } from './core/command/declaration.ts'
@@ -99,6 +101,8 @@ export type {
   SessionServices,
 } from './core/event/index.ts'
 export { createSession, stripLeadingMention } from './core/event/index.ts'
+export type { ActorIdentity, BotIdentity } from './core/identity.ts'
+export { actorIdentitySchema, botIdentitySchema, botKey } from './core/identity.ts'
 export {
   createLogger,
   getRecentLogs,

@@ -10,14 +10,13 @@ import type { App } from '../app.ts'
 import type { Bot, SendResult } from '../bot.ts'
 import type { CommandBuilder } from '../command/builder.ts'
 import type { ApiInterceptor } from '../dispatch/api.ts'
-import {
-  type DispatchEvent,
-  type Disposer,
-  groupKeyOf,
-  type MatchHandler,
-  type MatchPattern,
-  type Middleware,
-  type Scope,
+import type {
+  DispatchEvent,
+  Disposer,
+  MatchHandler,
+  MatchPattern,
+  Middleware,
+  Scope,
 } from '../dispatch/types.ts'
 import { NoBotOnlineError, PluginError } from '../errors.ts'
 import type {
@@ -28,12 +27,14 @@ import type {
   PlatformNoticeEvent,
   RequestEvent,
 } from '../event/index.ts'
+import type { BotIdentity } from '../identity.ts'
 import type { Sendable } from '../message/index.ts'
 import { Scheduler } from '../scheduler.ts'
 import type { KVStore } from '../storage/index.ts'
 import { type Target, targetSchema } from '../target.ts'
 import { type Duration, parseDuration } from '../utils/duration.ts'
 import { type PluginDefinition, serviceDependencies } from './definition.ts'
+import { pluginExecution } from './execution.ts'
 import { PersistentTasks, type TaskHandle, type TaskHandler, type TaskRegistrationOptions } from './tasks.ts'
 import type { PanelPageOptions, PluginStateEvent } from './types.ts'
 
@@ -117,11 +118,10 @@ export class Context<Config = undefined> {
     this.assertActive()
     return this.value
   }
-  /** 获取目标群合并覆盖项后的配置；没有群 ID 时返回全局配置。 */
-  configFor(target: string | { platform: string; groupId?: string }): Readonly<Config> {
+  /** 获取目标机器人或群组合并覆盖项后的有效配置。 */
+  configFor(target: string | (BotIdentity & { groupId?: string })): Readonly<Config> {
     this.assertActive()
-    const key = typeof target === 'string' ? target : groupKeyOf(target)
-    return key === undefined ? this.value : (this.app.plugins.configFor(this.owner, key) as Readonly<Config>)
+    return this.app.plugins.configFor(this.owner, target) as Readonly<Config>
   }
   /** 自动附带插件名的日志记录器。 */
   get logger(): Logger {
@@ -146,7 +146,7 @@ export class Context<Config = undefined> {
   /** 当前注册的机器人列表，包括离线实例。 */
   get bots(): Bot[] {
     this.assertActive()
-    return this.app.bots.list()
+    return this.app.bots.list().filter((bot) => this.app.plugins.isEnabledOnBot(this.owner, bot))
   }
   /** 创建并返回当前插件的数据目录；文件系统操作失败时抛错。 */
   get dataDir(): string {
@@ -157,11 +157,17 @@ export class Context<Config = undefined> {
   }
 
   /** 按账号 ID 查找在线机器人，省略时取第一个；找不到时抛出 NoBotOnlineError。 */
-  bot(selfId?: string): Bot {
+  bot(identity?: BotIdentity): Bot {
     this.assertActive()
     const bot = this.app.bots
       .list()
-      .find((item) => item.status === 'online' && (selfId === undefined || item.selfId === selfId))
+      .find(
+        (item) =>
+          item.status === 'online' &&
+          this.app.plugins.isEnabledOnBot(this.owner, item) &&
+          (identity === undefined ||
+            (item.selfId === identity.selfId && item.platform === identity.platform)),
+      )
     if (!bot) throw new NoBotOnlineError()
     return bot
   }
@@ -169,7 +175,7 @@ export class Context<Config = undefined> {
   /** 向指定目标发送内容；目标无效、无在线机器人或发送失败时拒绝。 */
   send(target: Target | string, content: Sendable): Promise<SendResult> {
     this.assertActive()
-    return this.app.send(target, content)
+    return pluginExecution.run(this.owner, () => this.app.send(target, content))
   }
 
   /** 顺序向多个目标发送，interval 是发送间隔；单个发送失败写入对应结果的 error。 */
@@ -278,7 +284,7 @@ export class Context<Config = undefined> {
   /** 注册 Bot API 拦截器并返回移除函数；优先级越高越先执行。 */
   interceptApi(fn: ApiInterceptor, options: { priority?: number } = {}): Disposer {
     this.assertActive()
-    const dispose = this.app.apiInterceptors.add(fn, options.priority ?? 0)
+    const dispose = this.app.apiInterceptors.add(fn, options.priority ?? 0, this.owner)
     this.controller.signal.addEventListener('abort', dispose, { once: true })
     return () => {
       this.controller.signal.removeEventListener('abort', dispose)
@@ -359,17 +365,21 @@ export class Context<Config = undefined> {
     options?: { timezone?: string },
   ): Disposer {
     this.assertActive()
-    return this.scheduler.cron(expression, fn, options)
+    return this.scheduler.cron(
+      expression,
+      (signal) => pluginExecution.run(this.owner, () => fn(signal)),
+      options,
+    )
   }
   /** 注册固定间隔任务并返回停止函数；duration 是毫秒数或时长字符串。 */
   interval(duration: string | number, fn: (signal: AbortSignal) => unknown | Promise<unknown>): Disposer {
     this.assertActive()
-    return this.scheduler.interval(duration, fn)
+    return this.scheduler.interval(duration, (signal) => pluginExecution.run(this.owner, () => fn(signal)))
   }
   /** 注册一次性延迟任务并返回停止函数；duration 是毫秒数或时长字符串。 */
   timeout(duration: string | number, fn: (signal: AbortSignal) => unknown | Promise<unknown>): Disposer {
     this.assertActive()
-    return this.scheduler.timeout(duration, fn)
+    return this.scheduler.timeout(duration, (signal) => pluginExecution.run(this.owner, () => fn(signal)))
   }
   /** 注册可持久化任务并恢复待执行项；同名任务重复注册时抛错。 */
   task<T>(name: string, handler: TaskHandler<T>, options?: TaskRegistrationOptions): TaskHandle<T> {

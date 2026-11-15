@@ -5,10 +5,13 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import { z } from 'zod'
 import type { App } from '../app.ts'
 import { deleteConfigValue, writeConfigValue } from '../config/write.ts'
-import type { DispatchEvent } from '../dispatch/types.ts'
+import { groupKeyOf } from '../dispatch/types.ts'
 import { PluginConfigError, PluginError } from '../errors.ts'
+import { type BotIdentity, groupIdentity } from '../identity.ts'
+import { mergeConfig } from '../utils/merge.ts'
 import { Context } from './context.ts'
 import { type PluginDefinition, serviceDependencies } from './definition.ts'
+import { pluginExecution } from './execution.ts'
 import { importPlugin, registerPluginRoots } from './loader.ts'
 import { type PackageManifest, type PackageOptions, PackageService, redact } from './packages.ts'
 import type { PluginState } from './types.ts'
@@ -90,7 +93,6 @@ export class PluginManager {
   private readonly packageUpdateSubscribers = new Set<(state: PluginState) => void>()
   private readonly timers = new Map<string, NodeJS.Timeout>()
   private readonly groupConfigCache = new Map<string, unknown>()
-  private readonly groupConfigWarnings = new Set<string>()
   private releaseRoots?: () => void
   private queue: Promise<void> = Promise.resolve()
   private started = false
@@ -211,45 +213,71 @@ export class PluginManager {
 
   setGroupConfig(name: string, groupKey: string, override: Record<string, unknown> | null): void {
     const entry = this.requireAvailable(name)
-    if (override !== null) {
-      if (!entry.definition?.config)
-        throw new PluginConfigError([
-          { path: `plugins.${name}.config`, message: 'Plugin has no configuration schema' },
-        ])
-      this.validateConfig(entry, {
-        ...(this.app.config.plugins[name]?.config as object | undefined),
-        ...override,
-      })
-    }
+    const target = groupIdentity(groupKey)
+    this.requireConfig(entry)
+    this.validateConfig(entry, this.rawConfig(name, target, { group: override }))
     this.app.storage.setGroupConfig(name, groupKey, override)
-    const key = JSON.stringify([name, groupKey])
-    this.groupConfigCache.delete(key)
-    this.groupConfigWarnings.delete(key)
+    this.invalidateGroupConfigs(name)
   }
 
-  configFor(name: string, groupKey: string): unknown {
-    const key = JSON.stringify([name, groupKey])
+  setBotConfig(name: string, bot: BotIdentity, override: Record<string, unknown> | null): void {
+    const entry = this.requireAvailable(name)
+    this.requireConfig(entry)
+    this.validateConfig(entry, this.rawConfig(name, bot, { bot: override }))
+    for (const group of this.app.storage.listGroups(name)) {
+      const target = groupIdentity(group.groupKey)
+      if (target.platform === bot.platform && target.selfId === bot.selfId)
+        this.validateConfig(entry, this.rawConfig(name, target, { bot: override }))
+    }
+    this.app.policies.setPlugin(bot, name, {
+      ...this.app.policies.plugin(bot, name),
+      config: override ?? undefined,
+    })
+    this.invalidateGroupConfigs(name)
+  }
+
+  setBotEnabled(name: string, bot: BotIdentity, enabled: boolean | null): void {
+    this.requireAvailable(name)
+    this.app.policies.setPlugin(bot, name, {
+      ...this.app.policies.plugin(bot, name),
+      enabled: enabled ?? undefined,
+    })
+  }
+
+  private requireConfig(entry: Entry): void {
+    if (!entry.definition?.config)
+      throw new PluginConfigError([
+        { path: `plugins.${entry.state.name}.config`, message: 'Plugin has no configuration schema' },
+      ])
+  }
+
+  private rawConfig(
+    name: string,
+    target: BotIdentity & { groupId?: string },
+    changes: {
+      global?: unknown
+      bot?: Record<string, unknown> | null
+      group?: Record<string, unknown> | null
+    } = {},
+  ): unknown {
+    const global = 'global' in changes ? changes.global : this.app.config.plugins[name]?.config
+    const bot = 'bot' in changes ? changes.bot : this.app.policies.plugin(target, name).config
+    const key = groupKeyOf(target)
+    const group =
+      'group' in changes
+        ? changes.group
+        : key === undefined
+          ? undefined
+          : this.app.storage.getGroupConfig(name, key)
+    return mergeConfig(mergeConfig(global ?? {}, bot ?? {}), group ?? {})
+  }
+
+  configFor(name: string, target: string | (BotIdentity & { groupId?: string })): unknown {
+    const destination = typeof target === 'string' ? groupIdentity(target) : target
+    const key = JSON.stringify([name, destination.platform, destination.selfId, destination.groupId])
     if (this.groupConfigCache.has(key)) return this.groupConfigCache.get(key)
     const entry = this.requireAvailable(name)
-    const override = this.app.storage.getGroupConfig(name, groupKey)
-    let result = this.getConfig(name)
-    if (override !== undefined) {
-      try {
-        result = this.validateConfig(entry, {
-          ...(this.app.config.plugins[name]?.config as object | undefined),
-          ...override,
-        })
-      } catch (error) {
-        if (!(error instanceof PluginConfigError)) throw error
-        if (!this.groupConfigWarnings.has(key)) {
-          this.groupConfigWarnings.add(key)
-          this.app.logger.warn(
-            { plugin: name, groupKey, issues: error.issues },
-            'Group configuration invalid; using global configuration',
-          )
-        }
-      }
-    }
+    const result = this.validateConfig(entry, this.rawConfig(name, destination))
     this.groupConfigCache.set(key, result)
     return result
   }
@@ -505,6 +533,10 @@ export class PluginManager {
     return this.serial(async () => {
       const entry = this.requireAvailable(name)
       this.validateConfig(entry, value)
+      for (const bot of this.app.policies.configured(name))
+        this.validateConfig(entry, this.rawConfig(name, bot, { global: value }))
+      for (const group of this.app.storage.listGroups(name))
+        this.validateConfig(entry, this.rawConfig(name, groupIdentity(group.groupKey), { global: value }))
       await this.persist(name, 'config', value)
       this.entryConfig(name).config = value
       this.invalidateGroupConfigs(name)
@@ -517,10 +549,21 @@ export class PluginManager {
     this.app.storage.setGroupEnabled(name, groupKey, enabled)
   }
 
-  isEnabledFor(name: string, event: DispatchEvent): boolean {
+  isEnabledOnBot(name: string, bot: BotIdentity): boolean {
+    return (
+      name === 'core' ||
+      (this.entries.get(name)?.state.enabled !== false &&
+        this.app.policies.plugin(bot, name).enabled !== false)
+    )
+  }
+
+  isEnabledFor(name: string, event: BotIdentity & { groupId?: string }): boolean {
     if (name === 'core') return true
-    const groupId = 'groupId' in event ? event.groupId : undefined
-    return groupId === undefined || this.app.storage.isGroupEnabled(name, `${event.platform}:${groupId}`)
+    const groupKey = groupKeyOf(event)
+    return (
+      this.isEnabledOnBot(name, event) &&
+      (groupKey === undefined || this.app.storage.isGroupEnabled(name, groupKey))
+    )
   }
 
   serial<T>(work: () => Promise<T>): Promise<T> {
@@ -584,6 +627,7 @@ export class PluginManager {
       enabled: this.app.config.plugins[name]?.enabled ?? true,
       provides: [],
       inject: [],
+      capabilities: definition.capabilities,
     }
     const entry: Entry = { state, definition, files, release }
     this.metadata(entry)
@@ -600,6 +644,7 @@ export class PluginManager {
   private metadata(entry: Entry): void {
     const definition = entry.definition
     if (!definition) return
+    entry.state.capabilities = definition.capabilities
     entry.state.version = definition.version
     entry.state.description = definition.description
     const dependencies = serviceDependencies(definition.inject)
@@ -688,9 +733,8 @@ export class PluginManager {
     if (this.configPath) await deleteConfigValue(this.configPath, ['plugins', name])
     delete this.app.config.plugins[name]
     this.app.storage.purgePlugin(name)
+    this.app.policies.load()
     this.invalidateGroupConfigs(name)
-    for (const key of this.groupConfigWarnings)
-      if ((JSON.parse(key) as string[])[0] === name) this.groupConfigWarnings.delete(key)
     const path = join(this.app.config.dataDir, 'plugins', name)
     try {
       await this.ensureRealInside(this.app.config.dataDir, path)
@@ -1072,7 +1116,9 @@ export class PluginManager {
       context = new Context(this.app, entry.state.name, parsed, entry.definition?.inject)
       let timedOut = false
       let timer: NodeJS.Timeout | undefined
-      const setup = Promise.resolve().then(() => entry.definition?.setup(context as Context<unknown>))
+      const setup = Promise.resolve().then(() =>
+        pluginExecution.run(entry.state.name, () => entry.definition?.setup(context as Context<unknown>)),
+      )
       void setup.catch((error: unknown) => {
         if (timedOut)
           this.app.logger.error({ err: error, plugin: entry.state.name }, 'Plugin setup failed after timeout')

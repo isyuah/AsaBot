@@ -1,4 +1,5 @@
 import type { Bot } from '../bot.ts'
+import type { CapabilityRequirements } from '../capabilities.ts'
 import type { BaseEvent } from '../event/index.ts'
 
 /** 插件面板页面的标题、图标、静态目录和可选入口文件。 */
@@ -29,6 +30,7 @@ export interface PluginState {
   provides: string[]
   inject: { name: string; optional: boolean }[]
   configSchema?: Record<string, unknown>
+  capabilities?: CapabilityRequirements
 }
 
 // Framework events can be emitted before an adapter has registered a Bot.

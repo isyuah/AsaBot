@@ -20,6 +20,7 @@ import { dialogueMethods, stripLeadingMention } from '../event/index.ts'
 import type { Message, Sendable } from '../message/index.ts'
 import { isSegment } from '../message/index.ts'
 import { resolvePermission } from '../permission.ts'
+import { pluginExecution } from '../plugin/execution.ts'
 import type { PluginStateEvent } from '../plugin/types.ts'
 import { RateLimiter } from '../ratelimit.ts'
 import { type Activity, ActivityTracker, trackPrompt } from './activity.ts'
@@ -412,7 +413,14 @@ export class Dispatcher implements SessionServices, CommandRegistration {
       ('userId' in event || 'groupId' in event) &&
       !(event.kind === 'message'
         ? event.isSuperuser
-        : 'userId' in event && event.userId !== undefined && this.config.superusers.includes(event.userId)) &&
+        : 'userId' in event &&
+          event.userId !== undefined &&
+          this.config.superusers.some(
+            (actor) =>
+              actor.platform === event.platform &&
+              actor.selfId === event.selfId &&
+              actor.userId === event.userId,
+          )) &&
       !this.accessFilter(event)
     ) {
       const step = this.traceStep('filter', undefined, 'blocked')
@@ -858,8 +866,10 @@ export class Dispatcher implements SessionServices, CommandRegistration {
     const work = Promise.resolve().then(() => {
       signal.throwIfAborted()
       return handlerContext
-        ? dispatchContext.run(handlerContext, () => handler(view, signal, step, record))
-        : handler(view, signal, step, record)
+        ? pluginExecution.run(scope.owner, () =>
+            dispatchContext.run(handlerContext, () => handler(view, signal, step, record)),
+          )
+        : pluginExecution.run(scope.owner, () => handler(view, signal, step, record))
     })
     void work.catch((error: unknown) => {
       if (finished && !isCancellation(error, signal)) logError(error)

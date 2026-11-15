@@ -265,7 +265,7 @@ describe('Feishu adapter', () => {
       )
       await t.app.whenIdle()
       expect(executed).toEqual(['ou_user'])
-      t.app.plugins.setGroupEnabled('buttons', 'feishu:oc_group', false)
+      t.app.plugins.setGroupEnabled('buttons', 'feishu:ou_bot_cli_0123456789abcdef:group:oc_group', false)
       await t.transport.receive(
         'card.action.trigger',
         cardAction({ tag: 'button', value: commandValue(t.bot, '/who') }),
@@ -452,7 +452,7 @@ describe('Feishu adapter', () => {
       await t.app.whenIdle()
       expect(messages).toHaveLength(1)
       t.app.storage.access.remove('block', 'user', 'feishu:ou_user')
-      t.app.plugins.setGroupEnabled('events', 'feishu:oc_group', false)
+      t.app.plugins.setGroupEnabled('events', 'feishu:ou_bot_cli_0123456789abcdef:group:oc_group', false)
       await t.transport.receive('im.message.receive_v1', message('disabled'))
       await t.app.whenIdle()
       expect(messages).toHaveLength(1)

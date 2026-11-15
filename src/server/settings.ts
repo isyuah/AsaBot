@@ -9,6 +9,7 @@ import {
 } from '../core/config/load.ts'
 import { type Config, configSchema } from '../core/config/schema.ts'
 import { writeConfigValue } from '../core/config/write.ts'
+import { actorIdentitySchema } from '../core/identity.ts'
 import { constantTimeEqual } from '../core/utils/security.ts'
 
 const placeholder = '********'
@@ -28,7 +29,7 @@ const commandInput = z
 
 export const settingsInput = z
   .object({
-    superusers: z.array(z.string()).optional(),
+    superusers: z.array(actorIdentitySchema).optional(),
     timezone: z.string().optional(),
     command: commandInput.optional(),
     adapters: z.record(z.string(), z.unknown()).optional(),
@@ -43,7 +44,7 @@ export const setupInput = z
       .string()
       .min(8)
       .refine((value) => !value.includes('${'), 'Password must not contain "${"'),
-    superusers: z.array(z.string()),
+    superusers: z.array(actorIdentitySchema),
     adapters: z.record(z.string(), z.unknown()).optional(),
   })
   .strict()

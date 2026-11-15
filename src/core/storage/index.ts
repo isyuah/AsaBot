@@ -57,6 +57,8 @@ const coreMigrations = [
        CAST(unixepoch('subsec') * 1000 AS INTEGER), CAST(unixepoch('subsec') * 1000 AS INTEGER),
        '{"maxRetries":0,"delay":5000,"maxDelay":300000}' FROM scheduled_tasks;
    DROP TABLE scheduled_tasks;`,
+  `CREATE TABLE bot_admins (bot_key TEXT NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY (bot_key, user_id));
+   CREATE TABLE plugin_bot_policy (bot_key TEXT NOT NULL, plugin TEXT NOT NULL, enabled INTEGER, config TEXT, PRIMARY KEY (bot_key, plugin));`,
 ]
 
 /** SQLite 存储及插件状态、迁移和访问控制管理器。 */
@@ -305,6 +307,7 @@ export class Storage {
         'migrations',
         'plugin_group_state',
         'plugin_group_config',
+        'plugin_bot_policy',
         'task_attempts',
         'tasks',
       ]) {

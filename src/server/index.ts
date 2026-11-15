@@ -697,7 +697,7 @@ export class HttpServer implements ServerService {
         z
           .object({
             path: z.string().min(1),
-            groupKey: z.string().regex(/^[^:\s]+:[^\s]+$/),
+            groupKey: z.string().regex(/^[^:\s]+:[^:\s]+:group:[^\s]+$/),
             enabled: z.boolean(),
           })
           .strict(),
@@ -716,7 +716,7 @@ export class HttpServer implements ServerService {
         if (
           entry.list === 'block' &&
           entry.subject === 'user' &&
-          this.app.isSuperuser(entry.key.slice(entry.key.indexOf(':') + 1))
+          this.app.config.superusers.some((actor) => entry.key === `${actor.platform}:${actor.userId}`)
         )
           throw new HttpError(409, 'CONFLICT', 'Cannot block a superuser')
         this.app.storage.access.add(entry.list, entry.subject, entry.key)

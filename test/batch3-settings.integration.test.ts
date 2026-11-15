@@ -36,7 +36,7 @@ function request(url: string, cookie: string, method = 'GET', data?: unknown): P
 }
 
 interface SettingsView {
-  superusers: string[]
+  superusers: { platform: string; selfId: string; userId: string }[]
   timezone: string
   restartRequired: string[]
   adapters: Record<
@@ -171,7 +171,7 @@ describe('batch 3 panel settings', () => {
       const cookie = await login(url, password)
       expect((await t.say('/protected', { user: '42', group: null })).includes('allowed')).toBe(false)
       const response = await request(`${url}/settings`, cookie, 'PUT', {
-        superusers: ['42'],
+        superusers: [{ platform: 'virtual', selfId: '10000', userId: '42' }],
         command: { prefixes: ['!'] },
       })
       expect(response.status).toBe(200)

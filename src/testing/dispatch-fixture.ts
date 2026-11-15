@@ -37,7 +37,9 @@ export function dispatchFixture(config: unknown = {}) {
         userId,
         message: typeof message === 'string' ? [seg.text(message)] : message,
         sender: { userId, nickname: userId, ...(options.role === undefined ? {} : { role: options.role }) },
-        isSuperuser: options.superuser ?? app.isSuperuser(userId),
+        isSuperuser:
+          options.superuser ?? app.isSuperuser({ platform: bot.platform, selfId: bot.selfId, userId }),
+        isBotAdmin: app.isBotAdmin({ platform: bot.platform, selfId: bot.selfId, userId }),
       },
       app.sessionServices,
     )

@@ -4,6 +4,7 @@ import type { Logger } from 'pino'
 import type { Bot, MessageTarget, SendResult } from './bot.ts'
 import type { ApiCall } from './dispatch/api.ts'
 import type { AnyEvent, SessionServices } from './event/index.ts'
+import type { ActorIdentity } from './identity.ts'
 import type { Message } from './message/index.ts'
 
 /** 发送前钩子接收的机器人、目标和消息。 */
@@ -54,7 +55,8 @@ export interface AdapterHost {
   registerUpgrade(path: string, handler: UpgradeHandler): () => void
   setBotInfo(bot: Bot, info: BotInfo): void
   whenIdle(): Promise<void>
-  isSuperuser(userId: string): boolean
+  isSuperuser(actor: ActorIdentity): boolean
+  isBotAdmin(actor: ActorIdentity): boolean
   prepareOutgoing(input: OutgoingMessage): Promise<PreparedOutgoing>
   invokeApi(call: ApiCall, execute: (args: unknown[]) => Promise<unknown>): Promise<unknown>
 }

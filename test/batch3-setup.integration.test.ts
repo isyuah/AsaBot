@@ -68,12 +68,16 @@ describe('first-run setup', () => {
       expect((await fetch(`${url}/overview`)).status).toBe(401)
       expect((await post(`${url}/login`, { password: randomBytes(12).toString('hex') })).status).toBe(401)
       const password = randomBytes(18).toString('base64url')
-      const wrong = await post(`${url}/setup`, { code: 'INVALID', password, superusers: ['42'] })
+      const wrong = await post(`${url}/setup`, {
+        code: 'INVALID',
+        password,
+        superusers: [{ platform: 'virtual', selfId: '10000', userId: '42' }],
+      })
       expect(wrong.status).toBe(401)
       const response = await post(`${url}/setup`, {
         code: running.code,
         password,
-        superusers: ['42'],
+        superusers: [{ platform: 'virtual', selfId: '10000', userId: '42' }],
         adapters: { onebot11: { reverse: { enabled: true } } },
       })
       expect(response.status).toBe(200)
@@ -83,8 +87,10 @@ describe('first-run setup', () => {
       if (!cookie) throw new Error('Missing session cookie')
       const settings = await fetch(`${url}/settings`, { headers: { cookie } })
       expect(settings.status).toBe(200)
-      const view = (await settings.json()) as { superusers: string[] }
-      expect(view.superusers).toEqual(['42'])
+      const view = (await settings.json()) as {
+        superusers: { platform: string; selfId: string; userId: string }[]
+      }
+      expect(view.superusers).toEqual([{ platform: 'virtual', selfId: '10000', userId: '42' }])
       const logs = await (await fetch(`${url}/logs`, { headers: { cookie } })).text()
       expect(logs.includes(running.code)).toBe(false)
       expect(logs.includes(password)).toBe(false)

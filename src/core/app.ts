@@ -11,13 +11,15 @@ import type {
   UpgradeHandler,
 } from './adapter.ts'
 import { type Bot, BotRegistry, type SendResult } from './bot.ts'
+import { BotPolicies } from './bot-policies.ts'
 import type { Config } from './config/schema.ts'
 import { type ApiCall, ApiInterceptors } from './dispatch/api.ts'
 import { Dispatcher } from './dispatch/dispatcher.ts'
 import { OutgoingHooks } from './dispatch/outgoing.ts'
 import { MessageStats } from './dispatch/stats.ts'
+import { dispatchContext } from './dispatch/trace.ts'
 import type { DispatchEvent } from './dispatch/types.ts'
-import { NoBotOnlineError } from './errors.ts'
+import { NoBotOnlineError, PluginError } from './errors.ts'
 import type {
   AnyEvent,
   EventMap,
@@ -29,9 +31,11 @@ import type {
   Session,
   SessionServices,
 } from './event/index.ts'
+import type { ActorIdentity } from './identity.ts'
 import { logger as defaultLogger } from './logger.ts'
 import type { Sendable } from './message/index.ts'
 import { lowerMessage } from './message/lower.ts'
+import { pluginExecution } from './plugin/execution.ts'
 import { PluginManager } from './plugin/manager.ts'
 import type { PackageOptions } from './plugin/packages.ts'
 import { TaskService } from './plugin/tasks.ts'
@@ -93,6 +97,7 @@ export class App implements AdapterHost {
   readonly sessionServices: SessionServices
   readonly events: CoreEvents
   readonly bots = new BotRegistry()
+  readonly policies: BotPolicies
   readonly storage: Storage
   readonly plugins: PluginManager
   readonly stats: MessageStats
@@ -133,6 +138,19 @@ export class App implements AdapterHost {
     this.sessionServices = this.dispatcher
     this.events = new CoreEvents(this.dispatcher)
     this.storage = new Storage(config.dataDir, logger)
+    this.policies = new BotPolicies(this.storage)
+    this.apiInterceptors.check = (call) => {
+      const owner = pluginExecution.getStore() ?? dispatchContext.getStore()?.plugin
+      if (owner && !this.plugins.isEnabledOnBot(owner, call.bot))
+        throw new PluginError(`Plugin "${owner}" is disabled for ${call.bot.platform}:${call.bot.selfId}`)
+    }
+    this.apiInterceptors.enabled = (owner, bot) => this.plugins.isEnabledOnBot(owner, bot)
+    this.outgoing.enabled = (owner, input) =>
+      this.plugins.isEnabledFor(owner, {
+        platform: input.bot.platform,
+        selfId: input.bot.selfId,
+        ...(input.target.type === 'group' ? { groupId: input.target.id } : {}),
+      })
     this.tasks = new TaskService(this.storage, config, logger)
     this.plugins = new PluginManager(this, options.configPath, options.packages)
     this.dispatcher.accessFilter = (event) => this.storage.allows(event)
@@ -363,8 +381,15 @@ export class App implements AdapterHost {
     this.bots.unregister(bot)
   }
 
-  isSuperuser(userId: string): boolean {
-    return this.config.superusers.includes(userId)
+  isSuperuser(actor: ActorIdentity): boolean {
+    return this.config.superusers.some(
+      (entry) =>
+        entry.platform === actor.platform && entry.selfId === actor.selfId && entry.userId === actor.userId,
+    )
+  }
+
+  isBotAdmin(actor: ActorIdentity): boolean {
+    return this.isSuperuser(actor) || this.policies.isAdmin(actor)
   }
 
   getBot(platform: string, selfId: string): Bot | undefined {
@@ -400,6 +425,7 @@ export class App implements AdapterHost {
     }
 
     this.storage.open()
+    this.policies.load()
     try {
       this.tasks.start()
       await this.plugins.start()

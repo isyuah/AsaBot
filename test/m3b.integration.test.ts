@@ -9,7 +9,7 @@ async function start(options: Parameters<typeof createTestApp>[0] = {}): Promise
   const app = await createTestApp({
     ...options,
     pluginDirs: [resolve('plugins')],
-    config: { ...options.config, superusers: ['99'] },
+    config: { ...options.config, superusers: [{ platform: 'virtual', selfId: '10000', userId: '99' }] },
   })
   apps.push(app)
   return app
@@ -93,7 +93,7 @@ describe('M3b through the virtual adapter', () => {
     expect(detail).toContain('/echo -n 2 你好')
     expect(await t.say('/help 不存在')).toEqual([expect.stringContaining('未找到')])
     expect(await t.say('/help plugin', { user: '99' })).toEqual([expect.stringContaining('/plugin list')])
-    expect(await t.say('/help -p 2', { user: '99' })).toEqual([expect.stringContaining('2/2')])
+    expect(await t.say('/help -p 2', { user: '99' })).toEqual([expect.stringContaining('2/3')])
     expect(await t.say('/help -p 0')).toEqual([expect.stringContaining('页码')])
   })
 

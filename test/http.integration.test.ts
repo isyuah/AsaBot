@@ -38,7 +38,7 @@ async function start(): Promise<{ t: TestApp; url: string }> {
     plugins: [sample],
     config: {
       server: { port: 0, panelPassword: 'panel-secret', apiToken: 'api-secret' },
-      superusers: ['99'],
+      superusers: [{ platform: 'virtual', selfId: '10000', userId: '99' }],
     },
   })
   apps.push(t)
@@ -293,7 +293,7 @@ describe('HTTP service contract', () => {
     expect(await (await request(url, cookie, '/acl')).json()).toContainEqual(entry)
     expect((await request(url, cookie, '/acl', 'DELETE', entry)).status).toBe(200)
     expect(await (await request(url, cookie, '/acl')).json()).not.toContainEqual(entry)
-    expect((await request(url, cookie, '/acl', 'POST', { ...entry, key: 'onebot11:99' })).status).toBe(409)
+    expect((await request(url, cookie, '/acl', 'POST', { ...entry, key: 'virtual:99' })).status).toBe(409)
   })
 
   it('runs isolated prompt rounds with the real pipeline and excludes them from statistics', async () => {
@@ -313,7 +313,9 @@ describe('HTTP service contract', () => {
     expect(await say('/secret', '99', '10', true)).toEqual(['secret'])
     expect(await say('/limited')).toEqual(['limited'])
     expect(await say('/limited')).toEqual([expect.stringContaining('冷却中')])
-    await request(url, cookie, '/plugins/panel-sample/groups/virtual%3A10', 'PUT', { enabled: false })
+    await request(url, cookie, '/plugins/panel-sample/groups/virtual%3Aplayground%3Agroup%3A10', 'PUT', {
+      enabled: false,
+    })
     expect(await say('/dialog')).toEqual([])
     await request(url, cookie, '/acl', 'POST', { list: 'block', subject: 'user', key: 'virtual:21' })
     expect(await say('/ping', '21', null)).toEqual([])

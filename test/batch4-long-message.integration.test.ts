@@ -73,7 +73,7 @@ describe('long-message plugin', () => {
     try {
       await t.mock.bot.sendGroup('10', [seg.text('long text'), seg.image('asset')])
       expect(t.mock.bot.sends[0]?.message).toEqual([seg.text('long text'), seg.image('asset')])
-      t.app.plugins.setGroupConfig('long-message', 'virtual:10', { threshold: 20 })
+      t.app.plugins.setGroupConfig('long-message', 'virtual:10000:group:10', { threshold: 20 })
       await t.mock.bot.sendGroup('10', 'long text')
       await t.mock.bot.sendGroup('11', 'long text')
       expect(t.mock.bot.sends[1]?.message).toEqual([seg.text('long text')])

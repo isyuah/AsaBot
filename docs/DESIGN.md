@@ -1484,3 +1484,13 @@ type HttpInit = RequestInit & { timeout?: Duration; proxy?: boolean | string; ma
 - **按群配置只对 `configFor` 生效**：插件在 setup 中读取的全局配置（例如 cron 表达式）不会随群覆盖变化。
 - **satori 的 CSS 子集**：`render.html` 只支持 flex 布局和 satori 支持的属性，需要完整 CSS 时用浏览器后端的 `render.page`。
 - **插件页面的静态文件公开**：`/plugin-pages/<name>/*` 无需登录即可访问，数据必须走需要登录的 `ctx.panel.route`。
+
+
+## 机器人作用域与插件配置
+
+- 框架管理员 `superusers` 使用 `{ platform, selfId, userId }` 身份；机器人的管理员存于 `bot_admins`，通过 `Session.isBotAdmin` 和 `bot.admin` 权限访问本机器人管理操作。包安装、卸载和全局插件启停仍要求框架管理员。
+- 群规则键统一为 `platform:selfId:group:groupId`，同平台的不同机器人拥有独立群规则。访问控制列表仍为框架级平台用户/群列表。
+- 插件可以声明 `capabilities: { required?, optional? }`，各项包含 `segments`、`textStyles`、`actions`。能力缺失仅用于兼容性提示；`inject.required` 服务缺失仍阻止插件加载。
+- `plugin_bot_policy` 保存机器人插件开关与配置覆盖。机器人插件停用影响事件、命令、发送前钩子、API 拦截和该插件的后台 Bot API 调用。插件实例、服务与任务调度仍为全局资源。
+- `ctx.config` 是全局配置；`ctx.configFor(botOrSession | groupKey)` 按全局原始配置 → 机器人覆盖 → 群覆盖递归合并对象、整体替换数组，再执行 schema 解析和默认值填充。删除覆盖项恢复继承。
+- 保存父级配置前校验所有受影响的子级有效配置，失败时拒绝写入；不再静默回落全局配置。本节替代 24.5 中的顶层覆盖及失效回落规则。

@@ -186,7 +186,9 @@ describe('dispatcher pipeline', () => {
   })
 
   it('applies access and enabled hooks, while superusers bypass access filtering', async () => {
-    const { app, say } = dispatchFixture({ superusers: ['99'] })
+    const { app, say } = dispatchFixture({
+      superusers: [{ platform: 'fake', selfId: '10000', userId: '99' }],
+    })
     const calls: string[] = []
     const access = vi.fn(() => false)
     const enabled = vi.fn((owner: string) => owner !== 'off')

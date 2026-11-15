@@ -117,6 +117,7 @@ interface SessionFields {
   message: Message
   sender: Session['sender']
   isSuperuser: boolean
+  isBotAdmin: boolean
   sentMessageIds?: LruSet<string>
 }
 
@@ -158,6 +159,7 @@ export function createSession(init: SessionInit, services: SessionServices): Ses
     sender: init.sender,
     toMe,
     isSuperuser: init.isSuperuser,
+    isBotAdmin: init.isBotAdmin,
     async send(content: Sendable): Promise<SendResult> {
       return init.messageType === 'group'
         ? init.bot.sendGroup(init.groupId, content)
