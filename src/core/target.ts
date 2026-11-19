@@ -1,14 +1,19 @@
 import { z } from 'zod'
+import type { MessageTarget } from './bot.ts'
 
 /** 主动发送目标，包含平台、会话类型、ID 和可选机器人账号。 */
-export interface Target {
+export interface Target extends MessageTarget {
   platform: string
   selfId?: string
-  type: 'group' | 'private'
-  id: string
 }
 
-const targetObjectSchema = z.object({
+export const threadSchema = z.object({ id: z.string().min(1), rootMessageId: z.string().min(1) })
+export const messageTargetSchema = z.object({
+  type: z.enum(['group', 'private']),
+  id: z.string().min(1),
+  thread: threadSchema.optional(),
+})
+const targetObjectSchema = messageTargetSchema.extend({
   platform: z
     .string()
     .min(1)
@@ -18,17 +23,26 @@ const targetObjectSchema = z.object({
     .min(1)
     .regex(/^[^:]+$/)
     .optional(),
-  type: z.enum(['group', 'private']),
-  id: z.string().min(1),
 })
+const targetKinds = new Set(['group', 'private', 'group-thread', 'private-thread'])
 
-/** 将 platform[:selfId]:type:id 字符串解析为发送目标；格式无效时抛错。 */
+/** 解析普通会话或话题的发送目标；格式无效时抛错。 */
 export function parseTarget(text: string): Target {
   const parts = text.split(':')
   const platform = parts.shift()
   const second = parts.shift()
-  const selfId = second === 'group' || second === 'private' ? undefined : second
+  const selfId = second !== undefined && targetKinds.has(second) ? undefined : second
   const type = selfId === undefined ? second : parts.shift()
+  if (type === 'group-thread' || type === 'private-thread') {
+    const [id, threadId, rootMessageId] = z.tuple([z.string(), z.string(), z.string()]).parse(parts)
+    return targetObjectSchema.parse({
+      platform,
+      selfId,
+      type: type === 'group-thread' ? 'group' : 'private',
+      id: decodeURIComponent(id),
+      thread: { id: decodeURIComponent(threadId), rootMessageId: decodeURIComponent(rootMessageId) },
+    })
+  }
   return targetObjectSchema.parse({
     platform,
     ...(selfId === undefined ? {} : { selfId }),
@@ -40,9 +54,11 @@ export function parseTarget(text: string): Target {
 /** 将发送目标格式化为字符串；目标无效时抛错。 */
 export function formatTarget(target: Target): string {
   const value = targetObjectSchema.parse(target)
-  return [value.platform, ...(value.selfId === undefined ? [] : [value.selfId]), value.type, value.id].join(
-    ':',
-  )
+  const bot = value.selfId === undefined ? value.platform : `${value.platform}:${value.selfId}`
+  const thread = value.thread
+  if (!thread) return `${bot}:${value.type}:${value.id}`
+  const ids = [value.id, thread.id, thread.rootMessageId].map(encodeURIComponent)
+  return [bot, `${value.type}-thread`, ...ids].join(':')
 }
 
 /** 接受目标对象或字符串并转换为 Target 的 zod schema。 */

@@ -1431,9 +1431,11 @@ type HttpInit = RequestInit & { timeout?: Duration; proxy?: boolean | string; ma
 
 - `connections` 中每条飞书记录配置独立 appId/appSecret，支持多个国内飞书企业自建应用，使用官方 SDK 长连接。SDK ready/reconnecting/error 驱动机器人状态，关闭和重配置回收连接并隔离旧回调。
 - 平台 ID 为机器人/用户 open_id、群 chat_id；平台专属 API 和类型从 `@asabot/core/feishu` 导出，核心保持协议无关。
-- 收发文本、提及、引用、富文本、图片和文件；媒体统一限制超时和大小。混合消息按原顺序拆分，逐条记录发送，返回最后 ID。成员、机器人进退群与撤回事件按可用身份信息映射，事件使用有界 TTL 去重。
+- 收发文本、提及、引用、富文本、图片、语音、视频和文件；媒体统一限制超时和大小。另支持飞书表情、表情包和分享名片。混合消息按原顺序拆分，逐条记录发送，返回最后 ID。成员、机器人进退群与撤回事件按可用身份信息映射，事件使用有界 TTL 去重。
+- `Target`、`Session`、`SendResult` 和收发记录可携带 `thread: { id, rootMessageId }`。使用 `sendTo` 按完整地址投递；飞书用根消息 ID 发话题回复，用话题 ID 转发和查历史。追问与消息记录按话题隔离，群策略与群冷却使用所在群。主动开话题的发送钩子可通过 `sendFirst` 先交付首段，取得话题地址后再继续发送。
+- 飞书专属 API 按页读取会话及话题历史、已读成员、表情回复与 Pin；支持转发已有消息、切换群消息形式、处理群成员与应用内加急。合并转发、加人、加急保留平台报告的部分失败结果。增加表情回复、群配置变更、单聊已读三类通知。
 - 配置、权限和真实联调步骤见 [FEISHU.md](FEISHU.md)。本轮不增加业务内置插件。
-- Markdown、按钮及 JSON 2.0 原生卡片通过适配器发送；`notice.feishu.card.action` 保留完整表单，并提供 2 秒内一次性的 `respond`。超时后可通过 `feishu.updateCard` 更新；有签名的命令按钮以点击者身份进入现有命令管线，表单值不转换为命令。
+- Markdown、按钮及 JSON 2.0 原生卡片通过适配器发送；`notice.feishu.card.action` 保留完整表单，并提供 2 秒内一次性的 `respond`。超时后可通过 `feishu.updateCard` 更新；有签名的命令按钮以点击者身份进入现有命令管线，表单值不转换为命令。卡片话题先读本地有界缓存，再通过原消息恢复；查不到目的地时不执行签名命令。
 
 ## 已知限制
 

@@ -9,7 +9,7 @@ import type {
   PreparedOutgoing,
   UpgradeHandler,
 } from './adapter.ts'
-import { type Bot, BotRegistry, type SendResult } from './bot.ts'
+import { type Bot, BotRegistry, type SendResult, sendTo } from './bot.ts'
 import { BotPolicies } from './bot-policies.ts'
 import type { Config } from './config/schema.ts'
 import { Connections } from './connections.ts'
@@ -371,9 +371,7 @@ export class App implements AdapterHost {
           (destination.selfId === undefined || item.selfId === destination.selfId),
       )
     if (!bot) throw new NoBotOnlineError()
-    return destination.type === 'group'
-      ? bot.sendGroup(destination.id, content)
-      : bot.sendPrivate(destination.id, content)
+    return sendTo(bot, destination, content)
   }
 
   get status(): AppState {

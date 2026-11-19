@@ -1,4 +1,4 @@
-import type { Bot, ForwardNode, SendResult } from '../bot.ts'
+import type { Bot, ForwardNode, MessageThread, SendResult } from '../bot.ts'
 import type { DispatchTrace } from '../dispatch/trace.ts'
 import type { Message, Sendable } from '../message/index.ts'
 import type { Target } from '../target.ts'
@@ -57,6 +57,8 @@ export interface Session extends BaseEvent {
   readonly userId: string
   /** 群消息的群 ID；私聊中不存在。 */
   readonly groupId?: string
+  /** 消息所属话题；群 ID 仍然指向所在群。 */
+  readonly thread?: MessageThread
   /** 包含平台、机器人账号、会话类型和 ID 的目标字符串。 */
   readonly channelKey: string
   /** 可用于主动发送的当前会话目标。 */
@@ -255,6 +257,7 @@ export interface MessageSentEvent extends BaseEvent {
   readonly messageType: 'private' | 'group'
   readonly userId?: string
   readonly groupId?: string
+  readonly thread?: MessageThread
   readonly message: Message
 }
 

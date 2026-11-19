@@ -1,5 +1,6 @@
 import { scheduleTimeout } from './dispatch/timer.ts'
 import type { Session } from './event/index.ts'
+import { formatTarget } from './target.ts'
 
 /** 命令冷却按用户、群或全局计算的范围。 */
 export type CooldownScope = 'user' | 'group' | 'global'
@@ -26,7 +27,11 @@ export class RateLimiter {
   ): { remaining: number; notify: boolean } | null {
     if (session.isSuperuser || duration === 0) return null
     const key =
-      scope === 'user' ? `${session.platform}:${session.userId}` : scope === 'group' ? session.channelKey : ''
+      scope === 'user'
+        ? `${session.platform}:${session.userId}`
+        : scope === 'group'
+          ? formatTarget({ ...session.target, thread: undefined })
+          : ''
     let bucket = this.entries.get(command)
     if (bucket === undefined) {
       bucket = { values: new Map() }

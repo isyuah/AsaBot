@@ -39,8 +39,9 @@ export class ApiInterceptors {
   wrap(bot: Bot): void {
     if (this.wrapped.has(bot)) return
     this.wrapped.add(bot)
-    for (const method of botActions) {
+    for (const method of [...botActions, 'sendThread'] as const) {
       const original = bot[method]
+      if (original === undefined) continue
       Object.defineProperty(bot, method, {
         configurable: true,
         writable: true,

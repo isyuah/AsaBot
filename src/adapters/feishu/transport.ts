@@ -23,10 +23,11 @@ export interface FeishuRequest {
   data?: Record<string, unknown>
   params?: Record<string, string | number>
 }
+export type FeishuUploadKind = 'image' | 'file' | 'audio' | 'video'
 /** Injectable SDK boundary; protocol payloads are validated by the adapter. */
 export interface FeishuTransport {
   request(method: string, path: string, input?: FeishuRequest): Promise<unknown>
-  upload(type: 'image' | 'file', content: Buffer, name: string): Promise<unknown>
+  upload(type: FeishuUploadKind, content: Buffer, name: string): Promise<unknown>
   download(messageId: string, key: string, type: 'image' | 'file'): Promise<Buffer>
   start(handlers: FeishuEventHandlers): Promise<void>
   close(): void
@@ -108,10 +109,16 @@ export class SDKTransport implements FeishuTransport {
     return this.client.request<unknown>({ method, url: `https://open.feishu.cn/open-apis${path}`, ...input })
   }
 
-  upload(type: 'image' | 'file', content: Buffer, name: string): Promise<unknown> {
+  upload(type: FeishuUploadKind, content: Buffer, name: string): Promise<unknown> {
     return type === 'image'
       ? this.client.im.image.create({ data: { image_type: 'message', image: content } })
-      : this.client.im.file.create({ data: { file_type: 'stream', file_name: name, file: content } })
+      : this.client.im.file.create({
+          data: {
+            file_type: type === 'audio' ? 'opus' : type === 'video' ? 'mp4' : 'stream',
+            file_name: name,
+            file: content,
+          },
+        })
   }
 
   async download(messageId: string, key: string, type: 'image' | 'file'): Promise<Buffer> {

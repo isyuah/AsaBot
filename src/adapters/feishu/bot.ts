@@ -1,64 +1,123 @@
 import { createHmac, randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { AdapterHost } from '../../core/adapter.ts'
-import type {
-  Bot,
-  ForwardMessage,
-  ForwardNode,
-  GroupInfo,
-  GroupMemberInfo,
-  MessageInfo,
-  MessageTarget,
-  SendResult,
-  UserInfo,
+import {
+  type Bot,
+  type ForwardMessage,
+  type ForwardNode,
+  type GroupInfo,
+  type GroupMemberInfo,
+  type MessageTarget,
+  type MessageThread,
+  type SendResult,
+  sendTo,
+  type ThreadTarget,
+  type UserInfo,
 } from '../../core/bot.ts'
 import { dispatchContext } from '../../core/dispatch/trace.ts'
 import { NotConnectedError, UnsupportedError } from '../../core/errors.ts'
 import type { Session } from '../../core/event/index.ts'
-import { isSegment, type Message, normalizeSendable, type Sendable } from '../../core/message/index.ts'
+import { isSegment, type Message, normalizeSendable, type Sendable, seg } from '../../core/message/index.ts'
+import { messageTargetSchema, threadSchema } from '../../core/target.ts'
 import { LruSet } from '../../core/utils/lru.ts'
 import { redactText } from '../../core/utils/redact.ts'
 import { constantTimeEqual } from '../../core/utils/security.ts'
-import { cardSchema, type FeishuCard, type FeishuElement, feishu } from './cards.ts'
+import {
+  chatMode,
+  chatPath,
+  chatRolesSchema,
+  type FeishuApi,
+  FeishuClient,
+  feishuOperations,
+  idSchema,
+  messagePath,
+} from './api.ts'
+import { cardSchema, type FeishuElement, feishu } from './cards.ts'
 import type { FeishuConfig } from './config.ts'
-import { incomingMessage, readMedia } from './message.ts'
-import type { FeishuRequest, FeishuTransport } from './transport.ts'
+import {
+  decodeMessageResource,
+  type FeishuMessageInfo,
+  messageResource,
+  readMedia,
+  threadFields,
+  threadOf,
+} from './message.ts'
+import type { FeishuTransport, FeishuUploadKind } from './transport.ts'
 
-export interface FeishuApi {
-  sendCard(target: MessageTarget, card: FeishuCard): Promise<SendResult>
-  updateCard(messageId: string, card: FeishuCard): Promise<void>
-  commandButton(label: string, command: string): FeishuElement
-  downloadResource(messageId: string, key: string, type: 'image' | 'file'): Promise<Buffer>
-}
 export interface FeishuBot extends Bot {
   readonly feishu: FeishuApi
+  sendThread(target: ThreadTarget, content: Sendable): Promise<SendResult>
+  getMessage(messageId: string): Promise<FeishuMessageInfo>
 }
 export function isFeishu(bot: Bot): bot is FeishuBot {
   return bot.platform === 'feishu' && 'feishu' in bot
 }
 
-const envelope = z.object({ code: z.number(), msg: z.string().optional() }).passthrough()
-const sentSchema = z.object({ message_id: z.string().min(1) })
-const memberSchema = z.object({ member_id: z.string(), name: z.string().default('') })
-const chatSchema = z.object({
-  chat_mode: z.enum(['group', 'p2p', 'topic']).optional(),
-  owner_id: z.string().optional(),
-  user_manager_id_list: z.array(z.string()).default([]),
+const sentSchema = threadFields
+const forwardedSchema = sentSchema.extend({
+  msg_type: z.string().optional(),
+  invalid_message_id_list: z.array(idSchema).default([]),
 })
-
+const threadTargetSchema = messageTargetSchema.extend({ thread: threadSchema })
+const threadSendResult = z.object({ messageId: idSchema, thread: threadSchema })
+const segmentSchema = z.object({ type: z.string().min(1), data: z.record(z.string(), z.unknown()) })
+const sendableSchema = z.union([z.string(), segmentSchema, z.array(segmentSchema)])
+const forwardMessageArgs = z.tuple([idSchema, messageTargetSchema])
+type Conversation =
+  | { messageType: 'private'; groupId?: undefined; thread?: MessageThread }
+  | { messageType: 'group'; groupId: string; thread?: MessageThread }
+const memberSchema = z.object({ member_id: z.string(), name: z.string().default('') })
 export const feishuCapabilities = {
-  segments: ['text', 'at', 'reply', 'image', 'file', 'markdown', 'button', 'feishu:card'],
+  segments: [
+    'text',
+    'at',
+    'reply',
+    'image',
+    'audio',
+    'video',
+    'file',
+    'markdown',
+    'button',
+    'feishu:card',
+    'feishu:sticker',
+    'feishu:emoji',
+    'feishu:share_chat',
+    'feishu:share_user',
+  ],
   textStyles: ['bold', 'italic', 'underline', 'strike', 'code'] as const,
   actions: [
     'sendPrivate',
     'sendGroup',
+    'sendThread',
     'getSelf',
     'getGroupList',
     'getGroupMember',
     'getGroupMembers',
     'getMessage',
+    'getForward',
+    'kickMember',
     'deleteMessage',
     'call',
+    'feishu.sendCard',
+    'feishu.updateCard',
+    'feishu.downloadResource',
+    'feishu.replyInThread',
+    'feishu.listMessages',
+    'feishu.forwardMessage',
+    'feishu.forwardThread',
+    'feishu.mergeForward',
+    'feishu.editMessage',
+    'feishu.addReaction',
+    'feishu.removeReaction',
+    'feishu.listReactions',
+    'feishu.pinMessage',
+    'feishu.unpinMessage',
+    'feishu.listPins',
+    'feishu.listReadUsers',
+    'feishu.getChat',
+    'feishu.setChatMessageMode',
+    'feishu.addChatMembers',
+    'feishu.urgentApp',
   ],
 }
 
@@ -73,13 +132,14 @@ export class FeishuBotImpl implements FeishuBot {
   readonly sentMessageIds = new LruSet<string>(1000)
   readonly shutdown = new AbortController()
   private readonly host: AdapterHost
-  private readonly transport: FeishuTransport
+  private readonly client: FeishuClient
   private readonly config: FeishuConfig
   private readonly buttonSecret: string
   private readonly roles = new Map<
     string,
-    { expires: number; value: Promise<z.output<typeof chatSchema> | undefined> }
+    { expires: number; value: Promise<z.output<typeof chatRolesSchema> | undefined> }
   >()
+  private readonly conversations = new Map<string, Conversation>()
 
   constructor(
     host: AdapterHost,
@@ -89,43 +149,70 @@ export class FeishuBotImpl implements FeishuBot {
     buttonSecret: string,
   ) {
     this.host = host
-    this.transport = transport
+    this.client = new FeishuClient(host, this, transport, config)
     this.selfId = self.userId
     this.nickname = self.nickname
     this.avatar = self.avatar
     this.config = config
     this.buttonSecret = buttonSecret
     this.feishu = {
-      sendCard: (target, card) =>
-        target.type === 'group'
-          ? this.sendGroup(target.id, feishu.card(card))
-          : this.sendPrivate(target.id, feishu.card(card)),
-      commandButton: (label, command) => this.commandButton(label, command),
-      updateCard: async (messageId, card) => {
-        await this.host.invokeApi(
-          { bot: this, method: 'feishu.updateCard', args: [messageId, card] },
-          async (args) => {
-            const [id, value] = z.tuple([z.string().min(1), cardSchema]).parse(args)
-            this.assertOnline()
-            await this.raw('PATCH', `/im/v1/messages/${encodeURIComponent(id)}`, {
-              data: { content: JSON.stringify(value) },
-            })
-          },
-        )
-      },
-      downloadResource: async (messageId, key, type) => {
-        const result = await this.host.invokeApi(
-          { bot: this, method: 'feishu.downloadResource', args: [messageId, key, type] },
-          async (args) => {
-            const [id, fileKey, kind] = z
-              .tuple([z.string(), z.string(), z.enum(['image', 'file'])])
+      sendCard: (target, card) => sendTo(this, target, feishu.card(card)),
+      ...feishuOperations(
+        this.client,
+        async (chatId) => (await this.resolveChannel(chatId)).messageType,
+        (chatId) => this.invalidateChat(chatId),
+      ),
+      replyInThread: async (target, messageId, content) =>
+        threadSendResult.parse(
+          await this.client.invoke('replyInThread', [target, messageId, content], async (args) => {
+            const [destination, root, message] = z
+              .tuple([messageTargetSchema, idSchema, sendableSchema])
               .parse(args)
-            this.assertOnline()
-            return this.safe(() => this.transport.download(id, fileKey, kind))
-          },
-        )
-        return z.instanceof(Buffer).parse(result)
-      },
+            if (destination.thread) {
+              if (destination.thread.rootMessageId !== root)
+                throw new Error('The message is not the target thread root')
+              return this.send(destination, message)
+            }
+            return this.send(destination, message, root)
+          }),
+        ),
+      forwardMessage: (messageId, target) =>
+        this.client.invoke('forwardMessage', [messageId, target], async (args) => {
+          const [id, destination] = forwardMessageArgs.parse(args)
+          return (await this.forward(`${messagePath(id)}/forward`, destination, false)).sent
+        }),
+      forwardThread: (threadId, target) =>
+        this.client.invoke('forwardThread', [threadId, target], async (args) => {
+          const [id, destination] = forwardMessageArgs.parse(args)
+          return (await this.forward(`/im/v1/threads/${encodeURIComponent(id)}/forward`, destination, true))
+            .sent
+        }),
+      mergeForward: (messageIds, target) =>
+        this.client.invoke('mergeForward', [messageIds, target], async (args) => {
+          const [ids, destination] = z
+            .tuple([z.array(idSchema).min(1).max(100), messageTargetSchema])
+            .parse(args)
+          const { sent, invalidMessageIds } = await this.forward(
+            '/im/v1/messages/merge_forward',
+            destination,
+            true,
+            { message_id_list: ids },
+          )
+          return { ...sent, invalidMessageIds }
+        }),
+      commandButton: (label, command) => this.commandButton(label, command),
+      updateCard: (messageId, card) =>
+        this.client.invoke('updateCard', [messageId, card], async (args) => {
+          const [id, value] = z.tuple([idSchema, cardSchema]).parse(args)
+          await this.client.raw('PATCH', messagePath(id), { data: { content: JSON.stringify(value) } })
+        }),
+      downloadResource: async (messageId, key, type) =>
+        z.instanceof(Buffer).parse(
+          await this.client.invoke('downloadResource', [messageId, key, type], (args) => {
+            const [id, fileKey, kind] = z.tuple([idSchema, idSchema, z.enum(['image', 'file'])]).parse(args)
+            return this.client.download(id, fileKey, kind)
+          }),
+        ),
     }
   }
 
@@ -159,35 +246,42 @@ export class FeishuBotImpl implements FeishuBot {
     const mode =
       chat?.chat_mode ??
       (
-        await this.data(
-          'GET',
-          `/im/v1/chats/${encodeURIComponent(chatId)}`,
-          z.object({ chat_mode: z.enum(['group', 'p2p', 'topic']) }),
-          { params: { user_id_type: 'open_id' } },
-        )
+        await this.client.data('GET', chatPath(chatId), z.object({ chat_mode: chatMode }), {
+          params: { user_id_type: 'open_id' },
+        })
       ).chat_mode
     return mode === 'p2p' ? { messageType: 'private' } : { messageType: 'group', groupId: chatId }
   }
 
-  async safe<T>(work: () => Promise<T>): Promise<T> {
-    try {
-      return await work()
-    } catch (error) {
-      throw new Error(redactText(error instanceof Error ? error.message : String(error), this.config))
+  rememberConversation(messageId: string, target: MessageTarget, thread = target.thread): void {
+    this.cacheConversation(
+      messageId,
+      target.type === 'group'
+        ? { messageType: 'group', groupId: target.id, thread }
+        : { messageType: 'private', thread },
+    )
+  }
+
+  private cacheConversation(messageId: string, conversation: Conversation): void {
+    this.conversations.delete(messageId)
+    this.conversations.set(messageId, conversation)
+    if (this.conversations.size > 1000) {
+      const oldest = this.conversations.keys().next()
+      if (!oldest.done) this.conversations.delete(oldest.value)
     }
   }
 
-  async raw(method: string, path: string, input?: FeishuRequest): Promise<z.output<typeof envelope>> {
-    return this.safe(async () => {
-      const result = envelope.parse(await this.transport.request(method, path, input))
-      if (result.code !== 0) throw new Error(`Feishu API ${result.code}: ${result.msg ?? 'request failed'}`)
-      return result
-    })
+  knownConversation(messageId: string): Conversation | undefined {
+    return this.conversations.get(messageId)
   }
 
-  async data<T>(method: string, path: string, schema: z.ZodType<T>, input?: FeishuRequest): Promise<T> {
-    const result = await this.raw(method, path, input)
-    return schema.parse(result.data)
+  async resolveConversation(messageId: string): Promise<Conversation> {
+    const known = this.conversations.get(messageId)
+    if (known) return known
+    const message = await this.getMessageResource(messageId)
+    const conversation = { ...(await this.resolveChannel(message.chat_id)), thread: threadOf(message) }
+    this.cacheConversation(messageId, conversation)
+    return conversation
   }
 
   private assertOnline(): void {
@@ -199,19 +293,21 @@ export class FeishuBotImpl implements FeishuBot {
     if (!groupId) return sender
     let cached = this.roles.get(groupId)
     if (!cached || cached.expires < Date.now()) {
-      const value = this.data('GET', `/im/v1/chats/${encodeURIComponent(groupId)}`, chatSchema, {
-        params: { user_id_type: 'open_id' },
-      }).catch((error: unknown) => {
-        this.host.logger.warn(
-          {
-            platform: 'feishu',
-            groupId,
-            reason: redactText(error instanceof Error ? error.message : String(error), this.config),
-          },
-          'Cannot resolve Feishu group roles',
-        )
-        return undefined
-      })
+      const value = this.client
+        .data('GET', chatPath(groupId), chatRolesSchema, {
+          params: { user_id_type: 'open_id' },
+        })
+        .catch((error: unknown) => {
+          this.host.logger.warn(
+            {
+              platform: 'feishu',
+              groupId,
+              reason: redactText(error instanceof Error ? error.message : String(error), this.config),
+            },
+            'Cannot resolve Feishu group roles',
+          )
+          return undefined
+        })
       cached = { expires: Date.now() + 30_000, value }
       this.roles.delete(groupId)
       this.roles.set(groupId, cached)
@@ -226,14 +322,21 @@ export class FeishuBotImpl implements FeishuBot {
     }
   }
 
+  invalidateChat(chatId: string): void {
+    this.roles.delete(chatId)
+  }
+
   sendPrivate(userId: string, content: Sendable): Promise<SendResult> {
     return this.send({ type: 'private', id: userId }, content)
   }
   sendGroup(groupId: string, content: Sendable): Promise<SendResult> {
     return this.send({ type: 'group', id: groupId }, content)
   }
+  sendThread(target: ThreadTarget, content: Sendable): Promise<SendResult> {
+    return this.send(threadTargetSchema.parse(target), content)
+  }
 
-  private async media(type: 'image' | 'file', source: string, name = 'file'): Promise<string> {
+  private async media(type: FeishuUploadKind, source: string, name = 'file'): Promise<string> {
     const bytes = await readMedia(
       source,
       Math.min(this.config.mediaMaxBytes, type === 'image' ? 10 * 1024 * 1024 : 30 * 1024 * 1024),
@@ -241,75 +344,54 @@ export class FeishuBotImpl implements FeishuBot {
       this.shutdown.signal,
     )
     if (bytes === undefined) return source
-    const result = envelope.parse(await this.safe(() => this.transport.upload(type, bytes, name)))
-    if (result.code !== 0)
-      throw new Error(`Feishu upload ${result.code}: ${redactText(result.msg ?? 'failed', this.config)}`)
-    const field = type === 'image' ? 'image_key' : 'file_key'
-    return z.object({ [field]: z.string() }).parse(result.data)[field] as string
+    return this.client.upload(type, bytes, name)
   }
 
-  private async send(target: MessageTarget, content: Sendable): Promise<SendResult> {
+  private async send(target: MessageTarget, content: Sendable, openThreadAt?: string): Promise<SendResult> {
     this.assertOnline()
     const prepared = await this.host.prepareOutgoing({
       bot: this,
       target,
       message: normalizeSendable(content),
+      ...(openThreadAt
+        ? { sendFirst: (part: Sendable) => this.feishu.replyInThread(target, openThreadAt, part) }
+        : {}),
     })
     if (!Array.isArray(prepared)) return prepared.sent
     let replyId: string | undefined
+    let thread = target.thread
     let post: Record<string, unknown>[] = []
     let original: Message = []
     let last: SendResult | undefined
     const deliver = async (type: string, body: Record<string, unknown>, message: Message) => {
       this.assertOnline()
-      const response = await this.data(
+      const reference = thread?.rootMessageId ?? openThreadAt ?? replyId
+      const response = await this.client.data(
         'POST',
-        replyId ? `/im/v1/messages/${encodeURIComponent(replyId)}/reply` : '/im/v1/messages',
+        reference ? `${messagePath(reference)}/reply` : '/im/v1/messages',
         sentSchema,
         {
-          ...(replyId
+          ...(reference
             ? {}
             : { params: { receive_id_type: target.type === 'group' ? 'chat_id' : 'open_id' } }),
           data: {
-            ...(replyId ? {} : { receive_id: target.id }),
+            ...(reference ? {} : { receive_id: target.id }),
+            ...(reference && (thread || openThreadAt) ? { reply_in_thread: true } : {}),
             msg_type: type,
             content: JSON.stringify(body),
             uuid: randomUUID(),
           },
         },
       )
-      last = { messageId: response.message_id }
-      this.sentMessageIds.add(last.messageId)
-      const context = dispatchContext.getStore()
-      this.host.logger.info(
-        {
-          platform: this.platform,
-          selfId: this.selfId,
-          messageId: last.messageId,
-          messageType: target.type,
-          ...(target.type === 'group' ? { groupId: target.id } : { userId: target.id }),
-          ...(context?.eventId ? { eventId: context.eventId } : {}),
-        },
-        'Feishu message sent',
-      )
-      this.host.emit({
-        id: randomUUID(),
-        platform: this.platform,
-        selfId: this.selfId,
-        time: Date.now(),
-        kind: 'internal',
-        name: 'bot.message.sent',
-        raw: response,
-        bot: this,
-        messageId: last.messageId,
-        messageType: target.type,
-        ...(target.type === 'group' ? { groupId: target.id } : { userId: target.id }),
-        message,
-        ...(context?.eventId ? { eventId: context.eventId } : {}),
-      })
+      const deliveredThread = this.sentThread(response, thread, openThreadAt)
+      thread = deliveredThread
+      last = this.recordSent(target, response, message, deliveredThread)
+      if (openThreadAt && !thread) throw new Error('Feishu did not return the created thread ID')
     }
     const flush = async () => {
-      if (post.length) await deliver('post', { zh_cn: { title: '', content: [post] } }, original)
+      const text = post.length === 1 ? post[0] : undefined
+      if (text?.tag === 'text' && !text.style) await deliver('text', { text: text.text }, original)
+      else if (post.length) await deliver('post', { zh_cn: { title: '', content: [post] } }, original)
       post = []
       original = []
     }
@@ -332,6 +414,20 @@ export class FeishuBotImpl implements FeishuBot {
       } else if (isSegment(segment, 'image')) {
         post.push({ tag: 'img', image_key: await this.media('image', segment.data.file) })
         original.push(segment)
+      } else if (isSegment(segment, 'audio') || isSegment(segment, 'video')) {
+        await flush()
+        const type = segment.type
+        await deliver(
+          type === 'audio' ? 'audio' : 'media',
+          {
+            file_key: await this.media(
+              type,
+              segment.data.file,
+              type === 'audio' ? 'audio.opus' : 'video.mp4',
+            ),
+          },
+          [segment],
+        )
       } else if (isSegment(segment, 'file')) {
         await flush()
         await deliver('file', { file_key: await this.media('file', segment.data.file, segment.data.name) }, [
@@ -350,6 +446,18 @@ export class FeishuBotImpl implements FeishuBot {
       } else if (segment.type === 'feishu:card') {
         await flush()
         await deliver('interactive', cardSchema.parse(segment.data.card), [segment])
+      } else if (segment.type === 'feishu:emoji') {
+        post.push({ tag: 'emotion', emoji_type: z.string().min(1).parse(segment.data.emoji_type) })
+        original.push(segment)
+      } else if (segment.type === 'feishu:sticker') {
+        await flush()
+        await deliver('sticker', z.object({ file_key: z.string().min(1) }).parse(segment.data), [segment])
+      } else if (segment.type === 'feishu:share_chat') {
+        await flush()
+        await deliver('share_chat', z.object({ chat_id: z.string().min(1) }).parse(segment.data), [segment])
+      } else if (segment.type === 'feishu:share_user') {
+        await flush()
+        await deliver('share_user', z.object({ user_id: z.string().min(1) }).parse(segment.data), [segment])
       } else throw new UnsupportedError('feishu', segment.type)
     }
     await flush()
@@ -357,56 +465,99 @@ export class FeishuBotImpl implements FeishuBot {
     return last
   }
 
+  private sentThread(
+    response: z.output<typeof sentSchema>,
+    known?: MessageThread,
+    root?: string,
+  ): MessageThread | undefined {
+    return (
+      threadOf({
+        ...response,
+        root_id: response.root_id || response.parent_id || known?.rootMessageId || root,
+      }) ?? known
+    )
+  }
+
+  private recordSent(
+    target: MessageTarget,
+    response: z.output<typeof sentSchema>,
+    message: Message,
+    thread: MessageThread | undefined,
+  ): SendResult {
+    const messageId = response.message_id
+    this.sentMessageIds.add(messageId)
+    this.rememberConversation(messageId, { ...target, thread })
+    const context = dispatchContext.getStore()
+    const fields = {
+      platform: this.platform,
+      selfId: this.selfId,
+      messageId,
+      messageType: target.type,
+      ...(target.type === 'group' ? { groupId: target.id } : { userId: target.id }),
+      ...(context?.active.value ? { eventId: context.eventId } : {}),
+    }
+    this.host.logger.info({ ...fields, ...(thread ? { threadId: thread.id } : {}) }, 'Feishu message sent')
+    this.host.emit({
+      ...fields,
+      id: randomUUID(),
+      time: Date.now(),
+      kind: 'internal',
+      name: 'bot.message.sent',
+      raw: response,
+      bot: this,
+      ...(thread ? { thread } : {}),
+      message,
+    })
+    return { messageId, ...(thread ? { thread } : {}) }
+  }
+
+  private async forward(
+    path: string,
+    target: MessageTarget,
+    merged: boolean,
+    data: Record<string, unknown> = {},
+  ) {
+    const response = await this.client.data('POST', path, forwardedSchema, {
+      params: {
+        receive_id_type: target.thread ? 'thread_id' : target.type === 'group' ? 'chat_id' : 'open_id',
+      },
+      data: { ...data, receive_id: target.thread?.id ?? target.id, uuid: randomUUID() },
+    })
+    const message =
+      merged || response.msg_type === 'merge_forward'
+        ? seg.forward(response.message_id)
+        : seg.text('[转发消息]')
+    const sent = this.recordSent(target, response, [message], this.sentThread(response, target.thread))
+    return { sent, invalidMessageIds: response.invalid_message_id_list }
+  }
+
   async getSelf(): Promise<UserInfo> {
     return { userId: this.selfId, nickname: this.nickname, avatar: this.avatar }
   }
   async deleteMessage(messageId: string): Promise<void> {
     this.assertOnline()
-    await this.raw('DELETE', `/im/v1/messages/${encodeURIComponent(messageId)}`)
-  }
-
-  private async pages<T>(
-    path: string,
-    schema: z.ZodType<T>,
-    params: Record<string, string | number>,
-  ): Promise<T[]> {
-    const pageSchema = z.object({
-      items: z.array(schema).default([]),
-      has_more: z.boolean().default(false),
-      page_token: z.string().optional(),
-    })
-    const result: T[] = []
-    let token: string | undefined
-    const seen = new Set<string>()
-    do {
-      const page = await this.data('GET', path, pageSchema, {
-        params: { ...params, page_size: 100, ...(token ? { page_token: token } : {}) },
-      })
-      result.push(...page.items)
-      if (!page.has_more) return result
-      if (!page.page_token || seen.has(page.page_token))
-        throw new Error('Feishu returned an invalid pagination token')
-      token = page.page_token
-      seen.add(token)
-    } while (token)
-    return result
+    await this.client.raw('DELETE', messagePath(messageId))
   }
 
   async getGroupList(): Promise<GroupInfo[]> {
     this.assertOnline()
     return (
-      await this.pages('/im/v1/chats', z.object({ chat_id: z.string(), name: z.string().default('') }), {
-        user_id_type: 'open_id',
-      })
+      await this.client.allPages(
+        '/im/v1/chats',
+        z.object({ chat_id: z.string(), name: z.string().default('') }),
+        {
+          user_id_type: 'open_id',
+        },
+      )
     ).map((chat) => ({ groupId: chat.chat_id, groupName: chat.name }))
   }
 
   async getGroupMembers(groupId: string): Promise<GroupMemberInfo[]> {
     this.assertOnline()
-    const path = `/im/v1/chats/${encodeURIComponent(groupId)}`
+    const path = chatPath(groupId)
     const [members, chat] = await Promise.all([
-      this.pages(`${path}/members`, memberSchema, { member_id_type: 'open_id' }),
-      this.data('GET', path, chatSchema, { params: { user_id_type: 'open_id' } }),
+      this.client.allPages(`${path}/members`, memberSchema, { member_id_type: 'open_id' }),
+      this.client.data('GET', path, chatRolesSchema, { params: { user_id_type: 'open_id' } }),
     ])
     return members.map((member) => ({
       groupId,
@@ -427,38 +578,28 @@ export class FeishuBotImpl implements FeishuBot {
     return member
   }
 
-  async getMessage(messageId: string): Promise<MessageInfo> {
+  async getMessage(messageId: string): Promise<FeishuMessageInfo> {
     this.assertOnline()
-    const item = z.object({
-      message_id: z.string(),
-      msg_type: z.string(),
-      create_time: z.string(),
-      chat_id: z.string(),
-      sender: z.object({ id: z.string(), sender_type: z.string() }),
-      body: z.object({ content: z.string() }),
-    })
-    const result = await this.data(
+    const message = await this.getMessageResource(messageId)
+    const channel = await this.resolveChannel(message.chat_id)
+    return decodeMessageResource(message, channel.messageType)
+  }
+
+  async getMessageResource(messageId: string): Promise<z.output<typeof messageResource>> {
+    const items = await this.getMessageResources(messageId)
+    const message = items.find((item) => item.message_id === messageId)
+    if (!message) throw new Error('Feishu message not found')
+    return message
+  }
+
+  private async getMessageResources(messageId: string): Promise<z.output<typeof messageResource>[]> {
+    const { items } = await this.client.data(
       'GET',
-      `/im/v1/messages/${encodeURIComponent(messageId)}`,
-      z.object({ items: z.array(item).min(1) }),
+      messagePath(messageId),
+      z.object({ items: z.array(messageResource) }),
       { params: { user_id_type: 'open_id' } },
     )
-    const message = result.items[0] as z.output<typeof item>
-    const chat = await this.data(
-      'GET',
-      `/im/v1/chats/${encodeURIComponent(message.chat_id)}`,
-      z.object({ chat_mode: z.enum(['group', 'p2p', 'topic']) }),
-      { params: { user_id_type: 'open_id' } },
-    )
-    return {
-      messageId: message.message_id,
-      messageType: chat.chat_mode === 'p2p' ? 'private' : 'group',
-      userId: message.sender.id,
-      ...(chat.chat_mode === 'p2p' ? {} : { groupId: message.chat_id }),
-      time: Number(message.create_time),
-      message: incomingMessage(message.msg_type, message.body.content),
-      sender: { userId: message.sender.id, nickname: message.sender.id },
-    }
+    return items
   }
 
   async call(action: string, params: Record<string, unknown> = {}): Promise<unknown> {
@@ -479,20 +620,41 @@ export class FeishuBotImpl implements FeishuBot {
       })
       .strict()
       .parse(params)
-    return this.raw(method, path, input)
+    return this.client.raw(method, path, input)
   }
 
   async sendForward(_target: MessageTarget, _nodes: ForwardNode[]): Promise<SendResult> {
     throw new UnsupportedError('feishu', 'sendForward')
   }
-  async getForward(_id: string): Promise<ForwardMessage[]> {
-    throw new UnsupportedError('feishu', 'getForward')
+  async getForward(id: string): Promise<ForwardMessage[]> {
+    this.assertOnline()
+    const items = await this.getMessageResources(id)
+    const root = items.find((item) => item.message_id === id && item.msg_type === 'merge_forward')
+    if (!root || root.deleted) throw new Error('Feishu merged message is unavailable')
+    const channel = await this.resolveChannel(root.chat_id)
+    return items
+      .filter((item) => item.upper_message_id === id && !item.deleted)
+      .map((item) => {
+        const { userId, sender, time, message } = decodeMessageResource(item, channel.messageType)
+        return { userId, nickname: sender.nickname, time, message }
+      })
   }
   async muteMember(_group: string, _user: string, _duration: number): Promise<void> {
     throw new UnsupportedError('feishu', 'muteMember')
   }
-  async kickMember(_group: string, _user: string): Promise<void> {
-    throw new UnsupportedError('feishu', 'kickMember')
+  async kickMember(groupId: string, userId: string, options?: { rejectRequest?: boolean }): Promise<void> {
+    this.assertOnline()
+    if (options?.rejectRequest) throw new UnsupportedError('feishu', 'kickMember.rejectRequest')
+    const result = await this.client.data(
+      'DELETE',
+      `${chatPath(groupId)}/members`,
+      z.object({ invalid_id_list: z.array(z.string()).default([]) }),
+      {
+        params: { member_id_type: 'open_id' },
+        data: { id_list: [userId] },
+      },
+    )
+    if (result.invalid_id_list.length) throw new Error('Feishu could not remove the requested member')
   }
   async setMemberCard(_group: string, _user: string, _card: string): Promise<void> {
     throw new UnsupportedError('feishu', 'setMemberCard')

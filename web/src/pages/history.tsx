@@ -14,7 +14,7 @@ import { formatClock, formatRelative } from '../lib/format.ts'
 import { softSpring } from '../lib/motion.ts'
 import { platformName } from '../lib/platform.ts'
 import { useLiveMessages } from '../lib/realtime.tsx'
-import type { Segment } from '../lib/types.ts'
+import type { ChannelTarget, Segment, Target } from '../lib/types.ts'
 import { cn } from '../lib/utils.ts'
 
 // Shapes of the history plugin's panel routes (DESIGN §24.8).
@@ -25,6 +25,7 @@ interface HistoryMessage {
   platform: string
   selfId: string
   channel: string
+  target: Target
   userId?: string
   nickname?: string
   messageId?: string
@@ -32,12 +33,10 @@ interface HistoryMessage {
   text: string
   time: number
 }
-interface HistoryChannel {
+interface HistoryChannel extends ChannelTarget {
   channel: string
   platform: string
   selfId: string
-  type: 'group' | 'private'
-  id: string
   count: number
   last: HistoryMessage
 }
@@ -52,10 +51,19 @@ function useGroupNames(): Map<string, string> {
   )
 }
 
+function targetTitle(target: Target, names: Map<string, string>, nickname?: string): string {
+  if (target.type === 'group')
+    return names.get(`${target.platform}:${target.selfId}:group:${target.id}`) ?? `群 ${target.id}`
+  return nickname ? `${nickname}（私聊）` : `私聊 ${target.id}`
+}
+
+function withTopic(label: string, threadId?: string): string {
+  return threadId ? `${label} · 话题 ${threadId}` : label
+}
+
 function channelTitle(channel: HistoryChannel, names: Map<string, string>): string {
-  if (channel.type === 'group') return names.get(`${channel.platform}:${channel.id}`) ?? `群 ${channel.id}`
   const nickname = channel.last.direction === 'in' ? channel.last.nickname : undefined
-  return nickname ? `${nickname}（私聊）` : `私聊 ${channel.id}`
+  return targetTitle(channel, names, nickname)
 }
 
 export function HistoryPage() {
@@ -101,11 +109,13 @@ export function HistoryPage() {
       (channel) =>
         !keyword ||
         channel.id.toLowerCase().includes(keyword) ||
+        channel.thread?.id.toLowerCase().includes(keyword) ||
         channelTitle(channel, names).toLowerCase().includes(keyword),
     )
   }, [channels.data, filter, names])
 
   const current = channels.data?.find((channel) => channel.channel === selected)
+  const currentTitle = current ? withTopic(channelTitle(current, names), current.thread?.id) : '全部会话'
   // Pages arrive newest first; the stream reads top to bottom, oldest first.
   const items = useMemo(
     () => (messages.data?.pages.flatMap((page) => page.items) ?? []).toReversed(),
@@ -192,10 +202,13 @@ export function HistoryPage() {
                   active={selected === channel.channel}
                   onClick={() => open(channel.channel)}
                   title={channelTitle(channel, names)}
+                  threadId={channel.thread?.id}
                   subtitle={`${channel.last.direction === 'out' ? '机器人：' : channel.last.nickname ? `${channel.last.nickname}：` : ''}${channel.last.text || '[非文本消息]'}`}
                   time={channel.last.time}
                   icon={
-                    channel.type === 'group' ? (
+                    channel.thread ? (
+                      <MessagesSquare className="size-4" />
+                    ) : channel.type === 'group' ? (
                       <span className="text-[12px] font-medium">
                         {channelTitle(channel, names).slice(0, 1)}
                       </span>
@@ -212,8 +225,8 @@ export function HistoryPage() {
         <Card className="flex h-[calc(100dvh-190px)] min-h-[480px] flex-col overflow-hidden">
           <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
             <div className="min-w-0 leading-tight">
-              <div className="truncate text-[13.5px] font-semibold">
-                {current ? channelTitle(current, names) : '全部会话'}
+              <div className="truncate text-[13.5px] font-semibold" title={currentTitle}>
+                {currentTitle}
               </div>
               <div className="text-[11.5px] text-fg-3">
                 {current
@@ -286,6 +299,7 @@ function ChannelButton({
   active,
   onClick,
   title,
+  threadId,
   subtitle,
   time,
   icon,
@@ -293,6 +307,7 @@ function ChannelButton({
   active: boolean
   onClick: () => void
   title: string
+  threadId?: string
   subtitle?: string
   time?: number
   icon: React.ReactNode
@@ -301,6 +316,9 @@ function ChannelButton({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
+      aria-label={threadId ? withTopic(title, threadId) : undefined}
+      title={withTopic(title, threadId)}
       className={cn(
         'relative flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left transition-colors',
         active ? 'text-fg' : 'text-fg-2 hover:bg-surface-2/70',
@@ -318,7 +336,8 @@ function ChannelButton({
       </span>
       <span className="relative min-w-0 flex-1">
         <span className="flex items-center justify-between gap-2">
-          <span className="truncate text-[13px] font-medium">{title}</span>
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{title}</span>
+          {threadId && <span className="shrink-0 text-[11px] text-fg-3">话题 {threadId.slice(-6)}</span>}
           {time !== undefined && (
             <span className="shrink-0 text-[11px] text-fg-3">{formatRelative(time)}</span>
           )}
@@ -341,9 +360,6 @@ function MessageRow({
   const [open, setOpen] = useState(false)
   const outgoing = message.direction === 'out'
   const traceable = message.direction === 'in' && message.eventId !== undefined
-  const [, , type, ...rest] = message.channel.split(':')
-  const channelLabel =
-    type === 'group' ? (names.get(`${message.platform}:${rest.join(':')}`) ?? `群 ${rest.join(':')}`) : '私聊'
   return (
     <div
       className={cn(
@@ -363,7 +379,11 @@ function MessageRow({
               {outgoing ? '机器人' : (message.nickname ?? message.userId)}
             </span>
             {!outgoing && message.nickname && <span className="font-mono text-fg-3">{message.userId}</span>}
-            {showChannel && <span className="text-fg-3">{channelLabel}</span>}
+            {showChannel && (
+              <span className="break-all text-fg-3">
+                {withTopic(targetTitle(message.target, names), message.target.thread?.id)}
+              </span>
+            )}
             <span className="text-fg-3 tabular">{formatClock(message.time)}</span>
             {traceable && (
               <button

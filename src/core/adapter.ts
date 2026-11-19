@@ -2,17 +2,19 @@ import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import type { Logger } from 'pino'
 import type { z } from 'zod'
-import type { Bot, BotCapabilities, MessageTarget, SendResult } from './bot.ts'
+import type { Bot, BotCapabilities, MessageTarget, MessageThread, SendResult } from './bot.ts'
 import type { ApiCall } from './dispatch/api.ts'
 import type { AnyEvent, SessionServices } from './event/index.ts'
 import type { ActorIdentity } from './identity.ts'
-import type { Message } from './message/index.ts'
+import type { Message, Sendable } from './message/index.ts'
 
 /** 发送前钩子接收的机器人、目标和消息。 */
 export interface OutgoingMessage {
   bot: Bot
   target: MessageTarget
   message: Message
+  /** 创建话题时，接管发送的钩子可用它发送首段并获取后续分段的目标。 */
+  sendFirst?: (content: Sendable) => Promise<SendResult & { thread: MessageThread }>
 }
 
 /**

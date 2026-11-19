@@ -1,6 +1,8 @@
 import { z } from 'zod'
+import type { MessageThread } from '../../core/bot.ts'
 import type { AnyEvent, PlatformNoticeEvent, Session } from '../../core/event/index.ts'
 import type { Segment } from '../../core/message/index.ts'
+import type { Target } from '../../core/target.ts'
 
 export interface FeishuElement {
   tag: string
@@ -23,6 +25,8 @@ export interface FeishuCardActionEvent extends PlatformNoticeEvent {
   readonly userId: string
   readonly chatId: string
   readonly messageId: string
+  readonly thread?: MessageThread
+  readonly target?: Target
   readonly sender: Session['sender']
   readonly action: {
     tag: string
@@ -73,10 +77,22 @@ export function isFeishuCardAction(event: AnyEvent): event is FeishuCardActionEv
 
 const text = (content: string) => ({ tag: 'plain_text', content })
 
-/** Small JSON 2.0 constructors; native fields can be added to the returned objects. */
+/** 飞书消息段及 JSON 2.0 卡片构造器。 */
 export const feishu = {
   card(card: FeishuCard): Segment {
     return { type: 'feishu:card', data: { card: cardSchema.parse(card) } }
+  },
+  emoji(emoji: string): Segment {
+    return { type: 'feishu:emoji', data: { emoji_type: emoji } }
+  },
+  sticker(fileKey: string): Segment {
+    return { type: 'feishu:sticker', data: { file_key: fileKey } }
+  },
+  shareChat(chatId: string): Segment {
+    return { type: 'feishu:share_chat', data: { chat_id: chatId } }
+  },
+  shareUser(openId: string): Segment {
+    return { type: 'feishu:share_user', data: { user_id: openId } }
   },
   message(elements: FeishuElement[], title?: string): FeishuCard {
     return {

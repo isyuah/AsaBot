@@ -1,4 +1,4 @@
-import type { Bot, SendResult } from '../bot.ts'
+import { type Bot, type MessageThread, type SendResult, sendTo } from '../bot.ts'
 import type { Message, Sendable } from '../message/index.ts'
 import { isSegment, normalizeSendable, plainText, seg } from '../message/index.ts'
 import { formatTarget } from '../target.ts'
@@ -114,6 +114,7 @@ interface SessionFields {
   bot: Bot
   messageId: string
   userId: string
+  thread?: MessageThread
   message: Message
   sender: Session['sender']
   isSuperuser: boolean
@@ -138,6 +139,7 @@ export function createSession(init: SessionInit, services: SessionServices): Ses
     selfId: init.selfId,
     type: init.messageType,
     id: init.groupId ?? init.userId,
+    ...(init.thread === undefined ? {} : { thread: init.thread }),
   }
   const session: Session = {
     id: init.id,
@@ -152,6 +154,7 @@ export function createSession(init: SessionInit, services: SessionServices): Ses
     messageId: init.messageId,
     userId: init.userId,
     ...(init.groupId === undefined ? {} : { groupId: init.groupId }),
+    ...(init.thread === undefined ? {} : { thread: init.thread }),
     channelKey: formatTarget(target),
     target,
     message: init.message,
@@ -161,9 +164,7 @@ export function createSession(init: SessionInit, services: SessionServices): Ses
     isSuperuser: init.isSuperuser,
     isBotAdmin: init.isBotAdmin,
     async send(content: Sendable): Promise<SendResult> {
-      return init.messageType === 'group'
-        ? init.bot.sendGroup(init.groupId, content)
-        : init.bot.sendPrivate(init.userId, content)
+      return sendTo(init.bot, target, content)
     },
     async reply(content: Sendable, options = {}): Promise<SendResult> {
       const quote = options.quote ?? true
@@ -178,10 +179,7 @@ export function createSession(init: SessionInit, services: SessionServices): Ses
       return session.send([...prefix, ...normalizeSendable(content)])
     },
     async sendForward(nodes) {
-      return init.bot.sendForward(
-        { type: init.messageType, id: init.messageType === 'group' ? init.groupId : init.userId },
-        nodes,
-      )
+      return init.bot.sendForward(target, nodes)
     },
     ...dialogueMethods((work) => work((text, options) => services.prompt(session, text, options))),
   }

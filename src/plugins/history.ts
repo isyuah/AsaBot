@@ -1,12 +1,13 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite'
 import { stream } from 'hono/streaming'
 import { z } from 'zod'
+import type { MessageThread } from '../core/bot.ts'
 import { durationSchema } from '../core/config/schema.ts'
 import type { DispatchTrace } from '../core/dispatch/trace.ts'
 import type { Message } from '../core/message/index.ts'
 import { plainText } from '../core/message/index.ts'
 import { definePlugin } from '../core/plugin/definition.ts'
-import { formatTarget, parseTarget } from '../core/target.ts'
+import { formatTarget, parseTarget, type Target } from '../core/target.ts'
 
 /** 历史记录中的收发消息、会话及可选关联事件。 */
 export interface HistoryMessage {
@@ -16,6 +17,7 @@ export interface HistoryMessage {
   platform: string
   selfId: string
   channel: string
+  target: Target
   userId?: string
   nickname?: string
   messageId?: string
@@ -31,6 +33,7 @@ export interface HistoryChannel {
   selfId: string
   type: 'group' | 'private'
   id: string
+  thread?: MessageThread
   count: number
   last: HistoryMessage
 }
@@ -59,13 +62,15 @@ declare module '@asabot/core' {
 type Row = Record<string, unknown>
 
 function historyMessage(row: Row): HistoryMessage {
+  const channel = String(row.channel)
   return {
     id: Number(row.id),
     ...(row.event_id === null ? {} : { eventId: String(row.event_id) }),
     direction: row.direction as 'in' | 'out',
     platform: String(row.platform),
     selfId: String(row.self_id),
-    channel: String(row.channel),
+    channel,
+    target: parseTarget(channel),
     ...(row.user_id === null ? {} : { userId: String(row.user_id) }),
     ...(row.nickname === null ? {} : { nickname: String(row.nickname) }),
     ...(row.message_id === null ? {} : { messageId: String(row.message_id) }),
@@ -191,7 +196,13 @@ export default definePlugin({
         'out',
         event.platform,
         event.selfId,
-        formatTarget({ platform: event.platform, selfId: event.selfId, type: event.messageType, id }),
+        formatTarget({
+          platform: event.platform,
+          selfId: event.selfId,
+          type: event.messageType,
+          id,
+          thread: event.thread,
+        }),
         event.selfId,
         event.bot.nickname ?? null,
         event.messageId,
@@ -235,13 +246,14 @@ export default definePlugin({
           .all()
         const channels: HistoryChannel[] = rows.map((row) => {
           const last = historyMessage(row)
-          const target = parseTarget(last.channel)
+          const { target } = last
           return {
             channel: last.channel,
             platform: last.platform,
             selfId: last.selfId,
             type: target.type,
             id: target.id,
+            ...(target.thread === undefined ? {} : { thread: target.thread }),
             count: Number(row.channel_count),
             last,
           }

@@ -1,3 +1,4 @@
+import { UnsupportedError } from './errors.ts'
 import type { Message, Sendable, TextStyle } from './message/index.ts'
 
 /** 机器人原生支持的消息段、文本样式和 API 操作。 */
@@ -42,6 +43,7 @@ export interface MessageInfo {
   messageType: 'private' | 'group'
   userId: string
   groupId?: string
+  thread?: MessageThread
   time: number
   message: Message
   sender: { userId: string; nickname: string; card?: string; role?: 'owner' | 'admin' | 'member' }
@@ -60,12 +62,20 @@ export interface ForwardMessage {
   time?: number
   message: Message
 }
-/** 机器人发送消息使用的群聊或私聊目标。 */
-export type MessageTarget = { type: 'group' | 'private'; id: string }
+/** 平台话题及其固定的根消息。 */
+export interface MessageThread {
+  id: string
+  rootMessageId: string
+}
+
+/** 机器人发送消息使用的群聊、私聊或其中的话题。 */
+export type MessageTarget = { type: 'group' | 'private'; id: string; thread?: MessageThread }
+export type ThreadTarget = MessageTarget & { thread: MessageThread }
 
 /** 发送成功后返回的平台消息 ID。 */
 export interface SendResult {
   messageId: string
+  thread?: MessageThread
 }
 
 /** 平台用户的 ID、昵称及可选扩展信息。 */
@@ -114,6 +124,8 @@ export interface Bot {
   sendPrivate(userId: string, content: Sendable): Promise<SendResult>
   /** 向群发送消息，返回消息 ID。 */
   sendGroup(groupId: string, content: Sendable): Promise<SendResult>
+  /** 向群聊或私聊内的现有话题发送消息。 */
+  sendThread?(target: ThreadTarget, content: Sendable): Promise<SendResult>
   /** 向指定私聊或群发送合并转发节点。 */
   sendForward(target: MessageTarget, nodes: ForwardNode[]): Promise<SendResult>
   /** 按转发 ID 获取合并转发的节点。 */
@@ -142,6 +154,16 @@ export interface Bot {
   call(action: string, params?: Record<string, unknown>): Promise<unknown>
   /** 获取用户头像地址；不可用时返回 undefined，部分平台不提供此方法。 */
   getAvatarUrl?(userId: string): string | undefined
+}
+
+/** 按完整会话目标发送，话题发送失败时不会回落到所在群聊或私聊。 */
+export async function sendTo(bot: Bot, target: MessageTarget, content: Sendable): Promise<SendResult> {
+  if (target.thread) {
+    if (!bot.sendThread || !bot.capabilities.actions.includes('sendThread'))
+      throw new UnsupportedError(bot.platform, 'sendThread')
+    return bot.sendThread({ ...target, thread: target.thread }, content)
+  }
+  return target.type === 'group' ? bot.sendGroup(target.id, content) : bot.sendPrivate(target.id, content)
 }
 
 /** 按平台和账号 ID 管理机器人实例的注册表。 */

@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises'
 import { z } from 'zod'
-import { supports } from '../core/bot.ts'
+import { sendTo, supports } from '../core/bot.ts'
 import { durationSchema } from '../core/config/schema.ts'
 import type { Message, Segment } from '../core/message/index.ts'
 import { isSegment, seg } from '../core/message/index.ts'
@@ -104,7 +104,7 @@ export default definePlugin({
     const render = ctx.injectOptional('render') as Renderer | undefined
     const signal = ctx.signal
     ctx.beforeSend(
-      async ({ bot, target, message }) => {
+      async ({ bot, target, message, sendFirst }) => {
         if (message.some((segment) => !['text', 'at', 'face', 'reply', 'markdown'].includes(segment.type)))
           return
         const config = ctx.configFor({
@@ -130,7 +130,7 @@ export default definePlugin({
           return [...message.filter((segment) => isSegment(segment, 'reply')), seg.image(image)]
         }
         const chunks = splitMessage(message, config.chunkSize)
-        if (config.strategy !== 'split' && supports(bot, 'sendForward')) {
+        if (!sendFirst && config.strategy !== 'split' && supports(bot, 'sendForward')) {
           const nodes = await Promise.all(
             chunks.map(async (chunk) => ({
               userId: bot.selfId,
@@ -143,15 +143,13 @@ export default definePlugin({
         // Split sending can take far longer than the hook timeout, so it runs as a delivery after the hook chain.
         return {
           deliver: async () => {
-            let sent = await (target.type === 'group'
-              ? bot.sendGroup(target.id, await imageMarkdown(chunks[0] as Message))
-              : bot.sendPrivate(target.id, await imageMarkdown(chunks[0] as Message)))
+            const first = await imageMarkdown(chunks[0] as Message)
+            let sent = await (sendFirst ? sendFirst(first) : sendTo(bot, target, first))
+            let destination = { ...target, thread: target.thread ?? sent.thread }
             for (const chunk of chunks.slice(1)) {
               if (config.splitInterval) await delay(config.splitInterval, undefined, { signal })
-              const content = await imageMarkdown(chunk)
-              sent = await (target.type === 'group'
-                ? bot.sendGroup(target.id, content)
-                : bot.sendPrivate(target.id, content))
+              sent = await sendTo(bot, destination, await imageMarkdown(chunk))
+              if (!destination.thread && sent.thread) destination = { ...destination, thread: sent.thread }
             }
             return sent
           },

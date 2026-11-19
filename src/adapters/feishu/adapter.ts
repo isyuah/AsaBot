@@ -8,7 +8,8 @@ import { redactText } from '../../core/utils/redact.ts'
 import { FeishuBotImpl } from './bot.ts'
 import { cardResponseSchema, type FeishuCardActionEvent, type FeishuCardResponse } from './cards.ts'
 import { type FeishuAccountConfig, type FeishuConfig, feishuSchema } from './config.ts'
-import { incomingMessage, mentionSchema } from './message.ts'
+import type { FeishuChatUpdatedEvent, FeishuMessageReadEvent, FeishuReactionEvent } from './events.ts'
+import { incomingMessage, mentionSchema, threadFields, threadOf } from './message.ts'
 import {
   type FeishuEventHandlers,
   type FeishuLifecycle,
@@ -22,16 +23,37 @@ export interface FeishuAdapterOptions {
 
 const baseSchema = z.object({ event_id: z.string().min(1), create_time: z.string().optional() })
 const userId = z.object({ open_id: z.string().min(1) })
+const reactionEventSchema = baseSchema
+  .extend({
+    message_id: z.string().min(1),
+    reaction_type: z.object({ emoji_type: z.string().min(1) }),
+    action_time: z.coerce.number().int().positive(),
+  })
+  .and(
+    z.discriminatedUnion('operator_type', [
+      z.object({ operator_type: z.literal('user'), user_id: userId }),
+      z.object({ operator_type: z.literal('app'), app_id: z.string().min(1) }),
+    ]),
+  )
+const changeSchema = z.record(z.string(), z.unknown()).optional()
+const chatUpdatedSchema = baseSchema.extend({
+  chat_id: z.string().min(1),
+  operator_id: userId.partial().optional(),
+  before_change: changeSchema,
+  after_change: changeSchema,
+})
+const messageReadSchema = baseSchema.extend({
+  reader: z.object({ reader_id: userId, read_time: z.coerce.number().int().positive() }),
+  message_id_list: z.array(z.string().min(1)).min(1),
+})
 const messageEvent = baseSchema.extend({
   sender: z.object({ sender_id: userId, sender_type: z.string() }),
-  message: z.object({
-    message_id: z.string(),
+  message: threadFields.extend({
     chat_id: z.string(),
     chat_type: z.enum(['p2p', 'group']),
     message_type: z.string(),
     content: z.string(),
     create_time: z.string(),
-    parent_id: z.string().optional(),
     mentions: z.array(mentionSchema).default([]),
   }),
 })
@@ -283,13 +305,15 @@ class Account {
     handlers['im.message.receive_v1'] = guard('im.message.receive_v1', async (raw) => {
       const event = messageEvent.parse(raw)
       const user = event.sender.sender_id.open_id
-      if (this.host.ignoreSelf && user === bot.selfId) return {}
+      if (this.host.ignoreSelf && (user === bot.selfId || bot.sentMessageIds.has(event.message.message_id)))
+        return {}
       const message = event.message
       const groupId = message.chat_type === 'group' ? message.chat_id : undefined
       const channel =
         message.chat_type === 'group'
           ? { messageType: 'group' as const, groupId: message.chat_id }
           : { messageType: 'private' as const }
+      const thread = threadOf(message)
       const sender = await bot.resolveSender(user, groupId)
       if (this.closed || this.bot !== bot) return {}
       this.messages.set(message.message_id, { userId: user, ...(groupId ? { groupId } : {}) })
@@ -300,12 +324,17 @@ class Account {
           ...channel,
           messageId: message.message_id,
           userId: user,
+          thread,
           time: z.coerce.number().finite().positive().parse(message.create_time),
           message: incomingMessage(
             message.message_type,
             message.content,
-            message.mentions,
+            message.mentions.flatMap((mention) => {
+              const id = mention.id?.open_id || (mention.key === '@_all' ? 'all' : undefined)
+              return id ? [{ key: mention.key, id }] : []
+            }),
             message.parent_id,
+            message.message_id,
           ),
           sender,
           isSuperuser: this.host.isSuperuser({ platform: 'feishu', selfId: bot.selfId, userId: user }),
@@ -314,6 +343,7 @@ class Account {
         },
         this.host.sessionServices,
       )
+      bot.rememberConversation(session.messageId, session.target)
       this.host.logger.info(
         {
           platform: 'feishu',
@@ -323,6 +353,7 @@ class Account {
           messageType: session.messageType,
           userId: user,
           ...(groupId ? { groupId } : {}),
+          ...(thread ? { threadId: thread.id } : {}),
           isBotAdmin: session.isBotAdmin,
           isSuperuser: session.isSuperuser,
           preview: [...redactText(session.text, this.config)].slice(0, 200).join(''),
@@ -361,6 +392,63 @@ class Account {
         return {}
       })
     for (const [type, name] of [
+      ['im.message.reaction.created_v1', 'notice.feishu.reaction.added'],
+      ['im.message.reaction.deleted_v1', 'notice.feishu.reaction.removed'],
+    ] as const) {
+      handlers[type] = guard(type, async (raw) => {
+        const event = reactionEventSchema.parse(raw)
+        if (this.host.ignoreSelf && event.operator_type === 'app' && event.app_id === this.config.appId)
+          return {}
+        const channel = await bot.resolveConversation(event.message_id)
+        if (this.closed || this.bot !== bot) return {}
+        const actor =
+          event.operator_type === 'user'
+            ? { operatorType: 'user' as const, userId: event.user_id.open_id }
+            : { operatorType: 'app' as const, operatorAppId: event.app_id }
+        const notice: FeishuReactionEvent = {
+          ...base(raw),
+          name,
+          platformType: type,
+          ...(channel.groupId === undefined ? {} : { groupId: channel.groupId }),
+          ...(channel.thread ? { thread: channel.thread } : {}),
+          ...actor,
+          time: event.action_time,
+          messageId: event.message_id,
+          emoji: event.reaction_type.emoji_type,
+        }
+        this.host.emit(notice)
+        return {}
+      })
+    }
+    handlers['im.chat.updated_v1'] = guard('im.chat.updated_v1', async (raw) => {
+      const event = chatUpdatedSchema.parse(raw)
+      bot.invalidateChat(event.chat_id)
+      const notice: FeishuChatUpdatedEvent = {
+        ...base(raw),
+        name: 'notice.feishu.chat.updated',
+        platformType: 'im.chat.updated_v1',
+        groupId: event.chat_id,
+        ...(event.operator_id?.open_id ? { operatorId: event.operator_id.open_id } : {}),
+        ...(event.before_change ? { before: event.before_change } : {}),
+        ...(event.after_change ? { after: event.after_change } : {}),
+      }
+      this.host.emit(notice)
+      return {}
+    })
+    handlers['im.message.message_read_v1'] = guard('im.message.message_read_v1', async (raw) => {
+      const event = messageReadSchema.parse(raw)
+      const notice: FeishuMessageReadEvent = {
+        ...base(raw),
+        name: 'notice.feishu.message.read',
+        platformType: 'im.message.message_read_v1',
+        userId: event.reader.reader_id.open_id,
+        time: event.reader.read_time,
+        messageIds: event.message_id_list,
+      }
+      this.host.emit(notice)
+      return {}
+    })
+    for (const [type, name] of [
       ['im.chat.member.bot.added_v1', 'notice.feishu.bot.added'],
       ['im.chat.member.bot.deleted_v1', 'notice.feishu.bot.removed'],
     ] as const)
@@ -389,12 +477,14 @@ class Account {
       else {
         const channel = await bot.resolveChannel(event.chat_id)
         if (this.closed || this.bot !== bot) return {}
-        this.host.emit({
+        const notice = {
           ...base(raw),
           ...(channel.messageType === 'group' ? { groupId: channel.groupId } : {}),
-          name: 'notice.feishu.message.recall',
+          name: 'notice.feishu.message.recall' as const,
           platformType: 'im.message.recalled_v1',
-        })
+          messageId: event.message_id,
+        }
+        this.host.emit(notice)
       }
       return {}
     })
@@ -426,14 +516,46 @@ class Account {
       return finish(cardResponseSchema.parse(response))
     }
     void (async () => {
-      const channel = await bot.resolveChannel(source.context.open_chat_id)
+      const messageId = source.context.open_message_id
+      const chatId = source.context.open_chat_id
+      const action = source.action
+      const command =
+        action.tag === 'button' && action.form_value === undefined ? bot.commandFrom(action.value) : undefined
+      const known = bot.knownConversation(messageId)
+      if (known?.messageType === 'group' && known.groupId !== chatId)
+        throw new Error('Feishu card does not belong to the callback chat')
+      const channel = known ?? (await bot.resolveChannel(chatId))
       const user = source.operator.open_id
       const sender = await bot.resolveSender(
         user,
         channel.messageType === 'group' ? channel.groupId : undefined,
       )
       if (this.closed || this.bot !== bot) return
-      const action = source.action
+      let thread = known?.thread
+      let commandChannelResolved = known !== undefined
+      if (!known) {
+        try {
+          const message = await bot.getMessageResource(messageId)
+          if (message.chat_id !== chatId)
+            throw new Error('Feishu message does not belong to the callback chat')
+          thread = threadOf(message)
+          commandChannelResolved = true
+        } catch (error) {
+          this.host.logger.debug(
+            { platform: 'feishu', messageId, reason: redactText(String(error), this.config) },
+            'Cannot resolve Feishu card thread',
+          )
+        }
+      }
+      if (this.closed || this.bot !== bot) return
+      const target = {
+        platform: 'feishu',
+        selfId: bot.selfId,
+        type: channel.messageType,
+        id: channel.messageType === 'group' ? channel.groupId : user,
+        ...(thread ? { thread } : {}),
+      }
+      if (commandChannelResolved) bot.rememberConversation(messageId, target)
       const event: FeishuCardActionEvent = {
         id: source.event_id,
         kind: 'notice',
@@ -447,8 +569,10 @@ class Account {
         userId: user,
         sender,
         ...(channel.messageType === 'group' ? { groupId: channel.groupId } : {}),
-        chatId: source.context.open_chat_id,
-        messageId: source.context.open_message_id,
+        chatId,
+        messageId,
+        ...(thread ? { thread } : {}),
+        ...(commandChannelResolved ? { target } : {}),
         action: {
           tag: action.tag,
           value: action.value,
@@ -463,9 +587,13 @@ class Account {
         respond,
       }
       this.host.emit(event)
-      const command =
-        action.tag === 'button' && action.form_value === undefined ? bot.commandFrom(action.value) : undefined
-      if (command !== undefined)
+      if (command !== undefined) {
+        if (!commandChannelResolved) {
+          respond({
+            toast: { type: 'warning', content: '无法确认这张卡片所在的会话，请让机器人重新发送卡片' },
+          })
+          return
+        }
         this.host.emit(
           createSession(
             {
@@ -476,7 +604,8 @@ class Account {
               raw,
               bot,
               ...channel,
-              messageId: source.context.open_message_id,
+              thread,
+              messageId,
               userId: user,
               message: [seg.at(bot.selfId), seg.text(command)],
               sender,
@@ -487,6 +616,7 @@ class Account {
             this.host.sessionServices,
           ),
         )
+      }
     })().catch((error: unknown) => {
       this.host.logger.warn(
         {

@@ -25,10 +25,12 @@ export type {
   GroupMemberInfo,
   MessageInfo,
   MessageTarget,
+  MessageThread,
   SendResult,
+  ThreadTarget,
   UserInfo,
 } from './core/bot.ts'
-export { BotRegistry, supports } from './core/bot.ts'
+export { BotRegistry, sendTo, supports } from './core/bot.ts'
 export type { CapabilityGap, CapabilityRequirements, Compatibility } from './core/capabilities.ts'
 export { compatibility } from './core/capabilities.ts'
 export type { CommandDefinition, OptionDefinition, OptionSettings } from './core/command/builder.ts'

@@ -10,7 +10,7 @@ AsaBot 是一个协议无关的 TypeScript 聊天机器人框架，支持 OneBot
 - Web 面板：首次设置、管理机器人与插件、查看日志和调试消息。
 - 插件市场：搜索、安装和管理 npm 插件包。
 - 消息与存储：统一消息段、能力降级、SQLite 存储和定时任务。
-- 飞书企业自建应用：长连接、多账号、私聊/群聊、富文本、图片、文件、Markdown、卡片与完整表单。配置与权限见 [飞书接入](docs/FEISHU.md)。
+- 飞书企业自建应用：长连接、多账号、私聊、群聊与话题，支持原生媒体、卡片表单、历史、转发和常用群管理。配置与权限见 [飞书接入](docs/FEISHU.md)。
 
 ## 快速开始
 
@@ -303,7 +303,7 @@ await session.send(message) // 不支持按钮时降级为“打开: https://exa
 
 ### 主动发送
 
-`Target` 包含 `platform`、`type`、`id` 和可选的 `selfId`；`session.target` 是当前会话目标。`formatTarget` 与 `parseTarget` 可在对象和 `platform[:selfId]:type:id` 字符串之间转换，`targetSchema` 可用于插件配置。
+`Target` 包含 `platform`、`type`、`id` 和可选的 `selfId`、`thread`。`session.target` 是当前会话的完整地址；要让后台任务发回飞书原话题，可以保存这个对象再交给 `ctx.send`。`formatTarget` 与 `parseTarget` 可在对象和字符串之间转换，普通会话格式为 `platform[:selfId]:type:id`，话题格式见 [飞书接入](docs/FEISHU.md#话题)。`targetSchema` 可用于插件配置。
 
 ```ts
 import { formatTarget, parseTarget, type Target } from '@asabot/core'

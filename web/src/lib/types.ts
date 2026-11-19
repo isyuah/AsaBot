@@ -227,10 +227,17 @@ export interface LogRecord {
 /** A log record as held by the panel, with a client-side sequence number used as a stable list key. */
 export type LogEntry = LogRecord & { seq: number }
 
+/** A thread and the message the adapter replies to when posting to it. */
+export interface MessageThread {
+  id: string
+  rootMessageId: string
+}
+
 /** A conversation on a bot (bot-level target). */
 export interface ChannelTarget {
   type: 'group' | 'private'
   id: string
+  thread?: MessageThread
 }
 
 /** A serializable send target; without selfId the first online bot of the platform is used. */
