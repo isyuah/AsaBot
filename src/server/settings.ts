@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { z } from 'zod'
 import type { App } from '../core/app.ts'
 import {
@@ -53,6 +54,28 @@ type SetupInput = z.output<typeof setupInput>
 type ConfigRecord = Record<string, unknown>
 
 export class SetupCodeError extends Error {}
+
+export class ConnectionSetupError extends Error {
+  readonly status: 400 | 404 | 409 | 429
+
+  constructor(status: ConnectionSetupError['status'], message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
+export const connectionSetupSaveInput = z.strictObject({
+  name: connectionSchema.shape.name.optional(),
+  enabled: z.boolean().optional(),
+  replace: z.boolean().optional(),
+})
+
+export type ConnectionSetupSaveInput = z.output<typeof connectionSetupSaveInput>
+
+export interface SetupAccount {
+  selfId: string
+  config: unknown
+}
 
 export class SettingsValidationError extends Error {
   readonly issues: { path: string; message: string }[]
@@ -219,6 +242,8 @@ export class SettingsService {
     const records = z.array(connectionSchema).parse(raw.connections ?? [])
     return this.app.connections.list().map((state) => {
       const config = records.find((record) => record.id === state.id)
+      const definition = this.app.connections.definition(state.adapter)
+      if (definition.setup) return { ...state, config: {} }
       const schema = this.app.connections
         .catalog()
         .find((adapter) => adapter.id === state.adapter)?.configSchema
@@ -231,12 +256,18 @@ export class SettingsService {
       const previous = await this.raw()
       const records = z.array(connectionSchema).parse(previous.connections ?? [])
       const old = records.find((record) => record.id === input.id)
+      const setup = this.app.connections.definition(input.adapter).setup
+      const oldSetup = old && this.app.connections.definition(old.adapter).setup
+      if ((setup || oldSetup) && (old?.adapter !== input.adapter || !isDeepStrictEqual(input.config, {})))
+        throw new ConnectionSetupError(409, '此连接的授权只能通过扫码设置')
       const schema = this.app.connections
         .catalog()
         .find((adapter) => adapter.id === input.adapter)?.configSchema
       const nextRecord = {
         ...input,
-        config: merge(old?.adapter === input.adapter ? old.config : undefined, input.config, [], schema),
+        config: setup
+          ? old?.config
+          : merge(old?.adapter === input.adapter ? old.config : undefined, input.config, [], schema),
       }
       const next = {
         ...previous,
@@ -249,6 +280,78 @@ export class SettingsService {
       this.app.config.connections = config.connections
       await this.app.connections.apply(config.connections)
       return this.connections()
+    })
+  }
+
+  saveConnectionSetup(input: {
+    id: string
+    adapter: string
+    previousAccount?: SetupAccount
+    account: SetupAccount & { adminUserId?: string }
+    options: ConnectionSetupSaveInput
+    signal: AbortSignal
+  }): Promise<void> {
+    return this.app.plugins.serial(async () => {
+      const previous = await this.raw()
+      const records = z.array(connectionSchema).parse(previous.connections ?? [])
+      const current = validate(previous, this.app).config.connections
+      const { id, adapter, previousAccount, account, options, signal } = input
+      const definition = this.app.connections.definition(adapter)
+      const existing = current.find((record) => record.id === id)
+      const sameTarget = previousAccount
+        ? existing?.adapter === adapter &&
+          isDeepStrictEqual(definition.configSchema.parse(existing.config), previousAccount.config)
+        : !existing
+      if (!sameTarget) throw new ConnectionSetupError(409, '连接已变更，请重新扫码')
+      if (previousAccount && previousAccount.selfId !== account.selfId && !options.replace)
+        throw new ConnectionSetupError(409, '请确认替换已绑定的机器人')
+      if (
+        current.some((record) => {
+          if (record.id === id) return false
+          const other = this.app.connections.definition(record.adapter)
+          return (
+            other.platform === definition.platform &&
+            other.setup?.accountId(other.configSchema.parse(record.config)) === account.selfId
+          )
+        })
+      )
+        throw new ConnectionSetupError(409, '该机器人已绑定到另一条连接')
+
+      const connection = connectionSchema.parse({
+        id,
+        adapter,
+        name: existing?.name ?? options.name ?? definition.name,
+        enabled: existing?.enabled ?? options.enabled ?? true,
+        config: account.config,
+      })
+      const next = {
+        ...previous,
+        connections: existing
+          ? records.map((record) => (record.id === id ? connection : record))
+          : [...records, connection],
+      }
+      const { config } = validate(next, this.app)
+      if (signal.aborted) throw new ConnectionSetupError(409, '扫码已结束，请重新扫码')
+      await this.persist(previous, next)
+      if (account.adminUserId && account.selfId !== previousAccount?.selfId) {
+        const bot = { platform: definition.platform, selfId: account.selfId }
+        try {
+          this.app.policies.setAdmins(bot, [...this.app.policies.admins(bot), account.adminUserId])
+        } catch (error) {
+          await this.persist(next, previous)
+          throw error
+        }
+      }
+      this.app.config.connections = config.connections
+      await this.app.connections.apply(config.connections)
+      if (
+        existing?.enabled &&
+        isDeepStrictEqual(
+          definition.configSchema.parse(existing.config),
+          definition.configSchema.parse(account.config),
+        )
+      )
+        await this.app.connections.reconnect(id)
     })
   }
 

@@ -1,7 +1,7 @@
 {
   "name": "@asabot/core",
   "version": "0.1.0",
-  "description": "协议无关的 TypeScript 聊天机器人框架，内置 Web 面板、任务中心及 OneBot 11、飞书适配器",
+  "description": "协议无关的 TypeScript 聊天机器人框架，内置 Web 面板、任务中心及 OneBot 11、飞书、微信 ClawBot 适配器",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -12,7 +12,8 @@
     "./testing": "./src/testing/index.ts",
     "./feishu": "./src/adapters/feishu/index.ts",
     "./onebot11": "./src/adapters/onebot11/index.ts",
-    "./onebot11/testing": "./src/adapters/onebot11/testing.ts"
+    "./onebot11/testing": "./src/adapters/onebot11/testing.ts",
+    "./weixin-clawbot": "./src/adapters/weixin-clawbot/index.ts"
   },
   "bin": {
     "asabot": "./src/cli.ts"
@@ -39,6 +40,10 @@
       "./onebot11/testing": {
         "types": "./dist/adapters/onebot11/testing.d.ts",
         "default": "./dist/adapters/onebot11/testing.js"
+      },
+      "./weixin-clawbot": {
+        "types": "./dist/adapters/weixin-clawbot/index.d.ts",
+        "default": "./dist/adapters/weixin-clawbot/index.js"
       }
     },
     "bin": {
@@ -50,6 +55,7 @@
     "web/dist",
     "README.md",
     "docs/FEISHU.md",
+    "docs/WEIXIN-CLAWBOT.md",
     "LICENSE",
     "asabot.config.example.yaml"
   ],
@@ -71,7 +77,9 @@
     "hono": "^4.13.17",
     "pino": "^10.4.0",
     "pino-pretty": "^13.2.0",
+    "qrcode": "^1.5.4",
     "semver": "^7.8.6",
+    "silk-wasm": "^3.7.1",
     "undici": "^8.12.4",
     "ws": "^8.22.2",
     "yaml": "^2.9.1",
@@ -80,6 +88,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.6.6",
     "@types/node": "^26.6.6",
+    "@types/qrcode": "^1.5.6",
     "@types/semver": "^7.8.0",
     "@types/ws": "^8.18.2",
     "typescript": "^7.0.2",

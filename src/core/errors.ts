@@ -51,6 +51,13 @@ export class NotConnectedError extends Error {
   }
 }
 
+export class ConversationUnavailableError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ConversationUnavailableError'
+  }
+}
+
 /** 发送队列已满，无法继续排队。 */
 export class SendQueueFullError extends Error {
   constructor() {

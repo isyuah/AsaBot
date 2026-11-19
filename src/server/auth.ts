@@ -28,20 +28,25 @@ export class PanelAuth {
   }
 
   authenticated(cookie: string | undefined): boolean {
-    const token = this.token(cookie)
-    if (!token) return false
-    const expires = this.sessions.get(token)
-    if (expires === undefined) return false
-    if (expires <= Date.now()) {
-      this.sessions.delete(token)
-      return false
-    }
-    return true
+    return this.session(cookie) !== undefined
   }
 
-  remove(cookie: string | undefined): void {
+  session(cookie: string | undefined): { token: string; expiresAt: number } | undefined {
+    const token = this.token(cookie)
+    if (!token) return undefined
+    const expiresAt = this.sessions.get(token)
+    if (expiresAt === undefined) return undefined
+    if (expiresAt <= Date.now()) {
+      this.sessions.delete(token)
+      return undefined
+    }
+    return { token, expiresAt }
+  }
+
+  remove(cookie: string | undefined): string | undefined {
     const token = this.token(cookie)
     if (token) this.sessions.delete(token)
+    return token
   }
 
   private token(cookie: string | undefined): string | undefined {

@@ -7,6 +7,7 @@ import type { ApiCall } from './dispatch/api.ts'
 import type { AnyEvent, SessionServices } from './event/index.ts'
 import type { ActorIdentity } from './identity.ts'
 import type { Message, Sendable } from './message/index.ts'
+import type { KVStore } from './storage/index.ts'
 
 /** 发送前钩子接收的机器人、目标和消息。 */
 export interface OutgoingMessage {
@@ -52,8 +53,9 @@ export interface BotInfo {
 export interface AdapterHost {
   readonly connection?: {
     id: string
+    store: Pick<KVStore, 'get' | 'set'>
     update(state: {
-      state: 'connecting' | 'waiting' | 'online' | 'retrying' | 'error' | 'offline'
+      state: 'connecting' | 'waiting' | 'online' | 'retrying' | 'error' | 'offline' | 'reauthorize'
       error?: string
       nextRetryAt?: number
     }): void
@@ -73,6 +75,21 @@ export interface AdapterHost {
   invokeApi(call: ApiCall, execute: (args: unknown[]) => Promise<unknown>): Promise<unknown>
 }
 
+export type QrSetupUpdate =
+  | { status: 'waiting' | 'scanned' | 'verification' | 'expired' | 'already-bound' }
+  | { status: 'authorized'; config: unknown; adminUserId?: string }
+
+export interface QrSetupChallenge {
+  content: string
+  poll(verifyCode?: string): Promise<QrSetupUpdate>
+}
+
+export interface QrConnectionSetup<T = unknown> {
+  kind: 'qr'
+  accountId(config: T): string
+  start(signal: AbortSignal): Promise<QrSetupChallenge>
+}
+
 /** 独立适配器包的公开契约；配置由框架在创建连接前校验。 */
 export interface AdapterDefinition {
   id: string
@@ -83,16 +100,23 @@ export interface AdapterDefinition {
   connectionTypes: string[]
   capabilities: BotCapabilities
   configSchema: z.ZodType
+  setup?: QrConnectionSetup
   create(config: unknown, host: AdapterHost): Adapter
 }
 
 export function defineAdapter<T>(
-  definition: Omit<AdapterDefinition, 'configSchema' | 'create'> & {
+  definition: Omit<AdapterDefinition, 'configSchema' | 'create' | 'setup'> & {
     configSchema: z.ZodType<T>
+    setup?: QrConnectionSetup<T>
     create(config: T, host: AdapterHost): Adapter
   },
 ): AdapterDefinition {
-  return { ...definition, create: (config, host) => definition.create(config as T, host) }
+  const { setup, ...metadata } = definition
+  return {
+    ...metadata,
+    ...(setup && { setup: { ...setup, accountId: (config: unknown) => setup.accountId(config as T) } }),
+    create: (config, host) => definition.create(config as T, host),
+  }
 }
 
 /** 处理 HTTP 升级请求的适配器回调。 */

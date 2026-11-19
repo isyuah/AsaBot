@@ -3,7 +3,7 @@ import { registerHooks } from 'node:module'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { z } from 'zod'
-import type { AdapterDefinition } from '../core/adapter.ts'
+import type { AdapterDefinition, QrConnectionSetup } from '../core/adapter.ts'
 import { capabilitySchema } from '../core/capabilities.ts'
 import { ConfigError } from '../core/errors.ts'
 
@@ -22,6 +22,13 @@ const definitionSchema = z.object({
       'safeParse' in value &&
       typeof value.safeParse === 'function',
   ),
+  setup: z
+    .object({
+      kind: z.literal('qr'),
+      accountId: z.custom<QrConnectionSetup['accountId']>((value) => typeof value === 'function'),
+      start: z.custom<QrConnectionSetup['start']>((value) => typeof value === 'function'),
+    })
+    .optional(),
   create: z.custom<AdapterDefinition['create']>((value) => typeof value === 'function'),
 })
 

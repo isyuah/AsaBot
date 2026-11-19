@@ -12,6 +12,9 @@ export type {
   Delivery,
   OutgoingMessage,
   PreparedOutgoing,
+  QrConnectionSetup,
+  QrSetupChallenge,
+  QrSetupUpdate,
   UpgradeHandler,
 } from './core/adapter.ts'
 export { defineAdapter } from './core/adapter.ts'

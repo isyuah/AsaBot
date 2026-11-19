@@ -9,6 +9,7 @@ import type {
   CommandOverride,
   CommandView,
   ConnectionInput,
+  ConnectionSetup,
   ConnectionView,
   GroupDetail,
   GroupView,
@@ -60,11 +61,12 @@ export function setUnauthorizedHandler(handler: () => void): void {
   onUnauthorized = handler
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   let response: Response
   try {
     response = await fetch(`/api/panel${path}`, {
       method,
+      signal,
       credentials: 'same-origin',
       headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -137,6 +139,15 @@ export const api = {
         }),
   deleteConnection: (id: string) => request<ConnectionView[]>('DELETE', `/connections/${encode(id)}`, {}),
   reconnect: (id: string) => request<ConnectionView[]>('POST', `/connections/${encode(id)}/reconnect`, {}),
+  startConnectionSetup: (adapter: string, connectionId?: string) =>
+    request<ConnectionSetup>('POST', '/connection-setups', { adapter, connectionId }),
+  connectionSetup: (id: string, signal: AbortSignal) =>
+    request<ConnectionSetup>('GET', `/connection-setups/${encode(id)}`, undefined, signal),
+  verifyConnectionSetup: (id: string, code: string) =>
+    request<ConnectionSetup>('POST', `/connection-setups/${encode(id)}/verify`, { code }),
+  saveConnectionSetup: (id: string, input: { name?: string; enabled?: boolean; replace?: boolean }) =>
+    request<{ connectionId: string }>('POST', `/connection-setups/${encode(id)}/save`, input),
+  cancelConnectionSetup: (id: string) => request<void>('DELETE', `/connection-setups/${encode(id)}`, {}),
   botGroups: (bot: Pick<BotView, 'platform' | 'selfId'>) =>
     request<BotGroup[]>('GET', `/bots/${encode(bot.platform)}/${encode(bot.selfId)}/groups`),
   send: (input: { target: Target | string; message: string | Segment[] }) =>

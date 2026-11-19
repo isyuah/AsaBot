@@ -1,16 +1,17 @@
 # AsaBot
 
-AsaBot 是一个协议无关的 TypeScript 聊天机器人框架，支持 OneBot 11 和飞书。
+AsaBot 是一个协议无关的 TypeScript 聊天机器人框架，支持 OneBot 11、飞书和微信 ClawBot。
 
 ## 特性
 
-- 协议无关：通过适配器接入聊天平台，支持 OneBot 11、飞书和多账号。
+- 协议无关：每个适配器可以配置多条独立连接。
 - 插件热重载：修改插件后自动加载，开发无需反复重启。
 - 命令系统：支持参数、选项、权限、冷却和多轮对话。
 - Web 面板：首次设置、管理机器人与插件、查看日志和调试消息。
 - 插件市场：搜索、安装和管理 npm 插件包。
 - 消息与存储：统一消息段、能力降级、SQLite 存储和定时任务。
 - 飞书企业自建应用：长连接、多账号、私聊、群聊与话题，支持原生媒体、卡片表单、历史、转发和常用群管理。配置与权限见 [飞书接入](docs/FEISHU.md)。
+- 微信 ClawBot：扫码授权，无需 OpenClaw 或公网回调，支持私聊、媒体和语音接收。操作与能力见 [微信 ClawBot 接入](docs/WEIXIN-CLAWBOT.md)。
 
 ## 快速开始
 
@@ -53,6 +54,8 @@ npm run dev
 适配器可以独立开发成 ESM npm 包。通过 `@asabot/core` 导入 `defineAdapter` 和类型，默认导出适配器定义，声明 `id`、`platform`、名称、版本、连接方式、能力、配置 schema 以及 `create(config, host)`。驱动实现 `start()`、`stop()` 和 `reconfigure(config)`；框架在调用前校验配置，每条连接分别创建实例。实现可参考 [内置注册](src/adapters/index.ts) 与 [AdapterHost 契约](src/core/adapter.ts)。
 
 驱动通过 host 注册和注销 Bot、发送事件及上报连接状态；通过 `prepareOutgoing`、`invokeApi` 接入统一发送钩子与 API 管线。被动 WebSocket 使用 `registerUpgrade`，框架自动加上连接 ID 路径前缀。停止时需要回收连接、监听器和在途请求。
+
+扫码适配器可声明 `setup: { kind: 'qr', start, accountId }`。`start(signal)` 返回用于本地生成二维码的 `content` 和 `poll(verifyCode?)`；申请和轮询均应响应 `signal` 取消。授权结果返回 `{ status: 'authorized', config, adminUserId? }`，`accountId(config)` 从已校验配置中提取 Bot ID。框架负责扫码会话隔离、验证码提交、重复绑定检查和保存；面板只显示接入方式，不接收授权配置。可通过 `host.connection.store` 持久化本连接的私有状态。
 
 在运行 AsaBot 的项目目录通过包管理器安装适配器包，再将真实包名加入 `adapterModules`，重启后即可在「适配器」页面查看并添加连接。适配器包和业务插件包使用各自的注册契约。
 

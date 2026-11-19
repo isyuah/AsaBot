@@ -11,7 +11,7 @@ export type KnownSegment =
   | { type: 'image'; data: { file: string; url?: string; summary?: string } }
   | { type: 'audio'; data: { file: string; url?: string } }
   | { type: 'video'; data: { file: string; url?: string } }
-  | { type: 'reply'; data: { id: string } }
+  | { type: 'reply'; data: { id: string; title?: string; message?: Message } }
   | { type: 'file'; data: { file: string; name?: string } }
   | { type: 'forward'; data: { id: string } }
 

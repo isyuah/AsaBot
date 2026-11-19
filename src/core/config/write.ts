@@ -43,6 +43,7 @@ export async function writeConfigValue(
     await writeFile(temporary, document.toString({ flowCollectionPadding: false }), {
       encoding: 'utf8',
       flag: 'wx',
+      mode: 0o600,
     })
     await rename(temporary, path)
   } catch (error) {
@@ -67,7 +68,10 @@ export async function deleteConfigValue(path: string, keyPath: string[]): Promis
   document.deleteIn(keyPath)
   const temporary = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`)
   try {
-    await writeFile(temporary, document.toString({ flowCollectionPadding: false }), { flag: 'wx' })
+    await writeFile(temporary, document.toString({ flowCollectionPadding: false }), {
+      flag: 'wx',
+      mode: 0o600,
+    })
     await rename(temporary, path)
   } catch (error) {
     await unlink(temporary).catch((cleanupError: NodeJS.ErrnoException) => {

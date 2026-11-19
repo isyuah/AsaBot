@@ -464,7 +464,7 @@ export interface ConnectionInput {
 }
 export interface ConnectionView extends ConnectionInput {
   platform: string
-  state: 'disabled' | 'connecting' | 'waiting' | 'online' | 'retrying' | 'error' | 'offline'
+  state: 'disabled' | 'connecting' | 'waiting' | 'online' | 'retrying' | 'error' | 'offline' | 'reauthorize'
   changedAt: number
   lastConnectedAt?: number
   lastError?: string
@@ -483,7 +483,15 @@ export interface AdapterView {
   connectionTypes: string[]
   capabilities: BotCapabilities
   configSchema: JsonSchema
+  setup?: { kind: 'qr' }
 }
+export type ConnectionSetup = { id: string; expiresAt: number } & (
+  | { status: 'starting' | 'scanned' | 'expired' | 'already-bound' | 'failed' }
+  | { status: 'waiting'; image: string }
+  | { status: 'verification'; retry: boolean }
+  | { status: 'authorized'; selfId: string; replaces?: string; missingAdmin: boolean }
+  | { status: 'saved'; connectionId: string }
+)
 export interface Compatibility {
   declared: boolean
   required: { kind: keyof BotCapabilities; name: string }[]

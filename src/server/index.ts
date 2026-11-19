@@ -16,7 +16,12 @@ import { commandOverrideSchema, logLevelSchema } from '../core/config/schema.ts'
 import { deleteConfigValue, writeConfigValue } from '../core/config/write.ts'
 import { connectionSchema } from '../core/connections.ts'
 import type { DispatchEvent } from '../core/dispatch/types.ts'
-import { ConfigError, NoBotOnlineError, PluginConfigError } from '../core/errors.ts'
+import {
+  ConfigError,
+  ConversationUnavailableError,
+  NoBotOnlineError,
+  PluginConfigError,
+} from '../core/errors.ts'
 import type { MessageSentEvent } from '../core/event/index.ts'
 import { groupIdentity } from '../core/identity.ts'
 import { getRecentLogs, subscribeLogs } from '../core/logger.ts'
@@ -27,6 +32,7 @@ import { ManagementError } from '../core/plugin/upload.ts'
 import { redactValue } from '../core/utils/redact.ts'
 import { constantTimeEqual } from '../core/utils/security.ts'
 import { PanelAuth } from './auth.ts'
+import { ConnectionSetups, connectionSetupInput, verificationInput } from './connection-setups.ts'
 import { Groups } from './groups.ts'
 import { Playground } from './playground.ts'
 import { isPluginPageName, pluginPageFile, unsafePluginPageUrl } from './plugin-pages.ts'
@@ -42,6 +48,8 @@ import {
   uploadSchema,
 } from './schemas.ts'
 import {
+  ConnectionSetupError,
+  connectionSetupSaveInput,
   SettingsService,
   SettingsValidationError,
   SetupCodeError,
@@ -217,6 +225,7 @@ export class HttpServer implements ServerService {
   private readonly auth = new PanelAuth()
   private readonly playground: Playground
   private readonly settings: SettingsService
+  private readonly connectionSetups: ConnectionSetups
   private readonly groups: Groups
   private readonly http: Server
   private readonly websocket = new WebSocketServer({ noServer: true })
@@ -225,6 +234,7 @@ export class HttpServer implements ServerService {
     this.app = app
     this.playground = new Playground(app)
     this.settings = new SettingsService(app)
+    this.connectionSetups = new ConnectionSetups(app, this.settings)
     this.groups = new Groups(app)
     const routes = this.routes()
     const listener = getRequestListener(routes.fetch)
@@ -284,6 +294,7 @@ export class HttpServer implements ServerService {
   }
 
   async stop(): Promise<void> {
+    this.connectionSetups.revoke()
     for (const client of this.websocket.clients) client.terminate()
     const closed = this.http.listening
       ? new Promise<void>((resolve, reject) => {
@@ -317,6 +328,12 @@ export class HttpServer implements ServerService {
         return failure(c, new HttpError(400, 'BAD_REQUEST', 'Plugin configuration is invalid', error.issues))
       if (error instanceof SettingsValidationError)
         return failure(c, new HttpError(400, 'BAD_REQUEST', 'Configuration is invalid', error.issues))
+      if (error instanceof ConnectionSetupError) {
+        const code = { 400: 'BAD_REQUEST', 404: 'NOT_FOUND', 409: 'CONFLICT', 429: 'RATE_LIMITED' }[
+          error.status
+        ]
+        return failure(c, new HttpError(error.status, code, error.message))
+      }
       if (error instanceof ConfigError) return failure(c, new HttpError(400, 'BAD_REQUEST', error.message))
       if (error instanceof SetupCodeError)
         return failure(c, new HttpError(401, 'UNAUTHORIZED', 'Invalid setup code'))
@@ -443,7 +460,8 @@ export class HttpServer implements ServerService {
       return c.json({ ok: true })
     })
     panel.post('/logout', (c) => {
-      this.auth.remove(c.req.header('cookie'))
+      const token = this.auth.remove(c.req.header('cookie'))
+      if (token) this.connectionSetups.revoke(token)
       for (const [client, cookie] of this.clientSessions) {
         if (!this.auth.authenticated(cookie)) client.close(1008, 'Session expired')
       }
@@ -513,6 +531,31 @@ export class HttpServer implements ServerService {
     panel.all('/ext/:name/*', forwardPanelPlugin)
     panel.get('/bots', (c) => c.json(panelBots(this.app).map((bot) => botView(this.app, bot))))
     panel.get('/adapters', (c) => c.json(this.app.connections.catalog()))
+    const setupSession = (c: ServerContext) => {
+      const session = this.auth.session(c.req.header('cookie'))
+      if (!session) throw new HttpError(401, 'UNAUTHORIZED', 'Authentication required')
+      c.header('Cache-Control', 'no-store')
+      return session
+    }
+    panel.post('/connection-setups', async (c) => {
+      const input = await body(c, connectionSetupInput, 4096)
+      return c.json(this.connectionSetups.start(setupSession(c), input), 201)
+    })
+    panel.get('/connection-setups/:id', (c) =>
+      c.json(this.connectionSetups.status(setupSession(c).token, c.req.param('id'))),
+    )
+    panel.post('/connection-setups/:id/verify', async (c) => {
+      const { code } = await body(c, verificationInput, 4096)
+      return c.json(this.connectionSetups.verify(setupSession(c).token, c.req.param('id'), code))
+    })
+    panel.post('/connection-setups/:id/save', async (c) => {
+      const options = await body(c, connectionSetupSaveInput, 4096)
+      return c.json(await this.connectionSetups.save(setupSession(c).token, c.req.param('id'), options))
+    })
+    panel.delete('/connection-setups/:id', (c) => {
+      this.connectionSetups.cancel(setupSession(c).token, c.req.param('id'))
+      return c.body(null, 204)
+    })
     panel.get('/connections', async (c) => c.json(await this.settings.connections()))
     panel.post('/connections', async (c) => {
       const input = await body(
@@ -875,6 +918,8 @@ export class HttpServer implements ServerService {
   }
 
   private setSessionCookie(c: ServerContext): void {
+    const token = this.auth.remove(c.req.header('cookie'))
+    if (token) this.connectionSetups.revoke(token)
     setCookie(c, 'asabot_session', this.auth.create(), {
       httpOnly: true,
       sameSite: 'Strict',
@@ -892,6 +937,7 @@ export class HttpServer implements ServerService {
       return await this.app.send(input.target, input.message)
     } catch (error) {
       if (error instanceof NoBotOnlineError) throw new HttpError(409, 'CONFLICT', 'No matching online bot')
+      if (error instanceof ConversationUnavailableError) throw new HttpError(409, 'CONFLICT', error.message)
       throw error
     }
   }

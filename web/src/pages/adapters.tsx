@@ -126,8 +126,17 @@ function AdapterContent({ id }: { id?: string }) {
             <CapabilityPanel capabilities={adapter.capabilities} adapter />
           </Card>
           <Card className="p-5">
-            <h2 className="text-sm font-semibold">配置字段</h2>
-            <SchemaFields schema={adapter.configSchema} />
+            {adapter.setup?.kind === 'qr' ? (
+              <>
+                <h2 className="text-sm font-semibold">接入方式</h2>
+                <p className="mt-2 text-[13px] text-fg-3">扫码授权后保存连接。</p>
+              </>
+            ) : (
+              <>
+                <h2 className="text-sm font-semibold">配置字段</h2>
+                <SchemaFields schema={adapter.configSchema} />
+              </>
+            )}
           </Card>
         </div>
         <div className="space-y-4">

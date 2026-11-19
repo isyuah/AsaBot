@@ -4,7 +4,7 @@ import type { Adapter, AdapterDefinition, AdapterHost } from './adapter.ts'
 import type { App } from './app.ts'
 import type { Bot } from './bot.ts'
 import { ConfigError } from './errors.ts'
-import { botKey } from './identity.ts'
+import { botIdentitySchema, botKey } from './identity.ts'
 import { redactSchemaText } from './utils/redact.ts'
 
 export const connectionSchema = z
@@ -23,7 +23,7 @@ export interface ConnectionState {
   adapter: string
   platform: string
   enabled: boolean
-  state: 'disabled' | 'connecting' | 'waiting' | 'online' | 'retrying' | 'error' | 'offline'
+  state: 'disabled' | 'connecting' | 'waiting' | 'online' | 'retrying' | 'error' | 'offline' | 'reauthorize'
   changedAt: number
   lastConnectedAt?: number
   lastError?: string
@@ -63,16 +63,20 @@ export class Connections {
   }
   catalog() {
     return [...this.definitions.values()].map(({ definition, source }) => {
-      const { create: _create, configSchema, ...metadata } = definition
+      const { create: _create, configSchema, setup, ...metadata } = definition
       return {
         ...metadata,
+        ...(setup && { setup: { kind: setup.kind } }),
         source,
-        configSchema: z.toJSONSchema(configSchema, { io: 'input', unrepresentable: 'any' }),
+        configSchema: setup
+          ? { type: 'object' }
+          : z.toJSONSchema(configSchema, { io: 'input', unrepresentable: 'any' }),
       }
     })
   }
   validate(configs: ConnectionConfig[]): ConnectionConfig[] {
     const ids = new Set<string>()
+    const accounts = new Set<string>()
     return configs.map((config) => {
       if (ids.has(config.id)) throw new ConfigError(`Duplicate connection ID "${config.id}"`)
       ids.add(config.id)
@@ -80,6 +84,15 @@ export class Connections {
       const result = definition.configSchema.safeParse(config.config)
       if (!result.success)
         throw new ConfigError(`connections.${config.id}.config: ${this.error(config, result.error)}`)
+      if (definition.setup) {
+        const selfId = definition.setup.accountId(result.data)
+        if (!botIdentitySchema.shape.selfId.safeParse(selfId).success)
+          throw new ConfigError(`connections.${config.id}: invalid Bot ID`)
+        const key = botKey({ platform: definition.platform, selfId })
+        if (accounts.has(key))
+          throw new ConfigError(`Bot ${definition.platform}:${selfId} 已绑定到另一条连接`)
+        accounts.add(key)
+      }
       return { ...config, config: result.data }
     })
   }
@@ -133,17 +146,17 @@ export class Connections {
     for (const config of parsed) {
       let entry = this.entries.get(config.id)
       if (entry && isDeepStrictEqual(entry.config, config)) continue
-      if (
-        entry?.adapter &&
-        entry.config.adapter === config.adapter &&
-        entry.config.enabled &&
-        config.enabled
-      ) {
+      const setup = this.definition(config.adapter).setup
+      const replaced =
+        entry &&
+        (entry.config.adapter !== config.adapter ||
+          (setup && setup.accountId(entry.config.config) !== setup.accountId(config.config)))
+      if (entry?.adapter && !replaced && entry.config.enabled && config.enabled) {
         const changed = !isDeepStrictEqual(entry.config.config, config.config)
         entry.config = config
         entry.state.name = config.name
         if (changed) {
-          this.update(entry, { state: 'connecting' })
+          this.update(entry, { state: 'connecting', nextRetryAt: undefined })
           try {
             await entry.adapter.reconfigure(config.config)
           } catch (error) {
@@ -172,7 +185,10 @@ export class Connections {
         }
         this.entries.set(config.id, entry)
       }
-      if (entry.config.adapter !== config.adapter) entry.bots.clear()
+      if (replaced) {
+        entry.bots.clear()
+        Object.assign(entry.state, { lastConnectedAt: undefined, lastError: undefined, errorAt: undefined })
+      }
       entry.config = config
       Object.assign(entry.state, {
         name: config.name,
@@ -216,9 +232,18 @@ export class Connections {
     this.update(entry, { state: 'connecting', nextRetryAt: undefined })
     const app = this.app
     const current = () => generation === entry.generation
+    const { config } = entry
+    const definition = this.definition(config.adapter)
+    const store = app.storage.store(
+      `@adapter:${JSON.stringify([config.adapter, config.id, definition.setup?.accountId(config.config)])}`,
+      () => {
+        if (!current()) throw new Error('Connection is stopped')
+      },
+    )
     const host: AdapterHost = {
       connection: {
-        id: entry.config.id,
+        id: config.id,
+        store,
         update: ({ error, ...state }) => {
           if (!current()) return
           this.update(entry, {
@@ -282,7 +307,7 @@ export class Connections {
       invokeApi: (call, execute) => app.invokeApi(call, execute),
     }
     try {
-      entry.adapter = this.definition(entry.config.adapter).create(entry.config.config, host)
+      entry.adapter = definition.create(config.config, host)
       await entry.adapter.start()
     } catch (error) {
       const lastError = this.error(entry.config, error)

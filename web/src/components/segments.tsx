@@ -127,16 +127,29 @@ export function Segments({
                 合并转发
               </Placeholder>
             )
-          case 'reply':
+          case 'reply': {
+            const quote = Array.isArray(data.message)
+              ? data.message
+                  .map((item: Segment) => {
+                    if (item.type === 'text') return String(item.data.text)
+                    if (item.type === 'file') return String(item.data.name ?? '[文件]')
+                    return { image: '[图片]', audio: '[语音]', video: '[视频]' }[item.type] ?? ''
+                  })
+                  .join('')
+              : ''
+            const preview = quote || (typeof data.title === 'string' ? data.title : '')
             return (
               <span key={key} className="mb-1 block">
                 {renderReply ? (
                   renderReply(String(data.id))
                 ) : (
-                  <Placeholder icon={<Reply className="size-3" />}>回复</Placeholder>
+                  <Placeholder icon={<Reply className="size-3 shrink-0" />}>
+                    <span className="line-clamp-2 break-all">{preview || '回复'}</span>
+                  </Placeholder>
                 )}
               </span>
             )
+          }
           default:
             return <Placeholder key={key}>{segment.type}</Placeholder>
         }

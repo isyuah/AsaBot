@@ -70,6 +70,8 @@ const platformLabels: Record<string, string> = {
   'feishu.setChatMessageMode': '切换群消息模式',
   'feishu.addChatMembers': '添加群成员',
   'feishu.urgentApp': '应用内加急',
+  'weixin-clawbot.downloadMedia': '下载并解密媒体',
+  'weixin-clawbot.setTyping': '设置或取消正在输入',
 }
 
 export interface CapabilityRow {

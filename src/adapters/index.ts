@@ -5,6 +5,7 @@ import { feishuCapabilities } from './feishu/bot.ts'
 import { feishuSchema } from './feishu/config.ts'
 import { OneBotAdapter, onebotCapabilities } from './onebot11/adapter.ts'
 import { onebot11Schema } from './onebot11/config.ts'
+import { weixinClawbot } from './weixin-clawbot/index.ts'
 
 const feishuConnection = feishuSchema.omit({ accounts: true }).extend({
   appId: z
@@ -78,4 +79,5 @@ export const adapters = [
         (value) => onebotConfig(onebotConnection.parse(value)),
       ),
   }),
+  weixinClawbot,
 ]

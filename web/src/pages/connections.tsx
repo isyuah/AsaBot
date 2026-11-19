@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Cable, ChevronRight, Copy, RefreshCw, Trash2 } from 'lucide-react'
+import { ArrowLeft, Cable, ChevronRight, Copy, RefreshCw, ScanLine, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
+import { ConnectionQrSetup } from '../components/connection-qr-setup.tsx'
 import { SchemaForm } from '../components/schema-form.tsx'
 import { Button } from '../components/ui/button.tsx'
 import { Dialog } from '../components/ui/dialog.tsx'
@@ -29,6 +30,7 @@ const status: Record<ConnectionView['state'], { label: string; tone: Tone }> = {
   retrying: { label: '等待重试', tone: 'warning' },
   error: { label: '连接失败', tone: 'danger' },
   offline: { label: '离线', tone: 'danger' },
+  reauthorize: { label: '需要重新扫码', tone: 'danger' },
 }
 export function ConnectionStatus({ state }: { state: ConnectionView['state'] }) {
   return (
@@ -86,7 +88,7 @@ export function ConnectionsPage({ path }: { path: string }) {
           <EmptyState
             icon={<Cable />}
             title="还没有连接"
-            description="选择适配器并填写连接配置，连接过程和重试状态会显示在这里。"
+            description="选择适配器，按提示填写配置或扫码授权。"
             action={<Button onClick={() => navigate('/bots/connections/new')}>添加连接</Button>}
           />
         </Card>
@@ -137,19 +139,23 @@ function ConnectionEditor({
   const [adapterId, setAdapterId] = useState(connection?.adapter ?? initialAdapter ?? adapters[0]?.id ?? '')
   const [id] = useState(() => connection?.id ?? crypto.randomUUID())
   const [removing, setRemoving] = useState(false)
+  const [rescanning, setRescanning] = useState(false)
   const adapter = adapters.find((item) => item.id === adapterId)
-  const invalidate = () => {
-    for (const key of ['connections', 'bots', 'bot', 'overview'])
-      void client.invalidateQueries({ queryKey: [key] })
+  const qr = adapter?.setup?.kind === 'qr'
+  const invalidate = () =>
+    Promise.all(
+      ['connections', 'bots', 'bot', 'overview'].map((key) => client.invalidateQueries({ queryKey: [key] })),
+    )
+  const saved = async (connectionId: string) => {
+    await invalidate()
+    setRescanning(false)
+    toast.success('连接已保存')
+    navigate(connectionPath(connectionId))
   }
   const save = useMutation({
     mutationFn: (value: Omit<ConnectionInput, 'id' | 'adapter'>) =>
-      api.saveConnection({ ...value, id, adapter: adapterId }, !connection),
-    onSuccess: () => {
-      invalidate()
-      toast.success('连接已保存')
-      navigate(connectionPath(id))
-    },
+      api.saveConnection({ ...value, id, adapter: adapterId, ...(qr && { config: {} }) }, !connection),
+    onSuccess: () => saved(id),
   })
   const reconnect = useMutation({ mutationFn: () => api.reconnect(id), onSuccess: invalidate })
   const remove = useMutation({
@@ -167,13 +173,13 @@ function ConnectionEditor({
       properties: {
         name: { type: 'string', title: '连接名称', minLength: 1, default: adapter?.name },
         enabled: { type: 'boolean', title: '启用连接', default: true },
-        config: { ...adapter?.configSchema, title: '连接配置' },
+        ...(adapter?.setup?.kind !== 'qr' && { config: { ...adapter?.configSchema, title: '连接配置' } }),
       },
     }),
     [adapter],
   )
   const value = connection
-    ? { name: connection.name, enabled: connection.enabled, config: connection.config }
+    ? { name: connection.name, enabled: connection.enabled, ...(!qr && { config: connection.config }) }
     : undefined
   const issues =
     save.error instanceof ApiError
@@ -190,21 +196,29 @@ function ConnectionEditor({
       </Link>
       <PageHeader
         title={connection?.name ?? '添加连接'}
-        description={
-          connection ? <span className="font-mono text-xs">{id}</span> : '选择适配器后填写连接信息'
-        }
+        description={connection ? <span className="font-mono text-xs">{id}</span> : '选择适配器并完成接入'}
         actions={
           connection && (
             <>
               <Button
-                disabled={!connection.enabled}
+                disabled={!connection.enabled || rescanning}
                 loading={reconnect.isPending}
                 onClick={() => reconnect.mutate()}
               >
                 <RefreshCw className="size-3.5" />
                 立即重连
               </Button>
-              <Button variant="danger-ghost" onClick={() => setRemoving(true)}>
+              {qr && (
+                <Button
+                  variant={connection.state === 'reauthorize' ? 'primary' : 'secondary'}
+                  disabled={rescanning || reconnect.isPending || save.isPending}
+                  onClick={() => setRescanning(true)}
+                >
+                  <ScanLine className="size-3.5" />
+                  重新扫码
+                </Button>
+              )}
+              <Button variant="danger-ghost" disabled={rescanning} onClick={() => setRemoving(true)}>
                 <Trash2 className="size-3.5" />
                 删除
               </Button>
@@ -213,7 +227,7 @@ function ConnectionEditor({
         }
       />
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
-        <Card className="min-w-0 p-6">
+        <Card className="min-w-0 p-4 sm:p-6">
           <div className="mb-5">
             <Select
               aria-label="适配器"
@@ -223,19 +237,28 @@ function ConnectionEditor({
               options={adapters.map((item) => ({ value: item.id, label: item.name }))}
             />
           </div>
-          {adapter && (
-            <SchemaForm
-              key={adapter.id}
-              schema={schema}
-              value={value}
-              issues={issues}
-              saving={save.isPending}
-              submitWhenPristine={!connection}
-              submitLabel={connection ? '保存连接' : '创建连接'}
-              note={connection ? '保存后应用到这条连接' : '创建后开始连接'}
-              onSubmit={(value) => save.mutate(value as Omit<ConnectionInput, 'id' | 'adapter'>)}
-            />
-          )}
+          {adapter &&
+            (qr && (!connection || rescanning) ? (
+              <ConnectionQrSetup
+                key={adapter.id}
+                adapter={adapter}
+                connection={connection}
+                onSaved={(id) => void saved(id)}
+                onCancel={() => (connection ? setRescanning(false) : navigate('/bots/connections'))}
+              />
+            ) : (
+              <SchemaForm
+                key={adapter.id}
+                schema={schema}
+                value={value}
+                issues={issues}
+                saving={save.isPending}
+                submitWhenPristine={!connection}
+                submitLabel={connection ? '保存连接' : '创建连接'}
+                note={connection ? '保存后应用到这条连接' : '创建后开始连接'}
+                onSubmit={(value) => save.mutate(value as Omit<ConnectionInput, 'id' | 'adapter'>)}
+              />
+            ))}
           {save.error && (
             <p role="alert" className="mt-3 text-[13px] text-danger">
               {save.error.message}

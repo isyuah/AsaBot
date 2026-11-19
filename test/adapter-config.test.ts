@@ -124,6 +124,7 @@ describe('adapter registration', () => {
       `import { z } from ${JSON.stringify(import.meta.resolve('zod'))}; export default {
       id: 'fixture', platform: 'fixture', name: 'Fixture', version: '1.0.0', description: '', connectionTypes: ['custom'],
       capabilities: { segments: ['text'], textStyles: [], actions: [] }, configSchema: z.object({}),
+      setup: { kind: 'qr', accountId: () => 'fixture-bot', async start() { return { content: 'local-test', async poll() { return { status: 'expired' } } } } },
       create: () => ({ platform: 'fixture', async start() {}, async stop() {}, async reconfigure() {} }),
     }`,
     )
@@ -136,12 +137,18 @@ describe('adapter registration', () => {
           `
         import { loadAdapterModules } from ${JSON.stringify(new URL('../src/adapters/loader.ts', import.meta.url).href)};
         const [item] = await loadAdapterModules(['asabot-adapter-fixture']);
-        console.log(JSON.stringify({ id: item.definition.id, source: item.source }));
+        const challenge = await item.definition.setup.start(new AbortController().signal);
+        console.log(JSON.stringify({ id: item.definition.id, source: item.source, setup: item.definition.setup.kind, status: (await challenge.poll()).status }));
       `,
         ],
         { cwd },
       )
-      expect(JSON.parse(stdout)).toEqual({ id: 'fixture', source: 'asabot-adapter-fixture' })
+      expect(JSON.parse(stdout)).toEqual({
+        id: 'fixture',
+        source: 'asabot-adapter-fixture',
+        setup: 'qr',
+        status: 'expired',
+      })
     } finally {
       await rm(cwd, { recursive: true, force: true })
     }
