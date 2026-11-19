@@ -5,15 +5,17 @@ import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { api } from '../lib/api.ts'
 import { subscribePluginEvents } from '../lib/realtime.tsx'
-import { usePath } from '../lib/router.tsx'
 import { useTheme } from '../lib/theme.tsx'
+import { openCommandPalette } from '../lib/ui-state.ts'
 
 // Theme variables handed to plugin pages; the SDK applies them as --asabot-<name> on the page's :root.
 const tokenNames = [
   'bg',
+  'bg-glow',
   'surface',
   'surface-2',
   'surface-3',
+  'overlay',
   'border',
   'border-strong',
   'fg',
@@ -32,8 +34,12 @@ const tokenNames = [
   'danger-soft',
   'info',
   'info-soft',
+  'series-in',
+  'series-out',
   'ring',
   'shadow-card',
+  'shadow-pop',
+  'highlight',
 ]
 
 function themeTokens(): Record<string, string> {
@@ -43,6 +49,7 @@ function themeTokens(): Record<string, string> {
 
 type BridgeRequest =
   | { asabot: 1; kind: 'ready' }
+  | { asabot: 1; kind: 'open-command-palette' }
   | { asabot: 1; kind: 'fetch'; id: number; path: string; method?: string; body?: unknown }
   | { asabot: 1; kind: 'toast'; text: string; level?: 'info' | 'success' | 'error' }
 
@@ -84,29 +91,27 @@ async function relay(plugin: string, path: string, method: string, body: unknown
   }
 }
 
-export function PluginPageHost() {
-  const path = usePath()
-  const name = decodeURIComponent(path.slice('/pages/'.length))
+export function PluginPageHost({ path }: { path: string }) {
+  const name = path.slice('/pages/'.length)
   const plugins = useQuery({ queryKey: ['plugins'], queryFn: api.plugins })
   const plugin = plugins.data?.find((item) => item.name === name)
   const frame = useRef<HTMLIFrameElement>(null)
   const { resolved } = useTheme()
-  // Per plugin, so switching between plugin pages shows the skeleton until the new page has loaded.
-  const [loadedFor, setLoadedFor] = useState<string | null>(null)
-  const loaded = loadedFor === name
+  const [loaded, setLoaded] = useState(false)
   const available = plugin?.state === 'active' && plugin.page !== undefined
 
   useEffect(() => {
     if (plugin?.page) document.title = `${plugin.page.title} · AsaBot`
   }, [plugin?.page])
 
-  // Bridge: only messages from this iframe's window are handled.
+  // The previous page can stay mounted during its exit animation.
   useEffect(() => {
     if (!available) return
     const post = (message: Record<string, unknown>) =>
       frame.current?.contentWindow?.postMessage({ asabot: 1, ...message }, '*')
     const onMessage = (event: MessageEvent) => {
-      if (!frame.current || event.source !== frame.current.contentWindow) return
+      const iframe = frame.current
+      if (!iframe || event.source !== iframe.contentWindow || window.location.pathname !== path) return
       const data = event.data as BridgeRequest | null
       if (data?.asabot !== 1) return
       if (data.kind === 'ready')
@@ -115,7 +120,11 @@ export function PluginPageHost() {
           mode: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
           tokens: themeTokens(),
         })
-      else if (data.kind === 'toast') {
+      else if (data.kind === 'open-command-palette') {
+        if (document.activeElement === iframe && document.hasFocus()) {
+          openCommandPalette(() => post({ kind: 'restore-focus' }))
+        }
+      } else if (data.kind === 'toast') {
         const text = String(data.text).slice(0, 300)
         if (data.level === 'error') toast.error(text)
         else if (data.level === 'success') toast.success(text)
@@ -137,7 +146,7 @@ export function PluginPageHost() {
       window.removeEventListener('message', onMessage)
       unsubscribe()
     }
-  }, [available, name])
+  }, [available, name, path])
 
   // Re-send the theme whenever it changes (the class on <html> is already updated by the provider).
   useEffect(() => {
@@ -150,7 +159,7 @@ export function PluginPageHost() {
 
   if (plugins.error && !plugins.data)
     return (
-      <Card>
+      <Card className="min-h-0 overflow-y-auto overscroll-contain">
         <ErrorState
           error={plugins.error}
           onRetry={() => void plugins.refetch()}
@@ -158,10 +167,10 @@ export function PluginPageHost() {
         />
       </Card>
     )
-  if (!plugins.data) return <Skeleton className="h-[70vh] rounded-xl" />
+  if (!plugins.data) return <Skeleton className="min-h-0 flex-1 rounded-xl" />
   if (!available || !plugin?.page)
     return (
-      <Card>
+      <Card className="min-h-0 overflow-y-auto overscroll-contain">
         <EmptyState
           icon={<AppWindow />}
           title="这个插件页面不可用"
@@ -179,24 +188,25 @@ export function PluginPageHost() {
   const src = `/plugin-pages/${encodeURIComponent(name)}/`
   return (
     <>
-      <PageHeader
-        title={plugin.page.title}
-        description={
-          <>
-            由插件 <span className="font-medium text-fg-2">{plugin.name}</span> 提供
-          </>
-        }
-      />
-      <Card className="relative overflow-hidden">
+      <div className="shrink-0">
+        <PageHeader
+          title={plugin.page.title}
+          description={
+            <>
+              由插件 <span className="font-medium text-fg-2">{plugin.name}</span> 提供
+            </>
+          }
+        />
+      </div>
+      <Card className="relative min-h-0 flex-1 overflow-clip">
         {!loaded && <Skeleton className="absolute inset-0 rounded-none" />}
         <iframe
           ref={frame}
-          key={name}
           title={plugin.page.title}
           src={src}
           sandbox="allow-scripts allow-forms allow-popups"
-          onLoad={() => setLoadedFor(name)}
-          className="block h-[calc(100dvh-190px)] min-h-[480px] w-full border-0 bg-transparent"
+          onLoad={() => setLoaded(true)}
+          className="block size-full border-0 bg-transparent"
         />
       </Card>
     </>

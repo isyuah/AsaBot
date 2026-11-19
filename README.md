@@ -223,7 +223,7 @@ export default definePlugin({
 
 `entry` 默认为 `index.html`。页面可用 `asabot.on('updated', handler)` 接收 `ctx.panel.push` 推送；SDK 还提供 `asabot.fetch`、`asabot.toast` 和 `asabot.theme`。页面、路由及推送入口随插件卸载失效。
 
-React 插件可使用 [`@asabot/panel-ui`](packages/panel-ui/README.md) 复用控制台的组件和配色。共享包提供编译好的 CSS 和可运行的插件示例。用 `PluginPageLayout` 固定工具栏并让正文在插件页内滚动。
+React 插件可使用 [`@asabot/panel-ui`](packages/panel-ui/README.md) 复用控制台的组件和配色。共享包提供编译好的 CSS 和可运行的插件示例。iframe 填满控制台标题下方的剩余空间，使用 `PluginPageLayout` 可让工具栏固定、正文在插件内滚动。加载 SDK 后，在插件页内按 `Ctrl/⌘ + K` 可以打开控制台命令面板。
 
 ### 通知与请求事件
 

@@ -8,7 +8,7 @@ import { useConnection } from '../../lib/realtime.tsx'
 import { Link, usePath } from '../../lib/router.tsx'
 import { resetSession } from '../../lib/session.ts'
 import { type ThemePreference, useTheme } from '../../lib/theme.tsx'
-import { commandPaletteOpen } from '../../lib/ui-state.ts'
+import { commandPalette, openCommandPalette } from '../../lib/ui-state.ts'
 import { AclPage } from '../../pages/acl.tsx'
 import { AdaptersPage } from '../../pages/adapters.tsx'
 import { BotsPage } from '../../pages/bots.tsx'
@@ -42,8 +42,10 @@ const pages: Record<string, ComponentType> = {
   '/tasks': TasksPage,
 }
 
+type Route = { key: string; Page: ComponentType } | { key: string; pluginPage: true }
+
 /** The page for a path; `key` drives the page transition, so in-page sub-routes (a group's sheet) don't re-animate. */
-function resolveRoute(path: string): { key: string; Page: ComponentType } {
+function resolveRoute(path: string): Route {
   const page = pages[path]
   if (page) return { key: path, Page: page }
   if (path.startsWith('/bots/')) return { key: '/bots', Page: BotsPage }
@@ -51,7 +53,7 @@ function resolveRoute(path: string): { key: string; Page: ComponentType } {
   if (path.startsWith('/plugin/')) return { key: '/plugins', Page: PluginDetailPage }
   if (path.startsWith('/groups/')) return { key: '/groups', Page: GroupsPage }
   if (path.startsWith('/tasks/')) return { key: '/tasks', Page: TasksPage }
-  if (path.startsWith('/pages/')) return { key: path, Page: PluginPageHost }
+  if (path.startsWith('/pages/')) return { key: path, pluginPage: true }
   return { key: path, Page: NotFoundPage }
 }
 
@@ -78,15 +80,25 @@ export function Shell() {
   const path = usePath()
   const [mobileOpen, setMobileOpen] = useState(false)
   const groups = useNavGroups()
-  const { key, Page } = resolveRoute(path)
+  const route = resolveRoute(path)
+  const { key } = route
+  const pluginPage = 'pluginPage' in route
   const current = groups.flatMap((group) => group.items).find((item) => item.to === key)
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        commandPaletteOpen.set((open) => !open)
-      }
+      if (
+        (!event.metaKey && !event.ctrlKey) ||
+        event.altKey ||
+        event.shiftKey ||
+        event.isComposing ||
+        event.key.toLowerCase() !== 'k'
+      )
+        return
+      event.preventDefault()
+      if (event.repeat) return
+      if (commandPalette.get()) commandPalette.set(null)
+      else openCommandPalette()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -129,14 +141,19 @@ export function Shell() {
       </AnimatePresence>
 
       <div className="relative z-0 flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center gap-3 px-4 lg:hidden">
+        <header className="flex h-14 shrink-0 items-center gap-3 px-4 lg:hidden">
           <Button variant="ghost" size="icon" aria-label="打开导航" onClick={() => setMobileOpen(true)}>
             <MenuIcon className="size-4.5" />
           </Button>
           <Logo className="size-6" />
           <span className="font-semibold tracking-tight">AsaBot</span>
         </header>
-        <main className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+        <main
+          className={cn(
+            'min-h-0 flex-1',
+            pluginPage ? 'overflow-clip' : 'overflow-y-auto [scrollbar-gutter:stable]',
+          )}
+        >
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
               key={key}
@@ -144,9 +161,12 @@ export function Shell() {
               animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
               exit={{ opacity: 0, y: -6, filter: 'blur(2px)', transition: { duration: 0.12 } }}
               transition={softSpring}
-              className="mx-auto w-full max-w-[1180px] px-5 py-7 lg:px-10 lg:py-9"
+              className={cn(
+                'mx-auto w-full max-w-[1180px] px-5 lg:px-10',
+                pluginPage ? 'flex h-full min-h-0 flex-col py-4 lg:py-5' : 'py-7 lg:py-9',
+              )}
             >
-              <Page />
+              {pluginPage ? <PluginPageHost path={key} /> : <route.Page />}
             </motion.div>
           </AnimatePresence>
         </main>
@@ -181,7 +201,7 @@ function Sidebar({
 
       <button
         type="button"
-        onClick={() => commandPaletteOpen.set(true)}
+        onClick={() => openCommandPalette()}
         className="group mb-5 flex h-9 cursor-pointer items-center gap-2 rounded-[10px] border border-border bg-surface px-2.5 text-[13px] text-fg-3 shadow-card transition-colors hover:border-border-strong hover:text-fg-2"
       >
         <Search className="size-3.5" />

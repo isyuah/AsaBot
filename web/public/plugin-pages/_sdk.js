@@ -9,6 +9,7 @@
   const listeners = new Map()
   const themeListeners = new Set()
   let nextId = 1
+  let shortcutFocus = null
   const theme = { mode: 'light', tokens: {} }
 
   function post(message) {
@@ -33,7 +34,10 @@
     const data = event.data
     if (!data || data.asabot !== 1) return
     if (data.kind === 'theme') applyTheme(data)
-    else if (data.kind === 'event') {
+    else if (data.kind === 'restore-focus') {
+      if (shortcutFocus?.isConnected) shortcutFocus.focus({ preventScroll: true })
+      shortcutFocus = null
+    } else if (data.kind === 'event') {
       for (const listener of listeners.get(data.topic) ?? []) listener(data.data)
     } else if (typeof data.id === 'number' && pending.has(data.id)) {
       const resolve = pending.get(data.id)
@@ -41,6 +45,27 @@
       resolve({ status: data.status, data: data.body })
     }
   })
+
+  window.addEventListener(
+    'keydown',
+    (event) => {
+      if (
+        parent === window ||
+        (!event.ctrlKey && !event.metaKey) ||
+        event.altKey ||
+        event.shiftKey ||
+        event.isComposing ||
+        event.key.toLowerCase() !== 'k'
+      )
+        return
+      event.preventDefault()
+      if (event.repeat) return
+      const element = document.activeElement
+      shortcutFocus = element instanceof HTMLElement || element instanceof SVGElement ? element : null
+      post({ kind: 'open-command-palette' })
+    },
+    { capture: true },
+  )
 
   /** Calls one of this plugin's panel routes. Resolves with the HTTP status (0 on network failure) and the parsed body. */
   function request(path, init = {}) {

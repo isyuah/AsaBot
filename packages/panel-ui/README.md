@@ -22,7 +22,7 @@ export function App() {
 - `PanelUIProvider` 提供 Tooltip 上下文，并遵循用户的减少动效偏好。
 - `PluginPageLayout` 适合放在 iframe 内容的最外层。`toolbar` 固定在顶部，正文超出时在内部滚动。简单 HTML 插件也可以直接使用 iframe 内的文档滚动。
 - `@asabot/panel-ui` 提供按钮、表单、卡片、弹窗、侧滑面板、Tab、头像、消息片段、趋势图、处理轨迹等组件。`Markdown` 从 `@asabot/panel-ui/markdown` 导入，也可单独懒加载。
-- 在插件的 `index.html` 中用 `<script src="/plugin-pages/_sdk.js"></script>` 加载面板 SDK，接收主题更新、调用插件接口和显示面板通知。弹窗和菜单在插件 iframe 内显示。
+- 在插件的 `index.html` 中用 `<script src="/plugin-pages/_sdk.js"></script>` 加载面板 SDK，接收主题更新、调用插件接口和显示面板通知。在插件内按 `Ctrl/⌘ + K` 也可以打开控制台命令面板。插件自己的弹窗和菜单在 iframe 内显示。
 - 前端构建产物使用相对路径（Vite 设置 `base: './'`），再用 `ctx.panel.page({ title, root })` 将入口目录指向构建产物。
 
 ## 运行示例插件

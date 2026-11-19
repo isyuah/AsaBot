@@ -4,17 +4,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Command } from 'cmdk'
 import { CornerDownLeft, FlaskConical, LogOut, Monitor, Moon, RotateCw, Search, Sun } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import type { ReactNode } from 'react'
+import { type ReactNode, useRef } from 'react'
 import { toast } from 'sonner'
 import { api } from '../lib/api.ts'
 import { navigate } from '../lib/router.tsx'
 import { resetSession } from '../lib/session.ts'
 import { useTheme } from '../lib/theme.tsx'
-import { commandPaletteOpen, playgroundDraft, useCommandPaletteOpen } from '../lib/ui-state.ts'
+import { commandPalette, playgroundDraft, useCommandPalette } from '../lib/ui-state.ts'
 import { navGroups } from './layout/nav.ts'
 
 export function CommandPalette() {
-  const open = useCommandPaletteOpen()
+  const request = useCommandPalette()
+  const open = request !== null
+  const input = useRef<HTMLInputElement>(null)
+  const restoreFocus = useRef<(() => void) | null>(null)
   const client = useQueryClient()
   const { setPreference } = useTheme()
   const plugins = useQuery({ queryKey: ['plugins'], queryFn: api.plugins, enabled: open })
@@ -27,14 +30,14 @@ export function CommandPalette() {
     },
   })
 
-  const close = () => commandPaletteOpen.set(false)
+  const close = () => commandPalette.set(null)
   const run = (action: () => void) => {
     close()
     action()
   }
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={commandPaletteOpen.set}>
+    <DialogPrimitive.Root open={open} onOpenChange={close}>
       <AnimatePresence>
         {open && (
           <DialogPrimitive.Portal forceMount>
@@ -47,30 +50,45 @@ export function CommandPalette() {
                 transition={{ duration: 0.18 }}
               />
             </DialogPrimitive.Overlay>
-            <div className="pointer-events-none fixed inset-0 z-50 flex justify-center px-4 pt-[14vh]">
-              <DialogPrimitive.Content asChild forceMount aria-describedby={undefined}>
+            <div className="pointer-events-none fixed inset-0 z-50 flex justify-center px-4 pt-[14dvh] pb-4">
+              <DialogPrimitive.Content
+                asChild
+                forceMount
+                aria-describedby={undefined}
+                onOpenAutoFocus={(event) => {
+                  event.preventDefault()
+                  restoreFocus.current = request?.restoreFocus ?? null
+                  input.current?.focus({ preventScroll: true })
+                }}
+                onCloseAutoFocus={(event) => {
+                  event.preventDefault()
+                  if (commandPalette.get()) return
+                  restoreFocus.current?.()
+                  restoreFocus.current = null
+                }}
+              >
                 <motion.div
                   initial={{ opacity: 0, scale: 0.97, y: -8 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.98, y: -4 }}
                   transition={spring}
-                  className="pointer-events-auto h-fit w-full max-w-[580px] overflow-hidden rounded-2xl border border-border bg-surface shadow-pop outline-none"
+                  className="pointer-events-auto flex h-fit max-h-full w-full max-w-[580px] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-pop outline-none"
                 >
                   <DialogPrimitive.Title className="sr-only">命令面板</DialogPrimitive.Title>
                   <Command
                     loop
-                    className="[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:pt-3 [&_[cmdk-group-heading]]:pb-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-fg-3"
+                    className="flex min-h-0 flex-col [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:pt-3 [&_[cmdk-group-heading]]:pb-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-fg-3"
                   >
-                    <div className="flex items-center gap-2.5 border-b border-border px-4">
+                    <div className="flex shrink-0 items-center gap-2.5 border-b border-border px-4">
                       <Search className="size-4 text-fg-3" />
                       <Command.Input
-                        autoFocus
+                        ref={input}
                         placeholder="输入页面、插件或命令…"
-                        className="h-13 flex-1 bg-transparent text-[14.5px] text-fg outline-none placeholder:text-fg-3"
+                        className="h-13 min-w-0 flex-1 bg-transparent text-[14.5px] text-fg outline-none placeholder:text-fg-3"
                       />
                       <Kbd>Esc</Kbd>
                     </div>
-                    <Command.List className="max-h-[min(420px,60vh)] overflow-y-auto overscroll-contain p-1.5 [&_[cmdk-list-sizer]]:transition-[height]">
+                    <Command.List className="min-h-0 max-h-[min(420px,60dvh)] overflow-y-auto overscroll-contain p-1.5 [&_[cmdk-list-sizer]]:transition-[height]">
                       <Command.Empty className="py-10 text-center text-[13px] text-fg-3">
                         没有匹配的结果
                       </Command.Empty>
@@ -168,7 +186,7 @@ export function CommandPalette() {
                         </PaletteItem>
                       </Command.Group>
                     </Command.List>
-                    <div className="flex items-center gap-3 border-t border-border bg-surface-2/60 px-4 py-2 text-[11.5px] text-fg-3">
+                    <div className="flex shrink-0 items-center gap-3 border-t border-border bg-surface-2/60 px-4 py-2 text-[11.5px] text-fg-3">
                       <span className="flex items-center gap-1">
                         <Kbd>↑</Kbd>
                         <Kbd>↓</Kbd>选择

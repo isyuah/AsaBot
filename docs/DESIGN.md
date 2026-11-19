@@ -1248,14 +1248,17 @@ ctx.panel.push(topic: string, data: unknown)        // 通过面板实时推送�
 - **面板宿主**：
   - 路由为 `/pages/<name>`，用 `<iframe sandbox="allow-scripts allow-forms allow-popups">` 加载页面，不给 `allow-same-origin`，页面因此读不到面板的 cookie 和 DOM。
   - 侧边栏增加“插件页面”分组。
+  - 页面标题固定在 iframe 上方，iframe 填满剩余空间，宿主正文不滚动。插件可以直接滚动 iframe 内的文档，或用 `PluginPageLayout` 固定工具栏，把滚动放在正文区域。
   - `PluginView` 新增 `page?: { title: string; icon?: string }`。
-- **桥接协议**（postMessage；宿主只处理 `event.source` 是该 iframe 的消息）：
+- **桥接协议**（postMessage；宿主只处理当前页面 iframe 发来的消息）：
   - 页面 → 宿主：
     - `{ asabot: 1, kind: 'ready' }`：SDK 加载后立即发送，宿主收到后回复一次 theme；
     - `{ asabot: 1, id, kind: 'fetch', path, method, body? }`：宿主带 cookie 请求 `/api/panel/ext/<name><path>`，然后回复 `{ asabot: 1, id, status, body }`。网络失败时 `status` 为 0；
-    - `{ asabot: 1, kind: 'toast', text, level? }`：在面板中显示提示。
+    - `{ asabot: 1, kind: 'toast', text, level? }`：在面板中显示提示；
+    - `{ asabot: 1, kind: 'open-command-palette' }`：SDK 在插件页捕获 `Ctrl/⌘ + K` 后发送。宿主仅在该 iframe 有焦点时打开命令面板，关闭时若仍在原页面则把焦点还给插件。
   - 宿主 → 页面：
     - `{ asabot: 1, kind: 'theme', mode, tokens }`：收到 ready 时和主题切换时发送；
+    - `{ asabot: 1, kind: 'restore-focus' }`：命令面板关闭后，SDK 把焦点还给触发快捷键的控件；
     - `{ asabot: 1, kind: 'event', topic, data }`：转发该插件的 `plugin-event`。
 - **客户端 SDK**：
   - SDK 是面板的一部分，源文件为 `web/public/plugin-pages/_sdk.js`，随面板构建进入 `web/dist`，由现有的面板静态托管在 `/plugin-pages/_sdk.js` 提供。`/plugin-pages/:name/*` 路由只处理合法的插件名，以 `_` 开头的路径交给面板静态托管。
