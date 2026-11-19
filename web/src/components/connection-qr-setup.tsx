@@ -110,6 +110,7 @@ export function ConnectionQrSetup({
   const failure = startError ?? query.error
   const status = failure ? 'failed' : (draft?.status ?? 'starting')
   const hint: { label: string; detail?: string; Icon: typeof ScanLine } = copy[status]
+  const detail = failure?.message ?? (draft?.status === 'failed' ? draft.detail : undefined) ?? hint.detail
   const authorized = !failure && draft?.status === 'authorized' ? draft : undefined
   const refreshable = status === 'expired' || status === 'already-bound' || status === 'failed'
   return (
@@ -135,9 +136,7 @@ export function ConnectionQrSetup({
                   />
                   {hint.label}
                 </h2>
-                {(failure || hint.detail) && (
-                  <p className="text-[12.5px] leading-relaxed text-fg-3">{failure?.message ?? hint.detail}</p>
-                )}
+                {detail && <p className="text-[12.5px] leading-relaxed text-fg-3">{detail}</p>}
                 {authorized && (
                   <>
                     <p className="break-all font-mono text-xs text-fg-3">{authorized.selfId}</p>

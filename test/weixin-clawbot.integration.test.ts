@@ -13,31 +13,36 @@ import { createApp, definePlugin, isSegment, loadConfig, type Session, seg } fro
 
 const platform = 'weixin-clawbot'
 const apiHost = 'ilinkai.weixin.qq.com'
+const regionalHost = 'idc-3.weixin.qq.com'
+const wechatHost = 'ilinkai.wechat.com'
 const cdnHost = 'novac2c.cdn.weixin.qq.com'
 const panelFetch = globalThis.fetch
 const setups = '/connection-setups'
 
 type Fields = Record<string, unknown>
+type QrResponse = Fields | (() => Response)
 
 class MockIlink {
   readonly password = randomUUID()
   readonly sent: { token: string; msg: Fields }[] = []
   readonly updateRequests: { token: string; cursor: unknown }[] = []
   readonly qrRequests: { id: string; host: string; code: string | null; signal: AbortSignal }[] = []
-  readonly pendingQr: Fields[][] = []
+  readonly pendingQr: QrResponse[][] = []
   readonly nextUpdates = new Map<string, (Fields | Response)[]>()
   readonly assets = new Map<string, Buffer>()
   readonly mediaRequests: string[] = []
   readonly uploads = new Map<string, { key: string; type: number; raw: Buffer }>()
   readonly typing: Fields[] = []
   readonly typingTicket = randomUUID()
-  private readonly qr = new Map<string, Fields[]>()
+  private readonly qr = new Map<string, QrResponse[]>()
   private readonly uploadKeys = new Map<string, Fields>()
 
   mockFetch(): void {
     vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : input)
-      return url.hostname.endsWith('.weixin.qq.com') ? this.request(url, init) : panelFetch(input, init)
+      return url.hostname.endsWith('.weixin.qq.com') || url.hostname === wechatHost
+        ? this.request(url, init)
+        : panelFetch(input, init)
     })
   }
 
@@ -121,9 +126,10 @@ class MockIlink {
         const signal = init?.signal
         if (!signal) throw new Error('Missing QR abort signal')
         this.qrRequests.push({ id, host: url.hostname, code: url.searchParams.get('verify_code'), signal })
-        return this.qr.get(id)?.length
-          ? Response.json(this.qr.get(id)?.shift())
-          : sleep(60_000, Response.json({ status: 'wait' }), { signal })
+        const next = this.qr.get(id)?.shift()
+        if (typeof next === 'function') return next()
+        if (next) return Response.json(next)
+        return sleep(60_000, Response.json({ status: 'wait' }), { signal })
       }
       case 'getupdates': {
         this.updateRequests.push({ token, cursor: data.get_updates_buf })
@@ -190,7 +196,7 @@ async function status(panel: Panel, id: string, expected: string) {
     async () => {
       const response = await panel(`${setups}/${id}`)
       const state = await response.json()
-      expect(state.status).toBe(expected)
+      expect(state.status, state.detail).toBe(expected)
       return state
     },
     { timeout: 4000, interval: 25 },
@@ -281,15 +287,19 @@ afterEach(() => vi.unstubAllGlobals())
 describe('微信 ClawBot', () => {
   it('checks regional handoff and verification, then saves once and grants only bot.admin', async () => {
     const mock = new MockIlink()
-    const token = randomUUID()
+    const token = `v1:${randomUUID()}`
     const context = randomUUID()
     const selfId = 'first@im.bot'
     mock.pendingQr.push([
       { status: 'wait' },
-      { status: 'scaned_but_redirect', redirect_host: 'ilinkai-sg.weixin.qq.com' },
+      { status: 'scaned_but_redirect', redirect_host: regionalHost },
+      { ...mock.authorization(selfId, token, 'scanner'), status: 'confirmed_but_need_verifycode' },
+      { status: 'wait' },
       { status: 'need_verifycode' },
-      { status: 'need_verifycode' },
-      mock.authorization(selfId, token, 'scanner'),
+      () => new Response(token, { status: 524 }),
+      { status: 'scaned_but_redirect', redirect_host: wechatHost },
+      { status: 'scaned' },
+      { ...mock.authorization(selfId, ` ${token} `, 'scanner'), baseurl: `https://${wechatHost}` },
     ])
     const t = await fixture(mock)
     try {
@@ -299,7 +309,9 @@ describe('微信 ClawBot', () => {
       const id = await start(panel)
       const waiting = await status(panel, id, 'waiting')
       expect(waiting.image).toMatch(/^data:image\/png;base64,/)
-      await status(panel, id, 'verification')
+      const verification = await status(panel, id, 'verification')
+      expect(verification.retry).toBe(false)
+      expect(JSON.stringify(verification)).not.toContain(token)
       const other = await t.panel()
       expect((await other(`${setups}/${id}`)).status).toBe(404)
       expect((await other(`${setups}/${id}`, 'DELETE', {})).status).toBe(404)
@@ -324,9 +336,13 @@ describe('微信 ClawBot', () => {
       expect(mock.qrRequests.map(({ host, code }) => [host, code])).toEqual([
         [apiHost, null],
         [apiHost, null],
-        ['ilinkai-sg.weixin.qq.com', null],
-        ['ilinkai-sg.weixin.qq.com', '1111'],
-        ['ilinkai-sg.weixin.qq.com', '2468'],
+        [regionalHost, null],
+        [regionalHost, '1111'],
+        [regionalHost, '1111'],
+        [regionalHost, '2468'],
+        [regionalHost, '2468'],
+        [wechatHost, '2468'],
+        [wechatHost, null],
       ])
       expect(t.app.config.connections).toEqual([])
       expect(mock.updateRequests).toEqual([])
@@ -370,12 +386,33 @@ describe('微信 ClawBot', () => {
       await vi.waitFor(() => expect(mock.updateRequests.at(-1)?.cursor).toBe('blocked-cursor'))
       expect(mock.sent).toHaveLength(4)
       const visible = JSON.stringify([await (await panel('/connections')).json(), t.sessions, t.log])
-      for (const secret of [token, context, 'first-cursor', 'ordinary-context', 'https://ilinkai'])
+      for (const secret of [token, context, 'first-cursor', 'ordinary-context', wechatHost])
         expect(visible).not.toContain(secret)
     } finally {
       await t.dispose()
     }
   }, 12_000)
+
+  it('reports the invalid credential field without revealing its value', async () => {
+    const mock = new MockIlink()
+    const secret = randomUUID()
+    mock.pendingQr.push(
+      [{ status: 'confirmed', bot_token: secret }],
+      [mock.authorization('first@im.bot', `${secret}\r\nInvalid header`)],
+    )
+    const t = await fixture(mock)
+    try {
+      const panel = await t.panel()
+      const missingId = await status(panel, await start(panel), 'failed')
+      const invalidToken = await status(panel, await start(panel), 'failed')
+      expect(missingId.detail).toContain('机器人 ID')
+      expect(invalidToken.detail).toContain('登录令牌')
+      expect(JSON.stringify([missingId, invalidToken, t.log])).not.toContain(secret)
+      expect(t.app.config.connections).toEqual([])
+    } finally {
+      await t.dispose()
+    }
+  })
 
   it('stops upstream QR polling when expired, cancelled or logged out', async () => {
     const mock = new MockIlink()
@@ -686,7 +723,10 @@ describe('微信 ClawBot', () => {
     try {
       const panel = await t.panel()
       const id = await start(panel)
-      expect(JSON.stringify(await status(panel, id, 'failed'))).not.toContain(secret)
+      const failed = await status(panel, id, 'failed')
+      expect(failed.detail).toContain('扫码区域地址不受支持')
+      expect(JSON.stringify(failed)).not.toContain(secret)
+      expect(t.log.some((line) => line.includes(failed.detail))).toBe(true)
       expect(mock.qrRequests).toHaveLength(1)
       await vi.waitFor(() => expect(t.sessions).toHaveLength(1))
       const bot = t.app.getBot(platform, selfId)

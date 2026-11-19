@@ -486,7 +486,8 @@ export interface AdapterView {
   setup?: { kind: 'qr' }
 }
 export type ConnectionSetup = { id: string; expiresAt: number } & (
-  | { status: 'starting' | 'scanned' | 'expired' | 'already-bound' | 'failed' }
+  | { status: 'starting' | 'scanned' | 'expired' | 'already-bound' }
+  | { status: 'failed'; detail?: string }
   | { status: 'waiting'; image: string }
   | { status: 'verification'; retry: boolean }
   | { status: 'authorized'; selfId: string; replaces?: string; missingAdmin: boolean }

@@ -6,6 +6,13 @@ export class ConfigError extends Error {
   }
 }
 
+export class QrSetupError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'QrSetupError'
+  }
+}
+
 /** 平台不支持请求的操作。 */
 export class UnsupportedError extends Error {
   readonly platform: string

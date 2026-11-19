@@ -72,6 +72,7 @@ export {
   NotConnectedError,
   PluginConfigError,
   PluginError,
+  QrSetupError,
   SendBlockedError,
   SendQueueFullError,
   UnsupportedError,

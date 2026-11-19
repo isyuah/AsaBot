@@ -76,7 +76,8 @@ export interface AdapterHost {
 }
 
 export type QrSetupUpdate =
-  | { status: 'waiting' | 'scanned' | 'verification' | 'expired' | 'already-bound' }
+  | { status: 'waiting' | 'scanned' | 'expired' | 'already-bound' }
+  | { status: 'verification'; retry: boolean }
   | { status: 'authorized'; config: unknown; adminUserId?: string }
 
 export interface QrSetupChallenge {

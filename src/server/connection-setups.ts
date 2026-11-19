@@ -5,6 +5,7 @@ import { z } from 'zod'
 import type { QrConnectionSetup, QrSetupChallenge } from '../core/adapter.ts'
 import type { App } from '../core/app.ts'
 import { connectionSchema } from '../core/connections.ts'
+import { QrSetupError } from '../core/errors.ts'
 import { actorIdentitySchema, botIdentitySchema } from '../core/identity.ts'
 import {
   ConnectionSetupError,
@@ -20,7 +21,8 @@ export const connectionSetupInput = z.strictObject({
 export const verificationInput = z.strictObject({ code: z.string().trim().min(1).max(64) })
 
 type SetupState =
-  | { status: 'starting' | 'scanned' | 'expired' | 'already-bound' | 'failed' }
+  | { status: 'starting' | 'scanned' | 'expired' | 'already-bound' }
+  | { status: 'failed'; detail?: string }
   | { status: 'waiting'; image: string }
   | { status: 'verification'; retry: boolean }
   | { status: 'authorized'; selfId: string; replaces?: string; missingAdmin: boolean }
@@ -184,7 +186,7 @@ export class ConnectionSetups {
         signal.throwIfAborted()
         switch (update.status) {
           case 'verification':
-            draft.state = { status: 'verification', retry: code !== undefined }
+            draft.state = { status: 'verification', retry: update.retry }
             return
           case 'authorized': {
             const definition = this.app.connections.definition(draft.adapter)
@@ -213,8 +215,14 @@ export class ConnectionSetups {
         code = undefined
         await sleep(750, undefined, { signal, ref: false })
       }
-    } catch {
-      if (!signal.aborted) this.finish(draft, { status: 'failed' })
+    } catch (error) {
+      if (signal.aborted) return
+      const detail = error instanceof QrSetupError ? error.message : undefined
+      this.app.logger.warn(
+        { adapter: draft.adapter, stage: draft.state.status, detail },
+        'Connection setup failed',
+      )
+      this.finish(draft, { status: 'failed', detail })
     }
   }
 }

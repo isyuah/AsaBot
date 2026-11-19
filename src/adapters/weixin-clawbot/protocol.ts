@@ -21,7 +21,7 @@ export function ilinkOrigin(value: string): string {
     url.search ||
     url.hash ||
     url.pathname !== '/' ||
-    !/^[a-z0-9-]*ilink[a-z0-9-]*(?:\.[a-z0-9-]+)*\.weixin\.qq\.com$/.test(url.hostname)
+    (url.hostname !== 'ilinkai.wechat.com' && !/^(?:ilinkai|idc-\d+)\.weixin\.qq\.com$/.test(url.hostname))
   )
     throw new Error('微信返回了不受信任的 iLink 地址')
   return url.origin
@@ -31,9 +31,10 @@ export const accountSchema = z.strictObject({
   selfId: botIdentitySchema.shape.selfId.max(512),
   token: z
     .string()
+    .trim()
     .min(1)
     .max(4096)
-    .regex(/^[A-Za-z0-9._~+/-]+=*$/)
+    .regex(/^[ -~]+$/)
     .meta({ writeOnly: true }),
   apiBaseUrl: z
     .string()
@@ -119,10 +120,12 @@ export type IlinkRequest = <T extends z.ZodType>(
 
 export class IlinkError extends Error {
   readonly expired: boolean
+  readonly retryable: boolean
 
-  constructor(operation: string, details: string, expired = false) {
+  constructor(operation: string, details: string, { expired = false, retryable = false } = {}) {
     super(`微信 ${operation} ${details}`)
     this.expired = expired
+    this.retryable = retryable
   }
 }
 
@@ -166,7 +169,7 @@ export async function ilink<T extends z.ZodType>(
     headers.set('X-WECHAT-UIN', Buffer.from(String(randomBytes(4).readUInt32BE())).toString('base64'))
   }
   if (token) headers.set('Authorization', `Bearer ${token}`)
-  let result: unknown
+  let bytes: Buffer
   try {
     const response = await fetch(url, {
       method: data ? 'POST' : 'GET',
@@ -181,25 +184,36 @@ export async function ilink<T extends z.ZodType>(
     })
     if (!response.ok) {
       await response.body?.cancel()
-      throw new IlinkError(operation, `失败（HTTP ${response.status}）`, !!token && response.status === 401)
+      const status = response.status
+      throw new IlinkError(operation, `失败（HTTP ${status}）`, {
+        expired: !!token && status === 401,
+        retryable: status === 408 || status === 429 || status >= 500,
+      })
     }
+    bytes = await limitedBytes(response, jsonLimit)
+  } catch (error) {
+    signal.throwIfAborted()
+    if (error instanceof IlinkError) throw error
+    if (deadline.aborted) throw deadline.reason
+    throw new IlinkError(operation, '请求失败', { retryable: true })
+  }
+  let result: unknown
+  try {
     result = JSON.parse(
-      (await limitedBytes(response, jsonLimit)).toString('utf8'),
+      bytes.toString('utf8'),
       (key: string, value: unknown, context?: { source: string }) =>
         typeof value === 'number' && (key === 'message_id' || key === 'msg_id' || key === 'svr_id')
           ? context?.source
           : value,
     )
-  } catch (error) {
-    signal.throwIfAborted()
-    if (error instanceof IlinkError) throw error
-    if (deadline.aborted) throw deadline.reason
-    throw new IlinkError(operation, '请求失败')
+  } catch {
+    throw new IlinkError(operation, '响应格式不正确')
   }
   const status = errorSchema.safeParse(result)
   if (status.success) {
     const { ret, errcode } = status.data
-    if (ret === -14 || errcode === -14) throw new IlinkError(operation, '授权已失效，请重新扫码', true)
+    if (ret === -14 || errcode === -14)
+      throw new IlinkError(operation, '授权已失效，请重新扫码', { expired: true })
     const code = ret || errcode
     if (code) throw new IlinkError(operation, `失败（错误码 ${code}）`)
   }
