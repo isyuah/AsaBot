@@ -128,6 +128,7 @@ const packagesSchema = z
 const pluginEntrySchema = z
   .object({
     enabled: z.boolean().default(true),
+    defaultOnNewBots: z.boolean().optional(),
     config: z.unknown().optional(),
   })
   .strict()

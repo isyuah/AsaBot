@@ -92,6 +92,7 @@ function renderText(message: Message): string {
 export default definePlugin({
   name: 'long-message',
   description: '将长消息转发、渲染或分段发送',
+  defaultOnNewBots: true,
   inject: { optional: ['render'] },
   config: z.object({
     threshold: z.number().int().positive().default(1000),

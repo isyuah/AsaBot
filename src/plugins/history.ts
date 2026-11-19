@@ -149,6 +149,7 @@ export function cleanHistory(
 export default definePlugin({
   name: 'history',
   description: '记录消息和分发追踪',
+  defaultOnNewBots: true,
   config: z.object({
     retention: durationSchema.default(7 * 86_400_000),
     maxMessages: z.number().int().nonnegative().default(100_000),

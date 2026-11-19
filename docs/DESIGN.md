@@ -622,6 +622,7 @@ type Target = { type: 'group' | 'private'; id: string }
 | `POST /send` | `{ platform?, selfId?, target: Target, message: string \| Segment[] }` → `{ messageId }`。不指定 Bot 时使用第一个在线的 |
 | `GET /plugins` | `PluginView[]` |
 | `POST /plugins/:name/enable` / `disable` / `reload` | 返回最新的 `PluginView`；失败（例如 admin 不允许停用）返回 409 和原因 |
+| `PUT /plugins/:name/bot-default` | `{ defaultOnNewBots: boolean }`。设置新机器人的初始开关，返回最新的 `PluginView` |
 | `PUT /plugins/:name/config` | `{ config }`。校验失败返回 400，`issues` 带字段路径；成功返回最新的 `PluginView` |
 | `GET /plugins/:name/groups` | `{ groupKey, enabled }[]`：只列出显式设置过的群 |
 | `PUT /plugins/:name/groups/:groupKey` | `{ enabled }` |
@@ -1462,6 +1463,7 @@ type HttpInit = RequestInit & { timeout?: Duration; proxy?: boolean | string; ma
 - 群规则键统一为 `platform:selfId:group:groupId`，同平台的不同机器人拥有独立群规则。访问控制列表仍为框架级平台用户/群列表。
 - 插件可以声明 `capabilities: { required?, optional? }`，各项包含 `segments`、`textStyles`、`actions`。能力缺失仅用于兼容性提示；`inject.required` 服务缺失仍阻止插件加载。
 - `plugin_bot_policy` 保存机器人插件开关与配置覆盖。机器人插件停用影响事件、命令、发送前钩子、API 拦截和该插件的后台 Bot API 调用。插件实例、服务与任务调度仍为全局资源。
+- 插件首次载入时，如果 `plugins.<name>.defaultOnNewBots` 未设置，保存插件声明的值，未声明时保存 `false`。账号首次登记时，`bot_plugin_defaults` 保存当时默认启用的插件。全局停用优先；全局启用时使用机器人的开关覆盖或登记时的初始值，再检查群开关。调试台使用全局启用的插件。
 - `ctx.config` 是全局配置；`ctx.configFor(botOrSession | groupKey)` 按全局原始配置 → 机器人覆盖 → 群覆盖递归合并对象、整体替换数组，再执行 schema 解析和默认值填充。删除覆盖项恢复继承。
 - 保存父级配置前校验所有受影响的子级有效配置，失败时拒绝写入；不再静默回落全局配置。本节替代 24.5 中的顶层覆盖及失效回落规则。
 

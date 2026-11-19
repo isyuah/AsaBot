@@ -82,6 +82,7 @@ export function createAdminPlugin(app: App) {
   return definePlugin({
     name: 'admin',
     description: '管理插件与访问控制',
+    defaultOnNewBots: true,
     setup(ctx) {
       const log = ctx.logger
       ctx

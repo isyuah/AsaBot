@@ -126,7 +126,7 @@ describe('task reliability', () => {
     storage.close()
     const db = new DatabaseSync(join(dataDir, 'asabot.db'))
     db.exec(
-      "DROP TABLE bot_admins; DROP TABLE plugin_bot_policy; DELETE FROM plugin_tables WHERE table_name IN ('bot_admins', 'plugin_bot_policy'); DROP TABLE task_attempts; DROP TABLE tasks; DELETE FROM plugin_tables WHERE table_name IN ('tasks', 'task_attempts'); CREATE TABLE scheduled_tasks (plugin TEXT, name TEXT, key TEXT, run_at INTEGER, payload TEXT, PRIMARY KEY (plugin,name,key)); INSERT INTO plugin_tables VALUES ('core', 'scheduled_tasks'); UPDATE migrations SET version = 4 WHERE plugin = 'core';",
+      "DROP TABLE bot_admins; DROP TABLE plugin_bot_policy; DROP TABLE bot_plugin_defaults; DELETE FROM plugin_tables WHERE table_name IN ('bot_admins', 'plugin_bot_policy', 'bot_plugin_defaults'); DROP TABLE task_attempts; DROP TABLE tasks; DELETE FROM plugin_tables WHERE table_name IN ('tasks', 'task_attempts'); CREATE TABLE scheduled_tasks (plugin TEXT, name TEXT, key TEXT, run_at INTEGER, payload TEXT, PRIMARY KEY (plugin,name,key)); INSERT INTO plugin_tables VALUES ('core', 'scheduled_tasks'); UPDATE migrations SET version = 4 WHERE plugin = 'core';",
     )
     db.prepare('INSERT INTO scheduled_tasks VALUES (?, ?, ?, ?, ?)').run(
       'jobs',

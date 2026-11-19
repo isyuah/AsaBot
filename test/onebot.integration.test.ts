@@ -730,6 +730,7 @@ describe('OneBot neutral management and forwarding', () => {
 
   it('converts forward nodes in both directions and applies hooks to OneBot sends', async () => {
     const filter = definePlugin({
+      defaultOnNewBots: true,
       name: 'send-filter',
       setup(ctx) {
         ctx.beforeSend(({ message }) => {
@@ -822,6 +823,7 @@ describe('OneBot neutral management and forwarding', () => {
   it('intercepts OneBot sends before hooks and honors replacement results on every send path', async () => {
     const order: string[] = []
     const filter = definePlugin({
+      defaultOnNewBots: true,
       name: 'replacement',
       setup(ctx) {
         ctx.interceptApi(async (call, next) => {

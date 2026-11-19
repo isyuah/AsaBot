@@ -13,6 +13,7 @@ export function createStatusPlugin(app: App) {
   return definePlugin({
     name: 'status',
     description: '查看运行状态',
+    defaultOnNewBots: true,
     setup(ctx) {
       ctx
         .command('ping')

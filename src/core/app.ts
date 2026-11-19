@@ -337,6 +337,7 @@ export class App implements AdapterHost {
   }
 
   registerBot(bot: Bot): void {
+    this.policies.enroll(bot, () => this.plugins.defaultsForNewBot())
     this.bots.register(bot)
     this.apiInterceptors.wrap(bot)
   }
@@ -391,6 +392,7 @@ export class App implements AdapterHost {
     try {
       this.tasks.start()
       await this.plugins.start()
+      this.policies.captureExistingDefaults(this.plugins.list().map(({ name }) => name))
     } catch (error) {
       await this.plugins.stop()
       this.tasks.stop()

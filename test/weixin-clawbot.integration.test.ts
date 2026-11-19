@@ -227,6 +227,7 @@ async function fixture(mock: MockIlink, connections: Fields[] = []) {
     app.plugins.register(
       definePlugin({
         name: 'weixin-fixture',
+        defaultOnNewBots: true,
         setup(ctx) {
           ctx.on('message.private', (session) => {
             sessions.push(session)

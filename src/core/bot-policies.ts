@@ -5,6 +5,7 @@ import type { Storage } from './storage/index.ts'
 export class BotPolicies {
   private readonly adminUsers = new Map<string, Set<string>>()
   private readonly plugins = new Map<string, { enabled?: boolean; config?: Record<string, unknown> }>()
+  private readonly defaults = new Map<string, Set<string>>()
   private readonly subscribers = new Set<() => void>()
   constructor(privateStorage: Storage) {
     this.storage = privateStorage
@@ -23,6 +24,7 @@ export class BotPolicies {
   load(): void {
     this.adminUsers.clear()
     this.plugins.clear()
+    this.defaults.clear()
     for (const row of this.storage.db.prepare('SELECT bot_key, user_id FROM bot_admins').all()) {
       const key = String(row.bot_key)
       const users = this.adminUsers.get(key) ?? new Set<string>()
@@ -35,6 +37,33 @@ export class BotPolicies {
         ...(row.config === null ? {} : { config: JSON.parse(String(row.config)) as Record<string, unknown> }),
       })
     }
+    for (const row of this.storage.db
+      .prepare('SELECT * FROM bot_plugin_defaults WHERE plugins IS NOT NULL')
+      .all()) {
+      this.defaults.set(String(row.bot_key), new Set(JSON.parse(String(row.plugins)) as string[]))
+    }
+  }
+
+  captureExistingDefaults(plugins: string[]): void {
+    const defaults = new Set(plugins)
+    const migrated = this.storage.db
+      .prepare('UPDATE bot_plugin_defaults SET plugins = ? WHERE plugins IS NULL RETURNING bot_key')
+      .all(JSON.stringify(plugins))
+    for (const row of migrated) this.defaults.set(String(row.bot_key), defaults)
+  }
+
+  enroll(bot: BotIdentity, initialPlugins: () => string[]): void {
+    if (bot.platform === 'virtual') return
+    const key = botKey(bot)
+    if (this.defaults.has(key)) return
+    const plugins = initialPlugins()
+    this.storage.db.prepare('INSERT INTO bot_plugin_defaults VALUES (?, ?)').run(key, JSON.stringify(plugins))
+    this.defaults.set(key, new Set(plugins))
+  }
+
+  defaultPluginEnabled(bot: BotIdentity, plugin: string): boolean {
+    // The playground and events without a real account use globally enabled plugins.
+    return (bot.platform === 'virtual' ? undefined : this.defaults.get(botKey(bot)))?.has(plugin) ?? true
   }
 
   admins(bot: BotIdentity): string[] {

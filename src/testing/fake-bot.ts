@@ -24,10 +24,14 @@ export interface FakeSend {
 /** 用于轻量测试的机器人，记录发送内容并模拟部分 API。 */
 export class FakeBot implements Bot {
   readonly platform = 'fake'
-  readonly selfId = '10000'
+  readonly selfId: string
   readonly status = 'online'
   readonly capabilities = { segments: ['text'], textStyles: [], actions: botActions }
   readonly sends: FakeSend[] = []
+
+  constructor(selfId = '10000') {
+    this.selfId = selfId
+  }
 
   async sendPrivate(userId: string, content: Sendable): Promise<SendResult> {
     this.sends.push({ type: 'private', target: userId, message: normalizeSendable(content) })

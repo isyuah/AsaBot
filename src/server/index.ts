@@ -763,6 +763,13 @@ export class HttpServer implements ServerService {
         throw new HttpError(409, 'CONFLICT', state.error ?? 'Plugin operation failed')
       return c.json(pluginView(this.app, state))
     })
+    panel.put('/plugins/:name/bot-default', async (c) => {
+      const name = c.req.param('name')
+      this.requirePlugin(name)
+      const { defaultOnNewBots } = await body(c, z.object({ defaultOnNewBots: z.boolean() }).strict())
+      await this.app.plugins.setDefaultOnNewBots(name, defaultOnNewBots)
+      return c.json(pluginView(this.app, this.requirePlugin(name)))
+    })
     panel.put('/plugins/:name/config', async (c) => {
       const name = c.req.param('name')
       this.requirePlugin(name)

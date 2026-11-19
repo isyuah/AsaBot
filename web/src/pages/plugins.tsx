@@ -23,7 +23,7 @@ import {
   type Tone,
   Tooltip,
 } from '@asabot/panel-ui'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
   ArrowLeft,
@@ -74,12 +74,15 @@ function sourceLabel(plugin: PluginView): string {
 
 const skeletonKeys = ['a', 'b', 'c', 'd', 'e', 'f']
 
+function cachePlugin(client: QueryClient, plugin: PluginView) {
+  client.setQueryData<PluginView[]>(['plugins'], (list) =>
+    list?.map((item) => (item.name === plugin.name ? plugin : item)),
+  )
+}
+
 function usePluginMutations() {
   const client = useQueryClient()
-  const update = (plugin: PluginView) =>
-    client.setQueryData<PluginView[]>(['plugins'], (list) =>
-      list?.map((item) => (item.name === plugin.name ? plugin : item)),
-    )
+  const update = (plugin: PluginView) => cachePlugin(client, plugin)
   const action = useMutation({
     mutationFn: ({ name, action }: { name: string; action: 'enable' | 'disable' | 'reload' }) =>
       api.pluginAction(name, action),
@@ -589,6 +592,37 @@ function CapabilityRequirements({ plugin }: { plugin: PluginView }) {
 
 function PluginBots({ plugin }: { plugin: PluginView }) {
   const client = useQueryClient()
+  const saveDefault = useMutation({
+    mutationFn: (enabled: boolean) => api.pluginBotDefault(plugin.name, enabled),
+    onSuccess: (next) => cachePlugin(client, next),
+  })
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-5">
+        <div>
+          <h2 className="text-sm font-semibold">
+            <label htmlFor="new-bot-plugin-default" className="cursor-pointer">
+              新机器人默认启用
+            </label>
+          </h2>
+          <p className="mt-1 text-[13px] text-fg-3">仅影响之后首次接入的机器人。</p>
+        </div>
+        <Switch
+          id="new-bot-plugin-default"
+          className="ml-auto"
+          checked={saveDefault.isPending ? saveDefault.variables : plugin.defaultOnNewBots}
+          disabled={saveDefault.isPending}
+          onCheckedChange={(enabled) => saveDefault.mutate(enabled)}
+        />
+      </div>
+      {!plugin.enabled && <p className="text-[13px] text-fg-3">重新全局启用后，会按各机器人的开关生效。</p>}
+      <BotApplications plugin={plugin} />
+    </div>
+  )
+}
+
+function BotApplications({ plugin }: { plugin: PluginView }) {
+  const client = useQueryClient()
   const applications = useQuery({
     queryKey: ['pluginBots', plugin.name],
     queryFn: () => api.pluginBots(plugin.name),
@@ -631,7 +665,7 @@ function PluginBots({ plugin }: { plugin: PluginView }) {
               </Link>
               <Switch
                 aria-label={`在 ${bot.nickname ?? bot.selfId} 上启用`}
-                checked={application.overrideEnabled ?? true}
+                checked={application.overrideEnabled ?? application.botDefaultEnabled}
                 disabled={toggle.isPending}
                 onCheckedChange={(enabled) => toggle.mutate({ bot, enabled })}
               />
@@ -887,7 +921,7 @@ function GroupsTab({ plugin }: { plugin: PluginView }) {
   return (
     <div className="space-y-5">
       <p className="text-[13px] leading-relaxed text-fg-3">
-        默认在所有群生效。在这里关闭后，插件在该群的命令、监听器和中间件都会被跳过；私聊不受影响。
+        插件在机器人上启用后，默认在它的所有群生效。可单独关闭某个群，私聊不受影响。
         {plugin.configSchema && '按群覆盖配置请到“群组”页面中打开对应的群。'}
       </p>
       <form

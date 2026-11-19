@@ -67,6 +67,7 @@ export function pluginView(app: App, state: PluginState) {
   }
   return {
     ...state,
+    defaultOnNewBots: app.config.plugins[state.name]?.defaultOnNewBots ?? false,
     provides: [...state.provides],
     inject: [...state.inject],
     removable: state.source !== 'builtin',
@@ -112,6 +113,7 @@ export function botPluginView(app: App, bot: Bot, name: string) {
   return {
     ...pluginView(app, state),
     botEnabled: app.plugins.isEnabledOnBot(name, bot),
+    botDefaultEnabled: app.policies.defaultPluginEnabled(bot, name),
     overrideEnabled: policy.enabled,
     override: policy.config,
     effectiveConfig:

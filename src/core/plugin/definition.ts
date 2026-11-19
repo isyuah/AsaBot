@@ -10,6 +10,8 @@ export interface PluginDefinition<Schema extends z.ZodType | undefined = z.ZodTy
   version?: string
   /** 插件说明，用于展示。 */
   description?: string
+  /** 安装时用于初始化「新机器人默认启用」；不声明时为 false。 */
+  defaultOnNewBots?: boolean
   /** 校验配置并推导 ctx.config 类型的 zod schema。 */
   config?: Schema
   /** 必须先加载的插件名称。 */

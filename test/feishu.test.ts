@@ -159,6 +159,7 @@ describe('Feishu adapter', () => {
       plugins: [
         definePlugin({
           name: 'topic-work',
+          defaultOnNewBots: true,
           setup(ctx) {
             const task = ctx.task<Target>('notify', async (target) => {
               await ctx.send(target, '完工')
@@ -221,6 +222,7 @@ describe('Feishu adapter', () => {
       plugins: [
         definePlugin({
           name: 'topic-prompt',
+          defaultOnNewBots: true,
           setup(ctx) {
             ctx.command('ask').action(async ({ session }) => {
               const answer = await session.prompt('请回答')
@@ -264,6 +266,7 @@ describe('Feishu adapter', () => {
       plugins: [
         definePlugin({
           name: 'topic-card',
+          defaultOnNewBots: true,
           setup(ctx) {
             ctx.command('answer').action(() => '收到')
           },
@@ -642,6 +645,7 @@ describe('Feishu adapter', () => {
       plugins: [
         definePlugin({
           name: 'feishu-events',
+          defaultOnNewBots: true,
           setup(ctx) {
             ctx.on('notice', (event) => {
               if (isFeishuReaction(event) || isFeishuChatUpdated(event) || isFeishuMessageRead(event))
@@ -864,6 +868,7 @@ describe('Feishu adapter', () => {
       plugins: [
         definePlugin({
           name: 'forms',
+          defaultOnNewBots: true,
           setup(ctx) {
             ctx.on('notice.feishu.card.action', (event) => {
               if (!isFeishuCardAction(event)) return
@@ -914,6 +919,7 @@ describe('Feishu adapter', () => {
       plugins: [
         definePlugin({
           name: 'buttons',
+          defaultOnNewBots: true,
           setup(ctx) {
             ctx.on('notice.feishu.card.action', (event) => {
               if (isFeishuCardAction(event)) event.respond({})
@@ -971,6 +977,7 @@ describe('Feishu adapter', () => {
       plugins: [
         definePlugin({
           name: 'slow-form',
+          defaultOnNewBots: true,
           setup(ctx) {
             ctx.on('notice.feishu.card.action', (value) => {
               if (isFeishuCardAction(value)) event = value
@@ -999,6 +1006,7 @@ describe('Feishu adapter', () => {
       plugins: [
         definePlugin({
           name: 'commands',
+          defaultOnNewBots: true,
           setup(ctx) {
             ctx.command('echo <text:rest>').action(({ args }) => args.text)
             ctx.on('message', (event) => {
@@ -1139,6 +1147,7 @@ describe('Feishu adapter', () => {
       plugins: [
         definePlugin({
           name: 'events',
+          defaultOnNewBots: true,
           setup(ctx) {
             ctx.on('notice', (e) => {
               notices.push(e)

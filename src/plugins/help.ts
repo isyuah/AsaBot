@@ -25,6 +25,7 @@ export function createHelpPlugin(app: App) {
   return definePlugin({
     name: 'help',
     description: '查看当前会话可用的命令',
+    defaultOnNewBots: true,
     setup(ctx) {
       ctx
         .command('help [path:rest]')

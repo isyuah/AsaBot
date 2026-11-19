@@ -84,7 +84,7 @@ function BotPlugin({
           )}
           <Switch
             aria-label={`在 ${bot.nickname ?? bot.selfId} 上启用 ${plugin.name}`}
-            checked={plugin.overrideEnabled ?? true}
+            checked={plugin.overrideEnabled ?? plugin.botDefaultEnabled}
             disabled={toggle.isPending}
             onCheckedChange={(enabled) => toggle.mutate(enabled)}
           />
@@ -94,7 +94,7 @@ function BotPlugin({
         <div className="flex items-center justify-between border-t border-border px-4 py-2 text-[12px] text-fg-3">
           <span>机器人开关已单独设置</span>
           <Button variant="ghost" size="sm" loading={toggle.isPending} onClick={() => toggle.mutate(null)}>
-            恢复默认启用
+            恢复初始设置
           </Button>
         </div>
       )}

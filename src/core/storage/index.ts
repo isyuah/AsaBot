@@ -23,7 +23,9 @@ export interface GroupRuleSummary {
   commands: number
 }
 
-const coreMigrations = [
+type Migration = string | ((db: DatabaseSync) => void)
+
+const coreMigrations: Migration[] = [
   `CREATE TABLE kv (plugin TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, expires_at INTEGER,
     PRIMARY KEY (plugin, key));
    CREATE TABLE plugin_group_state (plugin TEXT NOT NULL, group_key TEXT NOT NULL, enabled INTEGER NOT NULL,
@@ -59,6 +61,18 @@ const coreMigrations = [
    DROP TABLE scheduled_tasks;`,
   `CREATE TABLE bot_admins (bot_key TEXT NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY (bot_key, user_id));
    CREATE TABLE plugin_bot_policy (bot_key TEXT NOT NULL, plugin TEXT NOT NULL, enabled INTEGER, config TEXT, PRIMARY KEY (bot_key, plugin));`,
+  (db) => {
+    // NULL marks previously known accounts whose old defaults are captured once plugins are discovered.
+    db.exec(`CREATE TABLE bot_plugin_defaults (bot_key TEXT NOT NULL PRIMARY KEY, plugins TEXT);
+      INSERT INTO bot_plugin_defaults (bot_key)
+        SELECT bot_key FROM bot_admins UNION SELECT bot_key FROM plugin_bot_policy;`)
+    if (
+      db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'p_history_messages'").get()
+    ) {
+      db.exec(`INSERT OR IGNORE INTO bot_plugin_defaults (bot_key)
+        SELECT DISTINCT json_array(platform, self_id) FROM p_history_messages WHERE platform <> 'virtual'`)
+    }
+  },
 ]
 
 /** SQLite 存储及插件状态、迁移和访问控制管理器。 */
@@ -155,7 +169,7 @@ export class Storage {
     this.accessEntries.clear()
   }
 
-  migrate(owner: string, steps: string[]): void {
+  migrate(owner: string, steps: Migration[]): void {
     const db = this.db
     db.exec('BEGIN IMMEDIATE')
     try {
@@ -173,7 +187,9 @@ export class Storage {
       const changes: { name: string; added: boolean }[] = []
       for (let index = version; index < steps.length; index++) {
         const before = tables()
-        db.exec(steps[index] as string)
+        const step = steps[index] as Migration
+        if (typeof step === 'string') db.exec(step)
+        else step(db)
         const after = tables()
         for (const name of before) if (!after.has(name)) changes.push({ name, added: false })
         for (const name of after) if (!before.has(name)) changes.push({ name, added: true })
@@ -313,6 +329,9 @@ export class Storage {
       ]) {
         db.prepare(`DELETE FROM ${table} WHERE plugin = ?`).run(owner)
       }
+      db.prepare(`UPDATE bot_plugin_defaults
+        SET plugins = (SELECT json_group_array(value) FROM json_each(plugins) WHERE value <> ?)
+        WHERE EXISTS (SELECT 1 FROM json_each(plugins) WHERE value = ?)`).run(owner, owner)
       for (const row of db.prepare('SELECT table_name FROM plugin_tables WHERE plugin = ?').all(owner)) {
         const name = String(row.table_name)
         db.exec(`DROP TABLE IF EXISTS "${name.replaceAll('"', '""')}"`)

@@ -73,6 +73,7 @@ export interface PluginView {
   state: PluginStateName
   error?: string
   enabled: boolean
+  defaultOnNewBots: boolean
   configSchema?: JsonSchema
   capabilities?: { required?: Partial<BotCapabilities>; optional?: Partial<BotCapabilities> }
   commands: CommandView[]
@@ -424,6 +425,7 @@ export interface Compatibility {
 }
 export interface BotPluginView extends PluginView {
   botEnabled: boolean
+  botDefaultEnabled: boolean
   overrideEnabled?: boolean
   override?: Record<string, unknown>
   effectiveConfig?: unknown

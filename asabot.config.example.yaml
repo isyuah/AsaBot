@@ -157,6 +157,8 @@ plugins:
   #       executablePath: /path/to/chrome # 或配置 wsEndpoint
   echo:
     # 示例复读插件
+    # 首次登记的机器人是否启用；安装时用插件声明初始化，未声明则为 false
+    defaultOnNewBots: false
     enabled: true
     config:
       # 一次复读允许的最大文本长度

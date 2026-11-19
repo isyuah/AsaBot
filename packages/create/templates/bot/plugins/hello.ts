@@ -2,6 +2,7 @@ import { definePlugin, seg, z } from '@asabot/core'
 
 export default definePlugin({
   name: 'hello',
+  defaultOnNewBots: true,
   config: z.object({ greeting: z.string().default('你好') }),
   setup(ctx) {
     ctx

@@ -157,6 +157,8 @@ export const api = {
   plugins: () => request<PluginView[]>('GET', '/plugins'),
   pluginAction: (name: string, action: 'enable' | 'disable' | 'reload') =>
     request<PluginView>('POST', `/plugins/${encode(name)}/${action}`, {}),
+  pluginBotDefault: (name: string, defaultOnNewBots: boolean) =>
+    request<PluginView>('PUT', `/plugins/${encode(name)}/bot-default`, { defaultOnNewBots }),
   pluginConfig: (name: string, config: unknown) =>
     request<PluginView>('PUT', `/plugins/${encode(name)}/config`, { config }),
   pluginGroups: (name: string) => request<PluginGroupSetting[]>('GET', `/plugins/${encode(name)}/groups`),

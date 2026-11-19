@@ -308,6 +308,7 @@ describe('WeCom built-in adapter', () => {
     const apiCalls: string[] = []
     const plugin = definePlugin({
       name: 'wecom-hooks',
+      defaultOnNewBots: true,
       setup(ctx) {
         ctx.interceptApi(async ({ method }, next) => {
           apiCalls.push(method)
@@ -387,6 +388,7 @@ describe('WeCom built-in adapter', () => {
     const methods: string[] = []
     const plugin = definePlugin({
       name: 'wecom-native',
+      defaultOnNewBots: true,
       setup(ctx) {
         ctx.interceptApi(async ({ method }, next) => {
           methods.push(method)

@@ -51,6 +51,12 @@ function validateDefinition(value: unknown): PluginDefinition {
     throw new PluginError('Plugin must default-export a definition with a valid name and setup function')
   }
   if (
+    'defaultOnNewBots' in value &&
+    value.defaultOnNewBots !== undefined &&
+    typeof value.defaultOnNewBots !== 'boolean'
+  )
+    throw new PluginError(`Invalid new bot default for plugin "${value.name}"`)
+  if (
     'depends' in value &&
     value.depends !== undefined &&
     (!Array.isArray(value.depends) || !value.depends.every((item: unknown) => typeof item === 'string'))
@@ -328,6 +334,9 @@ export class PluginManager {
     this.started = true
     await this.packages.init()
     this.releaseRoots = registerPluginRoots([...this.dirs, this.packages.dir])
+    for (const { definition } of this.entries.values()) {
+      if (definition) await this.initializeDefaultOnNewBots(definition)
+    }
     for (const dir of this.dirs) await this.discover(dir)
     for (const name of Object.keys(await this.packages.dependencies())) {
       let manifest: PackageManifest | undefined
@@ -580,6 +589,19 @@ export class PluginManager {
     })
   }
 
+  setDefaultOnNewBots(name: string, enabled: boolean): Promise<void> {
+    return this.serial(async () => {
+      const entry = this.requireAvailable(name)
+      await this.persist(name, 'defaultOnNewBots', enabled)
+      this.entryConfig(name).defaultOnNewBots = enabled
+      this.publishState(entry)
+    })
+  }
+
+  defaultsForNewBot(): string[] {
+    return [...this.entries.keys()].filter((name) => this.app.config.plugins[name]?.defaultOnNewBots)
+  }
+
   setGroupEnabled(name: string, groupKey: string, enabled: boolean): void {
     this.requireAvailable(name)
     this.app.storage.setGroupEnabled(name, groupKey, enabled)
@@ -589,7 +611,7 @@ export class PluginManager {
     return (
       name === 'core' ||
       (this.entries.get(name)?.state.enabled !== false &&
-        this.app.policies.plugin(bot, name).enabled !== false)
+        (this.app.policies.plugin(bot, name).enabled ?? this.app.policies.defaultPluginEnabled(bot, name)))
     )
   }
 
@@ -631,12 +653,22 @@ export class PluginManager {
     return entry
   }
 
-  private entryConfig(name: string): { enabled: boolean; config?: unknown } {
+  private entryConfig(name: string) {
     this.app.config.plugins[name] ??= { enabled: true }
     return this.app.config.plugins[name]
   }
 
-  private async persist(name: string, field: 'enabled' | 'config', value: unknown): Promise<void> {
+  private async initializeDefaultOnNewBots({ name, defaultOnNewBots = false }: PluginDefinition) {
+    if (this.app.config.plugins[name]?.defaultOnNewBots !== undefined) return
+    await this.persist(name, 'defaultOnNewBots', defaultOnNewBots)
+    this.entryConfig(name).defaultOnNewBots = defaultOnNewBots
+  }
+
+  private async persist(
+    name: string,
+    field: 'enabled' | 'defaultOnNewBots' | 'config',
+    value: unknown,
+  ): Promise<void> {
     if (this.configPath) {
       await writeConfigValue(
         this.configPath,
@@ -723,7 +755,9 @@ export class PluginManager {
       try {
         const imported = await importPlugin(path)
         try {
-          this.add(validateDefinition(imported.value), 'file', path, imported.files, imported.release)
+          const definition = validateDefinition(imported.value)
+          if (!this.entries.has(definition.name)) await this.initializeDefaultOnNewBots(definition)
+          this.add(definition, 'file', path, imported.files, imported.release)
         } catch (error) {
           imported.release()
           throw error
@@ -873,6 +907,7 @@ export class PluginManager {
       if (existing?.definition && definition.name !== existing.state.name)
         throw new ManagementError(409, 'Updated package changed its plugin name')
       if (!existing) {
+        await this.initializeDefaultOnNewBots(definition)
         const entry = this.add(definition, 'package', path, imported.files, imported.release)
         entry.manifest = manifest
         return entry
@@ -1201,10 +1236,10 @@ export class PluginManager {
         const imported = await importPlugin(entry.state.path)
         release = imported.release
         definition = validateDefinition(imported.value)
+        if (definition.name !== entry.state.name && (entry.definition || this.entries.has(definition.name)))
+          throw new PluginError(`Plugin name changed from "${entry.state.name}" to "${definition.name}"`)
+        await this.initializeDefaultOnNewBots(definition)
         if (definition.name !== entry.state.name) {
-          if (entry.definition || this.entries.has(definition.name)) {
-            throw new PluginError(`Plugin name changed from "${entry.state.name}" to "${definition.name}"`)
-          }
           this.entries.delete(entry.state.name)
           entry.state.name = definition.name
           entry.state.enabled = this.app.config.plugins[definition.name]?.enabled ?? true

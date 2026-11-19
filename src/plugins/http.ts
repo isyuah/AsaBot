@@ -55,6 +55,7 @@ function bypassProxy(hostname: string, patterns: string[]): boolean {
 export default definePlugin({
   name: 'http',
   description: 'HTTP 请求、代理和响应大小限制',
+  defaultOnNewBots: true,
   config: z.object({
     proxy: z.string().default(''),
     noProxy: z.array(z.string()).default([]),
