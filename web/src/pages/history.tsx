@@ -1,21 +1,29 @@
+import {
+  Avatar,
+  Button,
+  Card,
+  cn,
+  EmptyState,
+  ErrorState,
+  formatClock,
+  Input,
+  Logo,
+  PageHeader,
+  type Segment,
+  Segments,
+  Skeleton,
+  softSpring,
+} from '@asabot/panel-ui'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, Download, Inbox, MessagesSquare, Search, Workflow } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Avatar } from '../components/avatar.tsx'
-import { Logo } from '../components/layout/logo.tsx'
-import { Segments } from '../components/segments.tsx'
 import { TraceLoader } from '../components/trace.tsx'
-import { Button } from '../components/ui/button.tsx'
-import { Input } from '../components/ui/input.tsx'
-import { Card, EmptyState, ErrorState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
 import { api } from '../lib/api.ts'
-import { formatClock, formatRelative } from '../lib/format.ts'
-import { softSpring } from '../lib/motion.ts'
+import { formatRelative } from '../lib/format.ts'
 import { platformName } from '../lib/platform.ts'
 import { useLiveMessages } from '../lib/realtime.tsx'
-import type { ChannelTarget, Segment, Target } from '../lib/types.ts'
-import { cn } from '../lib/utils.ts'
+import type { ChannelTarget, Target } from '../lib/types.ts'
 
 // Shapes of the history plugin's panel routes (DESIGN §24.8).
 interface HistoryMessage {

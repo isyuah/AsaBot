@@ -1,5 +1,5 @@
 import { forwardRef, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react'
-import { cn } from '../../lib/utils.ts'
+import { cn } from '../utils.ts'
 
 const fieldBase =
   'w-full rounded-[10px] border border-border bg-surface text-[13.5px] text-fg placeholder:text-fg-3 shadow-[inset_0_1px_1px_rgb(0_0_0/0.02)] transition-[border-color,box-shadow] duration-150 outline-none hover:border-border-strong focus:border-accent focus:shadow-[0_0_0_3px_var(--ring)] disabled:cursor-not-allowed disabled:opacity-60 aria-[invalid=true]:border-danger aria-[invalid=true]:focus:shadow-[0_0_0_3px_var(--danger-soft)]'

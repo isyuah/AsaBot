@@ -1,10 +1,9 @@
+import { Button, SchemaForm } from '@asabot/panel-ui'
 import { useMutation } from '@tanstack/react-query'
 import { RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '../lib/api.ts'
 import type { PluginView } from '../lib/types.ts'
-import { SchemaForm } from './schema-form.tsx'
-import { Button } from './ui/button.tsx'
 
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)

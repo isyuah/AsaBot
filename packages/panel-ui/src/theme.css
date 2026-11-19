@@ -1,0 +1,338 @@
+@custom-variant dark (&:where(.dark, .dark *, [data-theme='dark'], [data-theme='dark'] *));
+
+/*
+ * Design tokens. Components only use these role names, so the light and dark themes are each defined in one place.
+ * The palette is soft and low-saturation; the accent is a muted violet. Chart series colors were checked with the
+ * dataviz palette validator against the card surface of each mode.
+ */
+:root {
+  color-scheme: light;
+  --bg: var(--asabot-bg, #f6f6f8);
+  --bg-glow: var(--asabot-bg-glow, rgb(109 94 245 / 0.09));
+  --surface: var(--asabot-surface, #ffffff);
+  --surface-2: var(--asabot-surface-2, #f4f4f7);
+  --surface-3: var(--asabot-surface-3, #ececf1);
+  --overlay: var(--asabot-overlay, rgb(23 23 31 / 0.28));
+  --border: var(--asabot-border, #e7e7ed);
+  --border-strong: var(--asabot-border-strong, #d9d9e1);
+  --fg: var(--asabot-fg, #17171f);
+  --fg-2: var(--asabot-fg-2, #5b5c6b);
+  --fg-3: var(--asabot-fg-3, #8a8b99);
+  --accent: var(--asabot-accent, #6d5ef5);
+  --accent-hover: var(--asabot-accent-hover, #6051ee);
+  --accent-fg: var(--asabot-accent-fg, #ffffff);
+  --accent-soft: var(--asabot-accent-soft, #efedff);
+  --accent-soft-fg: var(--asabot-accent-soft-fg, #5245de);
+  --success: var(--asabot-success, #12a07e);
+  --success-soft: var(--asabot-success-soft, #e2f5ef);
+  --warning: var(--asabot-warning, #c97f05);
+  --warning-soft: var(--asabot-warning-soft, #fcf0d9);
+  --danger: var(--asabot-danger, #e5484d);
+  --danger-soft: var(--asabot-danger-soft, #fdeced);
+  --info: var(--asabot-info, #3a7fe6);
+  --info-soft: var(--asabot-info-soft, #e7effd);
+  --series-in: var(--asabot-series-in, #6d5ef5);
+  --series-out: var(--asabot-series-out, #13a589);
+  --ring: var(--asabot-ring, rgb(109 94 245 / 0.32));
+  --shadow-card: var(--asabot-shadow-card, 0 1px 2px rgb(23 23 31 / 0.04), 0 1px 1px rgb(23 23 31 / 0.02));
+  --shadow-pop: var(--asabot-shadow-pop, 0 12px 32px -8px rgb(23 23 31 / 0.18), 0 2px 6px rgb(23 23 31 / 0.06));
+  --highlight: var(--asabot-highlight, inset 0 1px 0 rgb(255 255 255 / 0.6));
+}
+
+.dark,
+[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: var(--asabot-bg, #0c0d11);
+  --bg-glow: var(--asabot-bg-glow, rgb(139 127 250 / 0.1));
+  --surface: var(--asabot-surface, #15161c);
+  --surface-2: var(--asabot-surface-2, #1b1c23);
+  --surface-3: var(--asabot-surface-3, #23242c);
+  --overlay: var(--asabot-overlay, rgb(4 4 8 / 0.6));
+  --border: var(--asabot-border, #24252e);
+  --border-strong: var(--asabot-border-strong, #30313c);
+  --fg: var(--asabot-fg, #ececf1);
+  --fg-2: var(--asabot-fg-2, #a3a4b2);
+  --fg-3: var(--asabot-fg-3, #6e6f7d);
+  --accent: var(--asabot-accent, #7c6ff7);
+  --accent-hover: var(--asabot-accent-hover, #8a7ef9);
+  --accent-fg: var(--asabot-accent-fg, #ffffff);
+  --accent-soft: var(--asabot-accent-soft, rgb(139 127 250 / 0.14));
+  --accent-soft-fg: var(--asabot-accent-soft-fg, #b4acff);
+  --success: var(--asabot-success, #2bbd95);
+  --success-soft: var(--asabot-success-soft, rgb(43 189 149 / 0.13));
+  --warning: var(--asabot-warning, #e9a43a);
+  --warning-soft: var(--asabot-warning-soft, rgb(233 164 58 / 0.13));
+  --danger: var(--asabot-danger, #f0585d);
+  --danger-soft: var(--asabot-danger-soft, rgb(240 88 93 / 0.14));
+  --info: var(--asabot-info, #5f9cf3);
+  --info-soft: var(--asabot-info-soft, rgb(95 156 243 / 0.14));
+  --series-in: var(--asabot-series-in, #8b7ffa);
+  --series-out: var(--asabot-series-out, #1aa182);
+  --ring: var(--asabot-ring, rgb(139 127 250 / 0.4));
+  --shadow-card: var(--asabot-shadow-card, 0 1px 2px rgb(0 0 0 / 0.3));
+  --shadow-pop: var(--asabot-shadow-pop, 0 16px 40px -8px rgb(0 0 0 / 0.6), 0 2px 8px rgb(0 0 0 / 0.3));
+  --highlight: var(--asabot-highlight, inset 0 1px 0 rgb(255 255 255 / 0.035));
+}
+
+@theme inline {
+  --font-sans: 'Geist Variable', 'Noto Sans SC Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Noto Sans SC Variable', ui-monospace, monospace;
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-overlay: var(--overlay);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-soft-fg: var(--accent-soft-fg);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-series-in: var(--series-in);
+  --color-series-out: var(--series-out);
+  --color-ring: var(--ring);
+
+  --shadow-card: var(--shadow-card);
+  --shadow-pop: var(--shadow-pop);
+
+  --radius-xl: 14px;
+  --radius-2xl: 18px;
+
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+  --animate-pulse-soft: pulse-soft 2.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(1.9);
+  }
+}
+
+@layer base {
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
+    color: var(--accent-soft-fg);
+  }
+
+  * {
+    border-color: var(--border);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-card), var(--highlight);
+  }
+
+  .skeleton {
+    border-radius: 8px;
+    background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
+    background-size: 400% 100%;
+    animation: var(--animate-shimmer);
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Rendered README content (react-markdown output, no raw HTML). */
+  .markdown {
+    font-size: 13.5px;
+    line-height: 1.7;
+    color: var(--fg-2);
+    overflow-wrap: anywhere;
+  }
+  .markdown > :first-child {
+    margin-top: 0;
+  }
+  .markdown :where(h1, h2, h3, h4) {
+    color: var(--fg);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    line-height: 1.35;
+    margin: 1.6em 0 0.6em;
+  }
+  .markdown h1 {
+    font-size: 19px;
+  }
+  .markdown h2 {
+    font-size: 16px;
+    padding-bottom: 0.35em;
+    border-bottom: 1px solid var(--border);
+  }
+  .markdown :where(h3, h4) {
+    font-size: 14px;
+  }
+  .markdown :where(p, ul, ol, pre, blockquote, table) {
+    margin: 0.75em 0;
+  }
+  .markdown :where(ul, ol) {
+    padding-left: 1.4em;
+  }
+  .markdown ul {
+    list-style: disc;
+  }
+  .markdown ol {
+    list-style: decimal;
+  }
+  .markdown li + li {
+    margin-top: 0.25em;
+  }
+  .markdown li:has(> input[type='checkbox']) {
+    list-style: none;
+    margin-left: -1.4em;
+  }
+  .markdown input[type='checkbox'] {
+    margin-right: 0.5em;
+    accent-color: var(--accent);
+    vertical-align: -1px;
+  }
+  .markdown a {
+    color: var(--accent-soft-fg);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+    text-underline-offset: 3px;
+    transition: text-decoration-color 0.15s;
+  }
+  .markdown a:hover {
+    text-decoration-color: currentColor;
+  }
+  .markdown :where(strong) {
+    color: var(--fg);
+    font-weight: 600;
+  }
+  .markdown :not(pre) > code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    padding: 0.12em 0.4em;
+    border-radius: 5px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--fg);
+  }
+  .markdown pre {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    overflow-x: auto;
+  }
+  .markdown blockquote {
+    padding: 2px 0 2px 14px;
+    border-left: 3px solid var(--accent-soft);
+    color: var(--fg-3);
+  }
+  .markdown table {
+    display: block;
+    overflow-x: auto;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .markdown :where(th, td) {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    text-align: left;
+  }
+  .markdown th {
+    background: var(--surface-2);
+    color: var(--fg);
+    font-weight: 600;
+  }
+  .markdown img {
+    max-width: 100%;
+    border-radius: 8px;
+  }
+  .markdown hr {
+    margin: 1.5em 0;
+    border-color: var(--border);
+  }
+  /* Markdown inside a chat bubble: inherit the bubble's size and colour, tighter spacing. */
+  .markdown-compact {
+    font-size: inherit;
+    line-height: 1.6;
+    color: inherit;
+    /* Bubbles use pre-wrap for plain text; the newlines react-markdown leaves between elements must not show. */
+    white-space: normal;
+  }
+  .markdown-compact :where(h1, h2, h3, h4) {
+    margin: 0.6em 0 0.3em;
+    border-bottom: 0;
+    padding-bottom: 0;
+    font-size: 1em;
+  }
+  .markdown-compact :where(p, ul, ol, pre, blockquote, table) {
+    margin: 0.35em 0;
+  }
+  .markdown-compact > :last-child {
+    margin-bottom: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}

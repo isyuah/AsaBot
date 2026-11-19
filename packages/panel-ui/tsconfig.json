@@ -1,0 +1,12 @@
+{
+  "extends": "../../web/tsconfig.json",
+  "compilerOptions": {
+    "types": ["react", "react-dom"],
+    "declaration": true,
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src"]
+}

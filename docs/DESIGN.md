@@ -1262,6 +1262,7 @@ ctx.panel.push(topic: string, data: unknown)        // 通过面板实时推送�
   - 插件页面用普通 `<script src="/plugin-pages/_sdk.js">` 加载 SDK。
   - 提供 `asabot.fetch(path, init)`、`asabot.json(path, init)`、`asabot.on(topic, fn)`、`asabot.toast(text, level?)`、`asabot.theme`。
   - 自动把主题变量写到 `:root`，插件页面直接使用面板的配色。
+- **共享 UI**：控制台和 React 插件复用 `@asabot/panel-ui` 的组件和主题。插件将组件、`styles.css` 与自己的代码打包进 iframe 页面；字体单独从 `fonts.css` 按需导入。共享组件通过 props 读写数据，控制台的路由和 API 客户端不进入该包。
 - 内置插件（例如 history）的页面由面板原生实现，但数据接口同样走 `ctx.panel.route`。
 
 ### 24.10 G3 群组规则（修订 18、19）
@@ -1315,7 +1316,7 @@ ctx.panel.push(topic: string, data: unknown)        // 通过面板实时推送�
   - 第三方插件包继续使用 `asabot-plugin-*` 命名和 `asabot-plugin` 关键词；官方插件包命名为 `@asabot/plugin-*`，同样带这个关键词。
 - **构建**：
   - 仓库内的开发方式不变，仍然直接运行 `.ts`。
-  - `pnpm build` 依次执行：构建面板（`web/dist`）；`tsc -p tsconfig.build.json --outDir dist --declaration --rewriteRelativeImportExtensions`，只包含 `src`，排除测试文件。
+  - `pnpm build` 依次构建共享 UI 包、面板（`web/dist`）和框架代码（`dist`，只包含 `src`，排除测试文件）。面板从 workspace 读取共享组件和主题源码，单独构建面板时无需预先构建 UI 包。
   - 发布用的 `exports`、`bin` 放在 `publishConfig` 中，`pnpm publish` 时替换成 dist 路径；`files` 为 `dist`、`web/dist`、README、LICENSE、`asabot.config.example.yaml`。
   - 服务端按模块相对路径 `../../web/dist` 查找面板，这个相对路径在仓库和发布包中都成立。
 - **CLI**：`bin: { asabot }`。

@@ -1,5 +1,5 @@
 import { useId } from 'react'
-import { cn } from '../../lib/utils.ts'
+import { cn } from './utils.ts'
 
 export function Logo({ className }: { className?: string }) {
   // Each instance needs its own gradient id: a shared id breaks when the defining <svg> is display:none.

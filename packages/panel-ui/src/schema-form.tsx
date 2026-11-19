@@ -1,13 +1,13 @@
 import { Braces, Plus, RotateCcw, Trash2, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
-import { softSpring } from '../lib/motion.ts'
-import type { JsonSchema } from '../lib/types.ts'
-import { cn } from '../lib/utils.ts'
+import { softSpring } from './motion.ts'
+import type { JsonSchema } from './types.ts'
 import { Button } from './ui/button.tsx'
 import { Field, Input, Textarea } from './ui/input.tsx'
 import { Select } from './ui/select.tsx'
 import { Switch } from './ui/switch.tsx'
+import { cn } from './utils.ts'
 
 type Value = unknown
 type Issues = Record<string, string>

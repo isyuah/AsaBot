@@ -1,3 +1,4 @@
+import type { LogRecord, StatsPoint } from '@asabot/panel-ui'
 import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { createContext, type ReactNode, useContext, useEffect, useSyncExternalStore } from 'react'
 import { api } from './api.ts'
@@ -5,12 +6,10 @@ import type {
   BotView,
   LiveMessage,
   LogEntry,
-  LogRecord,
   Overview,
   PackageOperation,
   PluginView,
   ServerFrame,
-  StatsPoint,
 } from './types.ts'
 import { createStore, type Store } from './utils.ts'
 

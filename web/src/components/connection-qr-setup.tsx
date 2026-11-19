@@ -1,14 +1,10 @@
+import { Button, Dialog, Field, Input, Switch, useFadeUp } from '@asabot/panel-ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CircleAlert, LoaderCircle, RefreshCw, ScanLine, ShieldCheck, Smartphone } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useId, useState } from 'react'
 import { api } from '../lib/api.ts'
-import { useFadeUp } from '../lib/motion.ts'
 import type { AdapterView, ConnectionSetup, ConnectionView } from '../lib/types.ts'
-import { Button } from './ui/button.tsx'
-import { Dialog } from './ui/dialog.tsx'
-import { Field, Input } from './ui/input.tsx'
-import { Switch } from './ui/switch.tsx'
 
 const copy = {
   starting: { label: '正在获取二维码', Icon: LoaderCircle },

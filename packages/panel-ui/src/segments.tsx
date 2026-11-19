@@ -1,7 +1,7 @@
 import { Paperclip, Reply, Share2 } from 'lucide-react'
 import { lazy, type ReactNode, Suspense } from 'react'
-import type { Segment } from '../lib/types.ts'
-import { cn } from '../lib/utils.ts'
+import type { Segment } from './types.ts'
+import { cn } from './utils.ts'
 
 const Markdown = lazy(() => import('./markdown.tsx').then((module) => ({ default: module.Markdown })))
 

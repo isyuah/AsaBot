@@ -1,26 +1,27 @@
+import {
+  Badge,
+  Button,
+  Card,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  type JsonSchema,
+  PageHeader,
+  PageTabs,
+  SchemaForm,
+  Select,
+  Skeleton,
+  type Tone,
+} from '@asabot/panel-ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Cable, ChevronRight, Copy, RefreshCw, ScanLine, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { ConnectionQrSetup } from '../components/connection-qr-setup.tsx'
-import { SchemaForm } from '../components/schema-form.tsx'
-import { Button } from '../components/ui/button.tsx'
-import { Dialog } from '../components/ui/dialog.tsx'
-import { PageTabs } from '../components/ui/misc.tsx'
-import {
-  Badge,
-  Card,
-  EmptyState,
-  ErrorState,
-  PageHeader,
-  Skeleton,
-  type Tone,
-} from '../components/ui/primitives.tsx'
-import { Select } from '../components/ui/select.tsx'
 import { ApiError, api } from '../lib/api.ts'
 import { adapterPath, botPath, connectionPath, timeText } from '../lib/management.ts'
 import { Link, navigate } from '../lib/router.tsx'
-import type { AdapterView, ConnectionInput, ConnectionView, JsonSchema } from '../lib/types.ts'
+import type { AdapterView, ConnectionInput, ConnectionView } from '../lib/types.ts'
 
 const status: Record<ConnectionView['state'], { label: string; tone: Tone }> = {
   disabled: { label: '已停用', tone: 'neutral' },

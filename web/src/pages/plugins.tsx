@@ -1,3 +1,28 @@
+import {
+  Badge,
+  Button,
+  Card,
+  CompatibilityInfo,
+  cn,
+  EmptyState,
+  ErrorState,
+  Input,
+  Menu,
+  MenuItem,
+  MenuSeparator,
+  PageHeader,
+  PageTabs,
+  SchemaForm,
+  Segmented,
+  Select,
+  Skeleton,
+  Switch,
+  softSpring,
+  stagger,
+  staggerItem,
+  type Tone,
+  Tooltip,
+} from '@asabot/panel-ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
@@ -22,33 +47,15 @@ import {
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { CompatibilityInfo } from '../components/bot-plugins.tsx'
 import { PackageMarket } from '../components/market.tsx'
 import { hasUpdate, UninstallDialog, UpdateButton, UploadDialog } from '../components/plugin-manage.tsx'
-import { SchemaForm } from '../components/schema-form.tsx'
-import { Button } from '../components/ui/button.tsx'
-import { Input } from '../components/ui/input.tsx'
-import { Menu, MenuItem, MenuSeparator, PageTabs, Segmented, Tooltip } from '../components/ui/misc.tsx'
-import {
-  Badge,
-  Card,
-  EmptyState,
-  ErrorState,
-  PageHeader,
-  Skeleton,
-  type Tone,
-} from '../components/ui/primitives.tsx'
-import { Select } from '../components/ui/select.tsx'
-import { Switch } from '../components/ui/switch.tsx'
 import { ApiError, api } from '../lib/api.ts'
 import { groupPath } from '../lib/groups.ts'
 import { botPath, invalidatePolicies, pluginPath } from '../lib/management.ts'
-import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
 import { isValidId } from '../lib/platform.ts'
 import { Link, navigate, usePath } from '../lib/router.tsx'
 import type { BotView, PluginGroupSetting, PluginStateName, PluginView } from '../lib/types.ts'
 import { playgroundDraft } from '../lib/ui-state.ts'
-import { cn } from '../lib/utils.ts'
 
 const stateMeta: Record<PluginStateName, { label: string; tone: Tone }> = {
   active: { label: '运行中', tone: 'success' },

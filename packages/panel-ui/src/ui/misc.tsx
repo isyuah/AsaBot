@@ -3,8 +3,8 @@ import * as TabsPrimitive from '@radix-ui/react-tabs'
 import * as TooltipPrimitive from '@radix-ui/react-tooltip'
 import { animate, motion, useMotionValue, useTransform } from 'motion/react'
 import { type ReactNode, useEffect, useId } from 'react'
-import { snappy, spring } from '../../lib/motion.ts'
-import { cn } from '../../lib/utils.ts'
+import { snappy, spring } from '../motion.ts'
+import { cn } from '../utils.ts'
 
 export function Tooltip({
   content,

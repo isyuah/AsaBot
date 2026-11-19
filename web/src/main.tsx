@@ -1,10 +1,9 @@
+import { PanelUIProvider } from '@asabot/panel-ui'
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MotionConfig } from 'motion/react'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Toaster, toast } from 'sonner'
 import { App } from './app.tsx'
-import { TooltipProvider } from './components/ui/misc.tsx'
 import { ApiError } from './lib/api.ts'
 import { ThemeProvider, useTheme } from './lib/theme.tsx'
 import './styles.css'
@@ -51,12 +50,10 @@ createRoot(root).render(
   <StrictMode>
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
-        <MotionConfig reducedMotion="user">
-          <TooltipProvider>
-            <App />
-            <ThemedToaster />
-          </TooltipProvider>
-        </MotionConfig>
+        <PanelUIProvider>
+          <App />
+          <ThemedToaster />
+        </PanelUIProvider>
       </QueryClientProvider>
     </ThemeProvider>
   </StrictMode>,

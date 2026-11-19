@@ -1,6 +1,5 @@
+import { Button, Card, EmptyState } from '@asabot/panel-ui'
 import { Compass } from 'lucide-react'
-import { Button } from '../components/ui/button.tsx'
-import { Card, EmptyState } from '../components/ui/primitives.tsx'
 import { navigate } from '../lib/router.tsx'
 
 export function NotFoundPage() {

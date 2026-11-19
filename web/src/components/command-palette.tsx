@@ -1,3 +1,4 @@
+import { Kbd, spring } from '@asabot/panel-ui'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Command } from 'cmdk'
@@ -6,13 +7,11 @@ import { AnimatePresence, motion } from 'motion/react'
 import type { ReactNode } from 'react'
 import { toast } from 'sonner'
 import { api } from '../lib/api.ts'
-import { spring } from '../lib/motion.ts'
 import { navigate } from '../lib/router.tsx'
 import { resetSession } from '../lib/session.ts'
 import { useTheme } from '../lib/theme.tsx'
 import { commandPaletteOpen, playgroundDraft, useCommandPaletteOpen } from '../lib/ui-state.ts'
 import { navGroups } from './layout/nav.ts'
-import { Kbd } from './ui/primitives.tsx'
 
 export function CommandPalette() {
   const open = useCommandPaletteOpen()

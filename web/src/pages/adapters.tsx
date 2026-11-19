@@ -1,13 +1,21 @@
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  type JsonSchema,
+  PageHeader,
+  Skeleton,
+  useFadeUp,
+} from '@asabot/panel-ui'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Cable, ChevronRight, Plus, Radio } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Button } from '../components/ui/button.tsx'
-import { Badge, Card, EmptyState, ErrorState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
 import { api } from '../lib/api.ts'
 import { adapterPath, botPath, connectionPath } from '../lib/management.ts'
-import { useFadeUp } from '../lib/motion.ts'
 import { Link, navigate, usePath } from '../lib/router.tsx'
-import type { AdapterView, JsonSchema } from '../lib/types.ts'
+import type { AdapterView } from '../lib/types.ts'
 import { CapabilityPanel } from './bots.tsx'
 import { ConnectionStatus } from './connections.tsx'
 

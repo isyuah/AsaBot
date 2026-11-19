@@ -1,0 +1,34 @@
+.toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.toolbar > *:first-child {
+  min-width: 0;
+  max-width: 18rem;
+}
+
+.toolbar > button {
+  flex-shrink: 0;
+}
+
+.content {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.message {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 5px 20px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}

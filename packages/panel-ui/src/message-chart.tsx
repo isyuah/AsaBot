@@ -1,9 +1,9 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { type PointerEvent, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { formatClock, formatNumber } from '../lib/format.ts'
-import { softSpring } from '../lib/motion.ts'
-import type { StatsPoint } from '../lib/types.ts'
-import { cn } from '../lib/utils.ts'
+import { formatClock, formatNumber } from './format.ts'
+import { softSpring } from './motion.ts'
+import type { StatsPoint } from './types.ts'
+import { cn } from './utils.ts'
 
 const height = 232
 const pad = { top: 14, right: 12, bottom: 26, left: 40 }

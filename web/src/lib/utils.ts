@@ -1,10 +1,3 @@
-import { type ClassValue, clsx } from 'clsx'
-import { twMerge } from 'tailwind-merge'
-
-export function cn(...inputs: ClassValue[]): string {
-  return twMerge(clsx(inputs))
-}
-
 /** A tiny external store for high-frequency realtime data that should not live in React Query. */
 export function createStore<T>(initial: T) {
   let value = initial

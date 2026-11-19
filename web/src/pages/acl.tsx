@@ -1,22 +1,23 @@
+import {
+  Button,
+  Card,
+  CardHeader,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  Field,
+  Input,
+  PageHeader,
+  Segmented,
+  Skeleton,
+  softSpring,
+} from '@asabot/panel-ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Ban, CheckCircle2, Plus, ShieldCheck, Trash2, User, Users } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type FormEvent, useState } from 'react'
 import { toast } from 'sonner'
-import { Button } from '../components/ui/button.tsx'
-import { Dialog } from '../components/ui/dialog.tsx'
-import { Field, Input } from '../components/ui/input.tsx'
-import { Segmented } from '../components/ui/misc.tsx'
-import {
-  Card,
-  CardHeader,
-  EmptyState,
-  ErrorState,
-  PageHeader,
-  Skeleton,
-} from '../components/ui/primitives.tsx'
 import { api } from '../lib/api.ts'
-import { softSpring } from '../lib/motion.ts'
 import { isValidId, usePlatforms } from '../lib/platform.ts'
 import type { AccessEntry, AccessList, AccessSubject } from '../lib/types.ts'
 

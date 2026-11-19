@@ -1,3 +1,22 @@
+import {
+  Badge,
+  Button,
+  Card,
+  cn,
+  EmptyState,
+  ErrorState,
+  Input,
+  PageHeader,
+  Select,
+  Sheet,
+  Skeleton,
+  Switch,
+  softSpring,
+  stagger,
+  staggerItem,
+  TabPanel,
+  Tabs,
+} from '@asabot/panel-ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Ban,
@@ -15,20 +34,11 @@ import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { ScopedConfig } from '../components/scoped-config.tsx'
-import { Button } from '../components/ui/button.tsx'
-import { Sheet } from '../components/ui/dialog.tsx'
-import { Input } from '../components/ui/input.tsx'
-import { TabPanel, Tabs } from '../components/ui/misc.tsx'
-import { Badge, Card, EmptyState, ErrorState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
-import { Select } from '../components/ui/select.tsx'
-import { Switch } from '../components/ui/switch.tsx'
 import { api } from '../lib/api.ts'
 import { groupPath } from '../lib/groups.ts'
-import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
 import { isValidId, platformName } from '../lib/platform.ts'
 import { navigate, usePath } from '../lib/router.tsx'
 import type { AccessEntry, GroupDetail, GroupView } from '../lib/types.ts'
-import { cn } from '../lib/utils.ts'
 
 /** `/groups/<encoded key>` opens that group's sheet, so other pages can deep-link to it. */
 function selectedKey(path: string): string | null {

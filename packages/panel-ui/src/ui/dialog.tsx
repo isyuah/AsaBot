@@ -2,8 +2,8 @@ import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import type { ReactNode } from 'react'
-import { softSpring, spring } from '../../lib/motion.ts'
-import { cn } from '../../lib/utils.ts'
+import { softSpring, spring } from '../motion.ts'
+import { cn } from '../utils.ts'
 import { Button } from './button.tsx'
 
 function Overlay() {

@@ -1,7 +1,7 @@
 import * as SelectPrimitive from '@radix-ui/react-select'
 import { Check, ChevronDown } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { cn } from '../../lib/utils.ts'
+import { cn } from '../utils.ts'
 
 export interface SelectOption<V extends string> {
   value: V

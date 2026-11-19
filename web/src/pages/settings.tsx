@@ -1,13 +1,21 @@
+import {
+  Card,
+  ErrorState,
+  type JsonSchema,
+  PageHeader,
+  SchemaForm,
+  Skeleton,
+  softSpring,
+  stagger,
+  staggerItem,
+} from '@asabot/panel-ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { RotateCw, SlidersHorizontal, TerminalSquare } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import type { ReactNode } from 'react'
 import { toast } from 'sonner'
-import { SchemaForm } from '../components/schema-form.tsx'
-import { Card, ErrorState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
 import { ApiError, api } from '../lib/api.ts'
-import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
-import type { JsonSchema, Settings, SettingsUpdate } from '../lib/types.ts'
+import type { Settings, SettingsUpdate } from '../lib/types.ts'
 
 const basicSchema: JsonSchema = {
   type: 'object',

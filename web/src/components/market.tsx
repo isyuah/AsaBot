@@ -1,3 +1,21 @@
+import {
+  Badge,
+  Button,
+  Card,
+  cn,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  Input,
+  Segmented,
+  Select,
+  Sheet,
+  Skeleton,
+  Switch,
+  softSpring,
+  stagger,
+  staggerItem,
+} from '@asabot/panel-ui'
 import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query'
 import {
   AlertTriangle,
@@ -15,20 +33,13 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { ApiError, api } from '../lib/api.ts'
 import { formatRelative } from '../lib/format.ts'
-import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
 import { useTrackOperation } from '../lib/realtime.tsx'
 import type { PackageDetail, PackageSearchItem, PackageSort, PackageVersion } from '../lib/types.ts'
-import { cn } from '../lib/utils.ts'
-import { Button } from './ui/button.tsx'
-import { Dialog, Sheet } from './ui/dialog.tsx'
-import { Input } from './ui/input.tsx'
-import { Segmented } from './ui/misc.tsx'
-import { Badge, Card, EmptyState, ErrorState, Skeleton } from './ui/primitives.tsx'
-import { Select } from './ui/select.tsx'
-import { Switch } from './ui/switch.tsx'
 
 // react-markdown and remark-gfm are only needed once a package's details are opened.
-const Markdown = lazy(() => import('./markdown.tsx').then((module) => ({ default: module.Markdown })))
+const Markdown = lazy(() =>
+  import('@asabot/panel-ui/markdown').then((module) => ({ default: module.Markdown })),
+)
 
 interface InstallTarget {
   name: string

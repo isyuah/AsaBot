@@ -1,3 +1,23 @@
+import {
+  Badge,
+  Button,
+  Card,
+  cn,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  Field,
+  Input,
+  ListControl,
+  PageHeader,
+  Segmented,
+  Select,
+  Skeleton,
+  Switch,
+  softSpring,
+  stagger,
+  staggerItem,
+} from '@asabot/panel-ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
@@ -11,22 +31,12 @@ import {
 import { AnimatePresence, motion } from 'motion/react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { ListControl } from '../components/schema-form.tsx'
-import { Button } from '../components/ui/button.tsx'
-import { Dialog } from '../components/ui/dialog.tsx'
-import { Field, Input } from '../components/ui/input.tsx'
-import { Segmented } from '../components/ui/misc.tsx'
-import { Badge, Card, EmptyState, ErrorState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
-import { Select } from '../components/ui/select.tsx'
-import { Switch } from '../components/ui/switch.tsx'
 import { ApiError, api } from '../lib/api.ts'
 import { compactDuration } from '../lib/format.ts'
 import { groupPath, parseGroupKey } from '../lib/groups.ts'
-import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
 import { Link, navigate } from '../lib/router.tsx'
 import type { CommandOverride, CommandPermission, CommandView, CooldownScope } from '../lib/types.ts'
 import { playgroundDraft } from '../lib/ui-state.ts'
-import { cn } from '../lib/utils.ts'
 
 const permissionLabels: Record<CommandPermission, string> = {
   everyone: '所有人',

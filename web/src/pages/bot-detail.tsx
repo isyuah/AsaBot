@@ -1,19 +1,27 @@
+import {
+  Avatar,
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  type JsonSchema,
+  PageHeader,
+  PageTabs,
+  SchemaForm,
+  Skeleton,
+  useFadeUp,
+} from '@asabot/panel-ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Cable, Radio, Send } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Avatar } from '../components/avatar.tsx'
 import { BotPlugins } from '../components/bot-plugins.tsx'
-import { SchemaForm } from '../components/schema-form.tsx'
-import { Button } from '../components/ui/button.tsx'
-import { PageTabs } from '../components/ui/misc.tsx'
-import { Badge, Card, EmptyState, ErrorState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
 import { api } from '../lib/api.ts'
 import { botPath, connectionPath, invalidatePolicies, timeText } from '../lib/management.ts'
-import { useFadeUp } from '../lib/motion.ts'
 import { Link, navigate } from '../lib/router.tsx'
-import type { BotView, ChannelTarget, JsonSchema } from '../lib/types.ts'
+import type { BotView, ChannelTarget } from '../lib/types.ts'
 import { CapabilityPanel, GroupList, SendDialog } from './bots.tsx'
 import { ConnectionStatus } from './connections.tsx'
 

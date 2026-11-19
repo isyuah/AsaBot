@@ -1,33 +1,12 @@
+import { Badge, Button, Card, CompatibilityInfo, Switch } from '@asabot/panel-ui'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, ChevronDown, Settings2 } from 'lucide-react'
+import { ChevronDown, Settings2 } from 'lucide-react'
 import { useState } from 'react'
 import { api } from '../lib/api.ts'
 import { invalidatePolicies, pluginPath } from '../lib/management.ts'
 import { Link } from '../lib/router.tsx'
-import type { BotPluginView, BotView, Compatibility } from '../lib/types.ts'
+import type { BotPluginView, BotView } from '../lib/types.ts'
 import { ScopedConfig } from './scoped-config.tsx'
-import { Button } from './ui/button.tsx'
-import { Badge, Card } from './ui/primitives.tsx'
-import { Switch } from './ui/switch.tsx'
-
-export function CompatibilityInfo({ value }: { value: Compatibility }) {
-  if (!value.declared) return <Badge>未声明能力要求</Badge>
-  if (!value.required.length && !value.optional.length) return <Badge tone="success">能力匹配</Badge>
-  return (
-    <div className="space-y-1 text-[12px]">
-      {value.required.length > 0 && (
-        <p className="flex items-start gap-1.5 text-warning">
-          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-          缺少必须能力：{value.required.map((item) => item.name).join('、')}
-        </p>
-      )}
-      {value.optional.length > 0 && (
-        <p className="text-fg-3">缺少可选能力：{value.optional.map((item) => item.name).join('、')}</p>
-      )}
-      <p className="text-fg-3">仍可启用；相关功能可能不可用或降级。</p>
-    </div>
-  )
-}
 
 export function BotPlugins({
   bot,

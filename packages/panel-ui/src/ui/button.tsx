@@ -1,7 +1,7 @@
 import { type HTMLMotionProps, motion } from 'motion/react'
 import { forwardRef, type ReactNode } from 'react'
-import { snappy } from '../../lib/motion.ts'
-import { cn } from '../../lib/utils.ts'
+import { snappy } from '../motion.ts'
+import { cn } from '../utils.ts'
 import { Spinner } from './primitives.tsx'
 
 const variants = {

@@ -1,3 +1,20 @@
+import {
+  Avatar,
+  Badge,
+  Card,
+  CardHeader,
+  cn,
+  EmptyState,
+  ErrorState,
+  MessageChart,
+  NumberTicker,
+  PageHeader,
+  Segmented,
+  Skeleton,
+  softSpring,
+  stagger,
+  staggerItem,
+} from '@asabot/panel-ui'
 import { useQuery } from '@tanstack/react-query'
 import {
   ArrowDownLeft,
@@ -13,25 +30,11 @@ import {
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useEffect, useState } from 'react'
-import { Avatar } from '../components/avatar.tsx'
-import { MessageChart } from '../components/message-chart.tsx'
-import { NumberTicker, Segmented } from '../components/ui/misc.tsx'
-import {
-  Badge,
-  Card,
-  CardHeader,
-  EmptyState,
-  ErrorState,
-  PageHeader,
-  Skeleton,
-} from '../components/ui/primitives.tsx'
 import { api } from '../lib/api.ts'
 import { formatBytes, formatDuration, formatRelative } from '../lib/format.ts'
-import { softSpring, stagger, staggerItem } from '../lib/motion.ts'
 import { useLiveMessages } from '../lib/realtime.tsx'
 import { Link } from '../lib/router.tsx'
 import type { BotView } from '../lib/types.ts'
-import { cn } from '../lib/utils.ts'
 
 export function OverviewPage() {
   const overview = useQuery({ queryKey: ['overview'], queryFn: api.overview, refetchInterval: 60_000 })

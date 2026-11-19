@@ -2,7 +2,7 @@ import { ImageOff } from 'lucide-react'
 import { useState } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { cn } from '../lib/utils.ts'
+import { cn } from './utils.ts'
 
 const external = /^(?:https?:|mailto:)/i
 

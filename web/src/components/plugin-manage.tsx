@@ -1,17 +1,12 @@
+import { Button, cn, Dialog, Spinner, Switch, softSpring, spring } from '@asabot/panel-ui'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, ArrowUpCircle, Check, ChevronDown, FileUp, Trash2, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type DragEvent, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { ApiError, api } from '../lib/api.ts'
-import { softSpring, spring } from '../lib/motion.ts'
 import { usePackageOperations, useTrackOperation } from '../lib/realtime.tsx'
 import type { PackageOperation, PluginView } from '../lib/types.ts'
-import { cn } from '../lib/utils.ts'
-import { Button } from './ui/button.tsx'
-import { Dialog } from './ui/dialog.tsx'
-import { Spinner } from './ui/primitives.tsx'
-import { Switch } from './ui/switch.tsx'
 
 const maxUploadBytes = 2 * 1024 * 1024
 

@@ -223,6 +223,8 @@ export default definePlugin({
 
 `entry` 默认为 `index.html`。页面可用 `asabot.on('updated', handler)` 接收 `ctx.panel.push` 推送；SDK 还提供 `asabot.fetch`、`asabot.toast` 和 `asabot.theme`。页面、路由及推送入口随插件卸载失效。
 
+React 插件可使用 [`@asabot/panel-ui`](packages/panel-ui/README.md) 复用控制台的组件和配色。共享包提供编译好的 CSS 和可运行的插件示例。用 `PluginPageLayout` 固定工具栏并让正文在插件页内滚动。
+
 ### 通知与请求事件
 
 事件名按层级匹配：派发 `notice.member.join` 时，`notice`、`notice.member` 和 `notice.member.join` 的监听器都会收到事件。带群 ID 的通知受插件按群开关控制；通知的用户 ID 和群 ID 也参与访问控制。所有 ID 都是字符串。

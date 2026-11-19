@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { cn } from '../lib/utils.ts'
+import { cn } from './utils.ts'
 
 const palettes = [
   'bg-[#efedff] text-[#5245de] dark:bg-[#8b7ffa]/15 dark:text-[#b4acff]',

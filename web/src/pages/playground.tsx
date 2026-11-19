@@ -1,3 +1,27 @@
+import {
+  Avatar,
+  Button,
+  Card,
+  CardHeader,
+  cn,
+  type DispatchTrace,
+  Field,
+  formatClock,
+  Input,
+  Logo,
+  type LogRecord,
+  Menu,
+  MenuItem,
+  MenuSeparator,
+  PageHeader,
+  type Segment,
+  Segmented,
+  Segments,
+  Switch,
+  softSpring,
+  spring,
+  TraceView,
+} from '@asabot/panel-ui'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   ArrowUp,
@@ -25,29 +49,9 @@ import {
 import { AnimatePresence, motion } from 'motion/react'
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Avatar } from '../components/avatar.tsx'
-import { Logo } from '../components/layout/logo.tsx'
-import { Segments } from '../components/segments.tsx'
-import { TraceView } from '../components/trace.tsx'
-import { Button } from '../components/ui/button.tsx'
-import { Field, Input } from '../components/ui/input.tsx'
-import { Menu, MenuItem, MenuSeparator, Segmented } from '../components/ui/misc.tsx'
-import { Card, CardHeader, PageHeader } from '../components/ui/primitives.tsx'
-import { Switch } from '../components/ui/switch.tsx'
 import { api } from '../lib/api.ts'
-import { formatClock } from '../lib/format.ts'
-import { softSpring, spring } from '../lib/motion.ts'
-import type {
-  BotCapabilities,
-  DispatchTrace,
-  LogRecord,
-  PlaygroundEventName,
-  PlaygroundResult,
-  PlaygroundUser,
-  Segment,
-} from '../lib/types.ts'
+import type { BotCapabilities, PlaygroundEventName, PlaygroundResult, PlaygroundUser } from '../lib/types.ts'
 import { playgroundDraft, usePlaygroundDraft } from '../lib/ui-state.ts'
-import { cn } from '../lib/utils.ts'
 
 type Role = 'member' | 'admin' | 'owner'
 

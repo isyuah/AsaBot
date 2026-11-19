@@ -1,7 +1,7 @@
 import * as SwitchPrimitive from '@radix-ui/react-switch'
 import { motion } from 'motion/react'
-import { snappy } from '../../lib/motion.ts'
-import { cn } from '../../lib/utils.ts'
+import { snappy } from '../motion.ts'
+import { cn } from '../utils.ts'
 
 export function Switch({
   id,

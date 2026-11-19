@@ -1,7 +1,7 @@
 import { motion } from 'motion/react'
 import type { HTMLAttributes, ReactNode } from 'react'
-import { softSpring } from '../../lib/motion.ts'
-import { cn } from '../../lib/utils.ts'
+import { softSpring } from '../motion.ts'
+import { cn } from '../utils.ts'
 
 export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return <div className={cn('card', className)} {...props} />

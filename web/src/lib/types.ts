@@ -1,3 +1,4 @@
+import type { DispatchTrace, JsonSchema, LogRecord, Segment, StatsPoint } from '@asabot/panel-ui'
 // Types of the panel HTTP API. They mirror docs/DESIGN.md §18 exactly; that section is the contract.
 
 export type BotStatus = 'connecting' | 'online' | 'offline'
@@ -26,28 +27,6 @@ export interface BotCapabilities {
 }
 
 export type PluginStateName = 'loading' | 'active' | 'failed' | 'disabled'
-
-export interface JsonSchema {
-  writeOnly?: boolean
-  type?: string | string[]
-  title?: string
-  description?: string
-  default?: unknown
-  enum?: unknown[]
-  const?: unknown
-  properties?: Record<string, JsonSchema>
-  required?: string[]
-  items?: JsonSchema
-  minimum?: number
-  maximum?: number
-  exclusiveMinimum?: number
-  exclusiveMaximum?: number
-  minLength?: number
-  maxLength?: number
-  anyOf?: JsonSchema[]
-  oneOf?: JsonSchema[]
-  additionalProperties?: boolean | JsonSchema
-}
 
 export interface CommandView {
   owner: string
@@ -206,23 +185,7 @@ export interface Overview {
   today: { received: number; sent: number }
 }
 
-export interface StatsPoint {
-  t: number
-  received: number
-  sent: number
-}
-
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error'
-
-export interface LogRecord {
-  time: number
-  level: number
-  msg: string
-  plugin?: string
-  /** The dispatched event this record was logged while handling. */
-  eventId?: string
-  [key: string]: unknown
-}
 
 /** A log record as held by the panel, with a client-side sequence number used as a stable list key. */
 export type LogEntry = LogRecord & { seq: number }
@@ -286,40 +249,6 @@ export interface PluginGroupSetting {
   config?: Record<string, unknown>
 }
 
-export type TraceStage = 'filter' | 'observer' | 'middleware' | 'prompt' | 'command' | 'matcher' | 'suggest'
-export type TraceOutcome =
-  | 'handled'
-  | 'passed'
-  | 'blocked'
-  | 'denied'
-  | 'cooldown'
-  | 'invalid'
-  | 'error'
-  | 'timeout'
-
-export interface TraceStep {
-  stage: TraceStage
-  plugin?: string
-  command?: string
-  outcome: TraceOutcome
-  duration: number
-  error?: string
-}
-
-export interface DispatchTrace {
-  eventId: string
-  name: string
-  platform: string
-  selfId: string
-  channel?: string
-  userId?: string
-  time: number
-  duration: number
-  steps: TraceStep[]
-  /** Message IDs sent while handling the event. */
-  sent: string[]
-}
-
 export type AccessList = 'block' | 'allow'
 export type AccessSubject = 'user' | 'group'
 
@@ -327,11 +256,6 @@ export interface AccessEntry {
   list: AccessList
   subject: AccessSubject
   key: string
-}
-
-export interface Segment {
-  type: string
-  data: Record<string, unknown>
 }
 
 export interface PlaygroundUser {

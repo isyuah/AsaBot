@@ -1,3 +1,4 @@
+import type { LogRecord, Segment, StatsPoint } from '@asabot/panel-ui'
 import type {
   AccessEntry,
   AdapterView,
@@ -14,7 +15,6 @@ import type {
   GroupDetail,
   GroupView,
   LogLevel,
-  LogRecord,
   Overview,
   PackageDetail,
   PackageOperation,
@@ -25,12 +25,10 @@ import type {
   PlaygroundResult,
   PluginGroupSetting,
   PluginView,
-  Segment,
   Session,
   Settings,
   SettingsUpdate,
   SetupInput,
-  StatsPoint,
   Target,
   TaskAttempt,
   TaskRecord,

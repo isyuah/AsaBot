@@ -1,24 +1,35 @@
+import {
+  Avatar,
+  Badge,
+  Button,
+  Card,
+  cn,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  Field,
+  formatNumber,
+  Input,
+  PageHeader,
+  Segmented,
+  Skeleton,
+  stagger,
+  staggerItem,
+  Textarea,
+  useFadeUp,
+} from '@asabot/panel-ui'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Check, ChevronRight, Minus, Plus, Radio, Search, Send } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type FormEvent, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Avatar } from '../components/avatar.tsx'
-import { Button } from '../components/ui/button.tsx'
-import { Dialog } from '../components/ui/dialog.tsx'
-import { Field, Input, Textarea } from '../components/ui/input.tsx'
-import { Segmented } from '../components/ui/misc.tsx'
-import { Badge, Card, EmptyState, ErrorState, PageHeader, Skeleton } from '../components/ui/primitives.tsx'
 import { api } from '../lib/api.ts'
 import { type CapabilityRow, capabilityRows } from '../lib/capabilities.ts'
-import { formatNumber } from '../lib/format.ts'
 import { groupPath } from '../lib/groups.ts'
 import { botPath } from '../lib/management.ts'
-import { stagger, staggerItem, useFadeUp } from '../lib/motion.ts'
 import { isValidId } from '../lib/platform.ts'
 import { Link, navigate, usePath } from '../lib/router.tsx'
 import type { BotView, ChannelTarget } from '../lib/types.ts'
-import { cn } from '../lib/utils.ts'
 import { BotDetailPage } from './bot-detail.tsx'
 import { ConnectionsPage, RobotTabs } from './connections.tsx'
 

@@ -1,12 +1,9 @@
+import { Button, Input, Logo, softSpring, spring } from '@asabot/panel-ui'
 import { useMutation } from '@tanstack/react-query'
 import { ArrowRight, KeyRound } from 'lucide-react'
 import { motion, useAnimationControls } from 'motion/react'
 import { type FormEvent, useState } from 'react'
-import { Logo } from '../components/layout/logo.tsx'
-import { Button } from '../components/ui/button.tsx'
-import { Input } from '../components/ui/input.tsx'
 import { ApiError, api } from '../lib/api.ts'
-import { softSpring, spring } from '../lib/motion.ts'
 
 export function LoginPage({ onSuccess }: { onSuccess: () => void }) {
   const [password, setPassword] = useState('')

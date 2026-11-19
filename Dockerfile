@@ -4,10 +4,12 @@ WORKDIR /app
 RUN npm install --global pnpm@12.4.1
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY web/package.json ./web/package.json
+COPY packages/panel-ui/package.json ./packages/panel-ui/package.json
 
 FROM dependencies AS web-build
 RUN pnpm install --frozen-lockfile
 COPY web/ ./web/
+COPY packages/panel-ui/src/ ./packages/panel-ui/src/
 RUN pnpm --filter web build
 
 FROM dependencies AS production-dependencies
