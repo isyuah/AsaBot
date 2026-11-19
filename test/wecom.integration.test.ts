@@ -290,7 +290,9 @@ describe('WeCom built-in adapter', () => {
       expect.arrayContaining([
         [
           { type: 'private', id: userId },
-          expect.objectContaining({ markdown: { content: expect.stringContaining('机器人管理员：是') } }),
+          expect.objectContaining({
+            markdown: { content: expect.stringContaining('机器人管理员：是  \n框架管理员：否') },
+          }),
         ],
         [{ type: 'group', id: groupId }, expect.objectContaining({ msgtype: 'markdown' })],
       ]),
@@ -679,8 +681,33 @@ describe('official WeCom SDK transport', () => {
     send(socket, message('bot-primary', 'wire-reply', text('hello')))
     await vi.waitFor(() => expect(sessions.map((session) => session.messageId)).toEqual(['msg-wire-reply']))
     const session = required(sessions[0])
-    await session.reply(seg.markdown('**answer**'))
-    await session.reply('push', { quote: false })
+    const markdown = '**answer**\n\n- first\n- second'
+    await session.reply(seg.markdown(markdown))
+    await session.reply(seg.text('first\r\n*second*\r\n\r\nthird\nfourth'))
+    await session.reply('push\nnext line', { quote: false })
+    expect(frames.slice(1)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          cmd: WsCmd.RESPONSE,
+          headers: { req_id: 'wire-reply' },
+          body: { msgtype: 'markdown', markdown: { content: markdown } },
+        }),
+        expect.objectContaining({
+          cmd: WsCmd.RESPONSE,
+          headers: { req_id: 'wire-reply' },
+          body: { msgtype: 'markdown', markdown: { content: 'first  \n\\*second\\*\n\nthird  \nfourth' } },
+        }),
+        expect.objectContaining({
+          cmd: WsCmd.SEND_MSG,
+          body: {
+            chatid: userId,
+            chat_type: 1,
+            msgtype: 'markdown',
+            markdown: { content: 'push  \nnext line' },
+          },
+        }),
+      ]),
+    )
     await bot().sendGroup(
       groupId,
       wecom.card({ card_type: 'button_interaction', button_list: [{ text: '选项', key: 'pick' }] }),
@@ -689,15 +716,6 @@ describe('official WeCom SDK transport', () => {
     await bot().sendPrivate(userId, seg.file(bytes, { name: 'report.bin' }))
     expect(frames.slice(1)).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          cmd: WsCmd.RESPONSE,
-          headers: { req_id: 'wire-reply' },
-          body: { msgtype: 'markdown', markdown: { content: '**answer**' } },
-        }),
-        expect.objectContaining({
-          cmd: WsCmd.SEND_MSG,
-          body: { chatid: userId, chat_type: 1, msgtype: 'markdown', markdown: { content: 'push' } },
-        }),
         expect.objectContaining({
           cmd: WsCmd.SEND_MSG,
           body: expect.objectContaining({

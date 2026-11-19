@@ -37,7 +37,7 @@ AsaBot 内置 `wecom` 适配器，使用企业微信 **智能机器人 → API �
 | --- | --- |
 | 回复当前消息 | `session.reply(content)` 用原回调的 `req_id`，回复窗口为 24 小时；过期或被拒绝时返回错误，不切换到主动发送。 |
 | 主动发送 | `session.send(content)`、`session.reply(content, { quote: false })`、`bot.sendPrivate`、`bot.sendGroup`，明确区分私聊和群聊。 |
-| 文本、Markdown、卡片 | 纯文本用 Markdown 通道发送并转义语法；需要格式用 `seg.markdown()`。出站 `at` 降级为 `@用户ID` 文本。模板卡片使用 `wecom.card()`。 |
+| 文本、Markdown、卡片 | 纯文本用 Markdown 通道发送，转义语法并保留换行；`seg.markdown()` 原样发送。出站 `at` 降级为 `@用户ID` 文本。模板卡片使用 `wecom.card()`。 |
 | 入站附件与引用 | 文本、图文混排、图片、文件、视频和语音转写。引用以 `reply` 段附带内容快照；企微不提供被引用消息的 ID，`wecom-quote:` ID 仅供本地记录。 |
 | 下载原始附件 | `bot.wecom.downloadMedia(segment.data.file)` 返回解密后的 `Buffer`。入站句柄仅该机器人可用，最多 5 分钟；仅从公网 HTTPS 下载，不跟随重定向，超时 30 秒，解密后最大 20 MiB。 |
 | 上传并发送 | `seg.image`：PNG/JPEG/GIF，10 MiB；`seg.video`：MP4，10 MiB；`seg.audio`：AMR，2 MiB；`seg.file`：20 MiB。最少 5 字节，不转码。来源支持 `Buffer`、绝对路径、HTTP(S) URL 或同账号的有效入站句柄。 |

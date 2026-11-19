@@ -84,6 +84,13 @@ export const contentText = z
 
 type OutgoingPart = { body: SendMsgBody; message: Message } | { media: MediaSegment }
 
+function textToMarkdown(text: string): string {
+  return text
+    .replace(/[\\`*_{}[\]()#+\-.!|>~<]/g, '\\$&')
+    .replace(/\r\n?/g, '\n')
+    .replace(/(?<!\n)\n(?!\n)/g, '  \n')
+}
+
 function markdownPart(content: string, message: Message): OutgoingPart {
   return { body: { msgtype: 'markdown', markdown: { content: contentText.parse(content) } }, message }
 }
@@ -93,10 +100,7 @@ export function* outgoing(message: Message): Generator<OutgoingPart> {
   let parts: Message = []
   for (const segment of message) {
     if (isSegment(segment, 'text') || isSegment(segment, 'markdown')) {
-      content +=
-        segment.type === 'markdown'
-          ? segment.data.content
-          : segment.data.text.replace(/[\\`*_{}[\]()#+\-.!|>~<]/g, '\\$&')
+      content += segment.type === 'markdown' ? segment.data.content : textToMarkdown(segment.data.text)
       parts.push(segment)
       continue
     }
