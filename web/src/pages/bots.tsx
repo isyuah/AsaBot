@@ -29,7 +29,7 @@ import { groupPath } from '../lib/groups.ts'
 import { botPath } from '../lib/management.ts'
 import { isValidId } from '../lib/platform.ts'
 import { Link, navigate, usePath } from '../lib/router.tsx'
-import type { BotView, ChannelTarget } from '../lib/types.ts'
+import type { BotCapabilities, BotView, ChannelTarget } from '../lib/types.ts'
 import { BotDetailPage } from './bot-detail.tsx'
 import { ConnectionsPage, RobotTabs } from './connections.tsx'
 
@@ -126,7 +126,7 @@ export function CapabilityPanel({
   capabilities,
   adapter = false,
 }: {
-  capabilities: BotView['capabilities']
+  capabilities: BotCapabilities
   adapter?: boolean
 }) {
   const { segments, styles, actions } = capabilityRows(capabilities)

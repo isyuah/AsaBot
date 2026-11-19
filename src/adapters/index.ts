@@ -60,6 +60,7 @@ export const adapters = [
     connectionTypes: ['long-connection'],
     capabilities: feishuCapabilities,
     configSchema: feishuConnection,
+    botBinding: (config) => ({ key: config.appId }),
     create: (config, host) =>
       reconfigurable(new FeishuAdapter(feishuConfig(config), host), (value) =>
         feishuConfig(feishuConnection.parse(value)),
@@ -74,6 +75,8 @@ export const adapters = [
     connectionTypes: ['forward', 'reverse'],
     capabilities: onebotCapabilities,
     configSchema: onebotConnection,
+    botBinding: (config) =>
+      config.type === 'reverse' ? { key: 'reverse', multiple: true } : { key: `forward:${config.url}` },
     create: (config, host) =>
       reconfigurable(
         new OneBotAdapter(onebotConfig(config), host, { ignoreSelf: host.ignoreSelf }),

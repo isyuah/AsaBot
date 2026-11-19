@@ -49,6 +49,7 @@ function applyFrame(
       void client.invalidateQueries({ queryKey: ['connections'] })
       void client.invalidateQueries({ queryKey: ['bots'] })
       void client.invalidateQueries({ queryKey: ['bot'] })
+      void client.invalidateQueries({ queryKey: ['pluginBots'] })
       void client.invalidateQueries({ queryKey: ['overview'] })
       break
     case 'policies':

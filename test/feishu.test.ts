@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Writable } from 'node:stream'
 import { EventDispatcher } from '@larksuiteoapi/node-sdk'
+import pino from 'pino'
 import { describe, expect, it, vi } from 'vitest'
 import {
   FeishuAdapter,
@@ -22,8 +26,20 @@ import {
   isFeishuReaction,
 } from '../src/adapters/feishu/index.ts'
 import { incomingMessage, readMedia } from '../src/adapters/feishu/message.ts'
+import { configSchema } from '../src/core/config/schema.ts'
 import { createLogger, getRecentLogs } from '../src/core/logger.ts'
-import { definePlugin, formatTarget, parseTarget, plainText, seg, type Target, z } from '../src/index.ts'
+import {
+  type App,
+  createApp,
+  defineAdapter,
+  definePlugin,
+  formatTarget,
+  parseTarget,
+  plainText,
+  seg,
+  type Target,
+  z,
+} from '../src/index.ts'
 import { createTestApp } from '../src/testing/index.ts'
 
 const account = { appId: 'cli_0123456789abcdef', appSecret: 'test-app-secret' }
@@ -154,6 +170,114 @@ function commandValue(bot: FeishuBot, command: string): Record<string, unknown> 
 }
 
 describe('Feishu adapter', () => {
+  it('manages a known account during a failed restart and restores its policy on reconnection', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'asabot-feishu-account-'))
+    const selfId = 'ou_persistent_bot'
+    let unavailable = false
+    const definition = defineAdapter({
+      id: 'feishu-test',
+      platform: 'feishu',
+      name: 'Feishu test',
+      version: '1.0.0',
+      description: '',
+      connectionTypes: ['long-connection'],
+      capabilities: { actions: [], segments: [], textStyles: [] },
+      configSchema: z.object({ appId: z.string(), appSecret: z.string() }),
+      botBinding: ({ appId }) => ({ key: appId }),
+      create: (config, host) =>
+        new FeishuAdapter(feishuSchema.parse({ accounts: [config] }), host, {
+          createTransport: (_account, lifecycle) => {
+            const transport = new MockTransport(lifecycle, selfId)
+            if (unavailable) transport.override = () => ({ code: 1, msg: 'Login unavailable' })
+            return transport
+          },
+        }),
+    })
+    const boot = async () => {
+      const app = createApp(
+        configSchema.parse({
+          dataDir,
+          pluginLoader: { dirs: [], hotReload: false },
+          connections: [{ id: 'primary', name: 'Feishu', adapter: definition.id, config: account }],
+          server: { port: 0, panelPassword: 'panel-secret', apiToken: 'api-secret' },
+        }),
+        { adapters: [{ definition, source: 'test' }], logger: pino({ level: 'silent' }) },
+      )
+      app.plugins.register(definePlugin({ name: 'offline-policy', setup() {} }))
+      await app.start()
+      return app
+    }
+    let app: App | undefined
+    try {
+      app = await boot()
+      const first = app.botAccounts.get({ platform: 'feishu', selfId })
+      expect(first).toMatchObject({
+        nickname: 'Test bot',
+        connectionId: 'primary',
+        lastOnlineAt: expect.any(Number),
+      })
+      await app.stop()
+      unavailable = true
+      app = await boot()
+      const base = `http://127.0.0.1:${app.server?.address()?.port}`
+      const login = await fetch(`${base}/api/panel/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'panel-secret' }),
+      })
+      const cookie = login.headers.get('set-cookie')?.split(';')[0]
+      if (!cookie) throw new Error('Panel login failed')
+      const panel = (path: string, method = 'GET', data?: unknown) =>
+        fetch(`${base}/api/panel${path}`, {
+          method,
+          headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        })
+      const path = `/bots/feishu/${selfId}`
+      const offline = {
+        selfId,
+        status: 'offline',
+        nickname: 'Test bot',
+        avatar: 'https://example.com/bot.png',
+        connectionId: 'primary',
+        lastOnlineAt: first?.lastOnlineAt,
+      }
+      expect(await (await panel('/bots')).json()).toEqual([expect.objectContaining(offline)])
+      expect(await (await panel(path)).json()).toMatchObject({
+        bot: { ...offline, capabilities: first?.capabilities },
+      })
+      expect(await (await panel('/connections')).json()).toMatchObject([
+        { state: 'retrying', bots: [{ platform: 'feishu', selfId }] },
+      ])
+      expect((await panel(`${path}/groups`)).status).toBe(409)
+      expect(
+        await (
+          await fetch(`${base}/api/v1/bots`, { headers: { Authorization: 'Bearer api-secret' } })
+        ).json(),
+      ).toEqual([])
+      expect((await panel(`${path}/admins`, 'PUT', { admins: ['ou_admin'] })).status).toBe(200)
+      expect((await panel(`${path}/plugins/offline-policy`, 'PUT', { enabled: true })).status).toBe(200)
+
+      unavailable = false
+      expect((await panel('/connections/primary/reconnect', 'POST')).status).toBe(200)
+      expect(await (await panel(path)).json()).toMatchObject({
+        bot: { status: 'online', lastOnlineAt: expect.any(Number) },
+        admins: ['ou_admin'],
+        plugins: expect.arrayContaining([
+          expect.objectContaining({ name: 'offline-policy', botEnabled: true }),
+        ]),
+      })
+
+      expect((await panel('/connections/primary', 'DELETE')).status).toBe(200)
+      const saved = await (await panel(path)).json()
+      expect(saved).toMatchObject({ bot: { status: 'offline' }, admins: ['ou_admin'] })
+      expect(saved.bot).not.toHaveProperty('connectionId')
+    } finally {
+      await app?.stop()
+      await rm(dataDir, { recursive: true, force: true })
+    }
+  })
+
   it('routes commands, split messages, card commands and persisted tasks to the original thread', async () => {
     const t = await fixture({
       plugins: [

@@ -10,6 +10,7 @@ import type {
   UpgradeHandler,
 } from './adapter.ts'
 import { type Bot, BotRegistry, type SendResult, sendTo } from './bot.ts'
+import { BotAccounts, type BotBinding } from './bot-accounts.ts'
 import { BotPolicies } from './bot-policies.ts'
 import type { Config } from './config/schema.ts'
 import { Connections } from './connections.ts'
@@ -98,6 +99,7 @@ export class App implements AdapterHost {
   readonly events: CoreEvents
   readonly connections: Connections
   readonly bots = new BotRegistry()
+  readonly botAccounts: BotAccounts
   readonly policies: BotPolicies
   readonly storage: Storage
   readonly plugins: PluginManager
@@ -138,6 +140,7 @@ export class App implements AdapterHost {
     this.sessionServices = this.dispatcher
     this.events = new CoreEvents(this.dispatcher)
     this.storage = new Storage(config.dataDir, logger)
+    this.botAccounts = new BotAccounts(this.storage)
     this.policies = new BotPolicies(this.storage)
     this.apiInterceptors.check = (call) => {
       const owner = pluginExecution.getStore() ?? dispatchContext.getStore()?.plugin
@@ -211,6 +214,7 @@ export class App implements AdapterHost {
 
   setBotInfo(bot: Bot, info: BotInfo): void {
     this.botInfo.set(bot, info)
+    if (this.getBot(bot.platform, bot.selfId) === bot) this.botAccounts.record(bot, info)
   }
 
   getBotInfo(bot: Bot): BotInfo | undefined {
@@ -310,6 +314,8 @@ export class App implements AdapterHost {
 
   emit(event: AnyEvent): void {
     if (this.state === 'stopped') return
+    if (event.name === 'bot.online' && this.getBot(event.platform, event.selfId) === event.bot)
+      this.botAccounts.record(event.bot, this.getBotInfo(event.bot), event.time)
     void this.dispatcher.dispatch(event).catch((error: unknown) => {
       this.logger.error({ err: error, event: event.name, eventId: event.id }, 'Event dispatch failed')
     })
@@ -336,10 +342,12 @@ export class App implements AdapterHost {
     return this.apiInterceptors.invoke(call, execute)
   }
 
-  registerBot(bot: Bot): void {
+  registerBot(bot: Bot, binding?: BotBinding): void {
     this.policies.enroll(bot, () => this.plugins.defaultsForNewBot())
     this.bots.register(bot)
     this.apiInterceptors.wrap(bot)
+    this.botAccounts.record(bot, this.getBotInfo(bot), bot.status === 'online' ? Date.now() : undefined)
+    this.botAccounts.bind(bot, binding)
   }
 
   unregisterBot(bot: Bot): void {

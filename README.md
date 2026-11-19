@@ -51,6 +51,8 @@ npm run dev
 
 每个飞书应用单独创建一条连接；OneBot 正向连接和反向监听也分别创建。反向监听可接入多个机器人，地址为 `ws://主机:5140/connections/<连接ID>/onebot/v11/ws`。旧的根配置 `adapters` 已移除，现有配置需改为 `connections`，详见示例配置。
 
+框架会记住已识别的机器人账号。断线、停用连接或重启后，可以继续从「机器人」进入该账号，修改管理员、插件开关和配置。详情会显示最近上线时间；发送消息和刷新群列表需要机器人在线。删除连接或换号会解除原有的连接关联，账号和设置仍会保留。
+
 ## 开发和加载适配器
 
 内置适配器在 `src/adapters/<平台>/` 独立实现，在 [内置注册表](src/adapters/index.ts) 加一项；公开平台能力时可增加 npm 子路径。第三方适配器可以独立开发成 ESM npm 包，不需要修改框架。通过 `@asabot/core` 导入 `defineAdapter` 和类型，默认导出适配器定义，声明 `id`、`platform`、名称、版本、连接方式、能力、配置 schema 以及 `create(config, host)`。驱动实现 `start()`、`stop()` 和 `reconfigure(config)`；框架在调用前校验配置，每条连接分别创建实例。见 [AdapterHost 契约](src/core/adapter.ts)。

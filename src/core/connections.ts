@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { z } from 'zod'
 import type { Adapter, AdapterDefinition, AdapterHost } from './adapter.ts'
 import type { App } from './app.ts'
 import type { Bot } from './bot.ts'
+import type { BotBinding } from './bot-accounts.ts'
 import { ConfigError } from './errors.ts'
 import { botIdentitySchema, botKey } from './identity.ts'
 import { redactSchemaText } from './utils/redact.ts'
@@ -37,6 +39,7 @@ interface Entry {
   state: ConnectionState
   adapter?: Adapter
   bots: Map<string, Bot>
+  binding: BotBinding
   generation: number
 }
 
@@ -63,7 +66,14 @@ export class Connections {
   }
   catalog() {
     return [...this.definitions.values()].map(({ definition, source }) => {
-      const { create: _create, configSchema, setup, accountId: _accountId, ...metadata } = definition
+      const {
+        create: _create,
+        configSchema,
+        setup,
+        accountId: _accountId,
+        botBinding: _botBinding,
+        ...metadata
+      } = definition
       return {
         ...metadata,
         ...(setup && { setup: { kind: setup.kind } }),
@@ -97,14 +107,26 @@ export class Connections {
     })
   }
   list(): ConnectionState[] {
-    return [...this.entries.values()].map((entry) => ({
-      ...entry.state,
-      endpoints: [...entry.state.endpoints],
-      bots: [...entry.bots.values()].map(({ platform, selfId }) => ({ platform, selfId })),
-    }))
+    const accounts = this.app.botAccounts.list()
+    return [...this.entries.values()].map((entry) => {
+      const bots = accounts.filter((bot) => bot.connectionId === entry.config.id)
+      const lastOnlineAt = Math.max(0, ...bots.map((bot) => bot.lastOnlineAt ?? 0))
+      return {
+        ...entry.state,
+        lastConnectedAt: entry.state.lastConnectedAt ?? (lastOnlineAt || undefined),
+        endpoints: [...entry.state.endpoints],
+        bots: bots.map(({ platform, selfId }) => ({ platform, selfId })),
+      }
+    })
   }
-  knownBots(): Bot[] {
-    return [...this.entries.values()].flatMap((entry) => [...entry.bots.values()])
+  private binding(config: ConnectionConfig): BotBinding {
+    const definition = this.definition(config.adapter)
+    const account = definition.accountId?.(config.config)
+    const remote = definition.botBinding?.(config.config)
+    const key = createHash('sha256')
+      .update(JSON.stringify([definition.id, account, remote?.key]))
+      .digest('hex')
+    return { id: config.id, key, multiple: account === undefined && (remote?.multiple ?? !remote) }
   }
   subscribe(listener: () => void): () => void {
     this.subscribers.add(listener)
@@ -136,14 +158,16 @@ export class Connections {
     this.publish()
   }
   async apply(configs: ConnectionConfig[]): Promise<void> {
-    const parsed = this.validate(configs)
+    const parsed = this.validate(configs).map((config) => ({ config, binding: this.binding(config) }))
+    const bindings = new Map(parsed.map(({ config, binding }) => [config.id, binding]))
     for (const [id, entry] of this.entries) {
-      if (!parsed.some((config) => config.id === id)) {
+      if (!bindings.has(id)) {
         await this.stopEntry(entry)
         this.entries.delete(id)
       }
     }
-    for (const config of parsed) {
+    this.app.botAccounts.pruneBindings(bindings)
+    for (const { config, binding } of parsed) {
       let entry = this.entries.get(config.id)
       if (entry && isDeepStrictEqual(entry.config, config)) continue
       const { accountId } = this.definition(config.adapter)
@@ -151,10 +175,14 @@ export class Connections {
         entry &&
         (entry.config.adapter !== config.adapter ||
           (accountId && accountId(entry.config.config) !== accountId(config.config)))
+      const bindingChanged = entry && entry.binding.key !== binding.key
       if (entry?.adapter && !replaced && entry.config.enabled && config.enabled) {
         const changed = !isDeepStrictEqual(entry.config.config, config.config)
         entry.config = config
+        entry.binding = binding
         entry.state.name = config.name
+        if (bindingChanged)
+          Object.assign(entry.state, { lastConnectedAt: undefined, lastError: undefined, errorAt: undefined })
         if (changed) {
           this.update(entry, { state: 'connecting', nextRetryAt: undefined })
           try {
@@ -171,6 +199,7 @@ export class Connections {
           config,
           generation: 0,
           bots: new Map(),
+          binding,
           state: {
             id: config.id,
             name: config.name,
@@ -185,10 +214,10 @@ export class Connections {
         }
         this.entries.set(config.id, entry)
       }
-      if (replaced) {
-        entry.bots.clear()
+      if (bindingChanged) {
         Object.assign(entry.state, { lastConnectedAt: undefined, lastError: undefined, errorAt: undefined })
       }
+      entry.binding = binding
       entry.config = config
       Object.assign(entry.state, {
         name: config.name,
@@ -221,6 +250,7 @@ export class Connections {
     await entry.adapter?.stop()
     entry.adapter = undefined
     for (const bot of entry.bots.values()) this.app.unregisterBot(bot)
+    entry.bots.clear()
     this.update(entry, {
       state: entry.config.enabled ? 'offline' : 'disabled',
       endpoints: [],
@@ -275,18 +305,21 @@ export class Connections {
         const existing = app.bots.get(bot.platform, bot.selfId)
         if (existing && existing !== bot && existing.status === 'online')
           throw new Error(`Bot ${bot.platform}:${bot.selfId} already belongs to another connection`)
+        app.registerBot(bot, entry.binding)
         entry.bots.set(botKey(bot), bot)
-        app.registerBot(bot)
         app.setBotInfo(bot, { connection: entry.config.adapter, connectionId: entry.config.id })
         this.publish()
       },
       unregisterBot: (bot) => {
         if (current()) {
           app.unregisterBot(bot)
+          if (entry.bots.get(botKey(bot)) === bot) entry.bots.delete(botKey(bot))
           this.publish()
         }
       },
-      setBotInfo: (bot, info) => app.setBotInfo(bot, { ...info, connectionId: entry.config.id }),
+      setBotInfo: (bot, info) => {
+        if (current()) app.setBotInfo(bot, { ...info, connectionId: entry.config.id })
+      },
       registerUpgrade: (path, handler) => {
         const endpoint = `/connections/${encodeURIComponent(entry.config.id)}${path}`
         const remove = app.registerUpgrade(endpoint, handler)

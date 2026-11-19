@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs'
 import type { App } from '../core/app.ts'
 import type { Bot } from '../core/bot.ts'
+import { type BotAccount, botAvatar } from '../core/bot-accounts.ts'
 import { compatibility } from '../core/capabilities.ts'
 import type { CommandDefinition } from '../core/command/builder.ts'
 import { formatUsage } from '../core/command/parse.ts'
-import { botKey } from '../core/identity.ts'
+import { type BotIdentity, botKey } from '../core/identity.ts'
 import type { PluginState } from '../core/plugin/types.ts'
 
 const version = (
@@ -13,19 +14,15 @@ const version = (
   }
 ).version
 
-export function botView(app: App, bot: Bot) {
-  const info = app.getBotInfo(bot)
-  const avatar = bot.avatar ?? bot.getAvatarUrl?.(bot.selfId)
+function botView(app: App, account: BotAccount, live?: Bot) {
+  const info = live && app.getBotInfo(live)
   return {
-    platform: bot.platform,
-    selfId: bot.selfId,
-    ...(bot.nickname === undefined ? {} : { nickname: bot.nickname }),
-    ...(avatar === undefined ? {} : { avatar }),
-    status: app.bots.get(bot.platform, bot.selfId) === bot ? bot.status : 'offline',
-    connectionId: info?.connectionId,
-    capabilities: bot.capabilities,
-    connection: info?.connection ?? '',
-    ...(info?.url === undefined ? {} : { url: info.url }),
+    ...account,
+    nickname: live?.nickname || account.nickname,
+    avatar: (live && botAvatar(live)) ?? account.avatar,
+    status: live?.status ?? 'offline',
+    connection: info?.connection ?? account.connection ?? '',
+    capabilities: live?.capabilities ?? account.capabilities,
   }
 }
 
@@ -88,7 +85,7 @@ export function overview(app: App) {
     node: process.version,
     startedAt: app.startedAt,
     memory: { rss: memory.rss, heapUsed: memory.heapUsed },
-    bots: panelBots(app).map((bot) => botView(app, bot)),
+    bots: panelBots(app),
     plugins: {
       active: states.filter((item) => item.state === 'active').length,
       failed: states.filter((item) => item.state === 'failed').length,
@@ -98,15 +95,24 @@ export function overview(app: App) {
   }
 }
 
-export function panelBots(app: App): Bot[] {
-  return [
-    ...new Map(
-      [...app.connections.knownBots(), ...app.bots.list()].map((bot) => [botKey(bot), bot]),
-    ).values(),
-  ]
+export function panelBot(app: App, identity: BotIdentity) {
+  const { platform, selfId } = identity
+  const live = app.getBot(platform, selfId)
+  const account = app.botAccounts.get(identity)
+  if (live || account) return botView(app, account ?? { platform, selfId }, live)
 }
 
-export function botPluginView(app: App, bot: Bot, name: string) {
+export function panelBots(app: App) {
+  const accounts = new Map(app.botAccounts.list().map((account) => [botKey(account), account]))
+  for (const bot of app.bots.list()) {
+    if (!accounts.has(botKey(bot))) accounts.set(botKey(bot), { platform: bot.platform, selfId: bot.selfId })
+  }
+  return [...accounts.values()].map((account) =>
+    botView(app, account, app.getBot(account.platform, account.selfId)),
+  )
+}
+
+export function botPluginView(app: App, bot: BotAccount, name: string) {
   const state = app.plugins.get(name)
   if (!state) throw new Error('Unknown plugin')
   const policy = app.policies.plugin(bot, name)
@@ -124,6 +130,6 @@ export function botPluginView(app: App, bot: Bot, name: string) {
       state.configSchema && app.plugins.getConfig(name) !== undefined
         ? app.plugins.configSources(name, bot)
         : {},
-    compatibility: compatibility(state.capabilities, bot.capabilities),
+    compatibility: bot.capabilities && compatibility(state.capabilities, bot.capabilities),
   }
 }

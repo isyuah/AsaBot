@@ -73,6 +73,13 @@ const coreMigrations: Migration[] = [
         SELECT DISTINCT json_array(platform, self_id) FROM p_history_messages WHERE platform <> 'virtual'`)
     }
   },
+  `CREATE TABLE bot_accounts (
+     bot_key TEXT PRIMARY KEY, nickname TEXT, avatar TEXT, capabilities TEXT,
+     connection TEXT, connection_id TEXT, binding_key TEXT, last_online_at INTEGER
+   );
+   CREATE INDEX bot_accounts_connection ON bot_accounts(connection_id);
+   INSERT INTO bot_accounts (bot_key)
+     SELECT bot_key FROM bot_plugin_defaults WHERE json_extract(bot_key, '$[0]') <> 'virtual';`,
 ]
 
 /** SQLite 存储及插件状态、迁移和访问控制管理器。 */

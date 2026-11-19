@@ -11,9 +11,9 @@ export interface BotView {
   /** Display text supplied by the adapter, e.g. '正向 WS'. */
   connection: string
   connectionId?: string
-  url?: string
   avatar?: string
-  capabilities: BotCapabilities
+  capabilities?: BotCapabilities
+  lastOnlineAt?: number
 }
 
 export type TextStyle = 'bold' | 'italic' | 'underline' | 'strike' | 'code' | 'spoiler'
@@ -430,7 +430,7 @@ export interface BotPluginView extends PluginView {
   override?: Record<string, unknown>
   effectiveConfig?: unknown
   configSources: Record<string, string>
-  compatibility: Compatibility
+  compatibility?: Compatibility
 }
 export interface BotDetail {
   bot: BotView

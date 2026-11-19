@@ -4,8 +4,9 @@ import { Badge } from './ui/primitives.tsx'
 export function CompatibilityInfo({
   value,
 }: {
-  value: { declared: boolean; required: readonly { name: string }[]; optional: readonly { name: string }[] }
+  value?: { declared: boolean; required: readonly { name: string }[]; optional: readonly { name: string }[] }
 }) {
+  if (!value) return <Badge>暂无能力记录</Badge>
   if (!value.declared) return <Badge>未声明能力要求</Badge>
   if (!value.required.length && !value.optional.length) return <Badge tone="success">能力匹配</Badge>
   return (

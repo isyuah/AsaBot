@@ -11,7 +11,7 @@ import { deleteCookie, setCookie } from 'hono/cookie'
 import WebSocket, { WebSocketServer } from 'ws'
 import { z } from 'zod'
 import type { App, ServerService } from '../core/app.ts'
-import { type Bot, supports } from '../core/bot.ts'
+import { supports } from '../core/bot.ts'
 import { commandOverrideSchema, logLevelSchema } from '../core/config/schema.ts'
 import { deleteConfigValue, writeConfigValue } from '../core/config/write.ts'
 import { connectionSchema } from '../core/connections.ts'
@@ -56,7 +56,7 @@ import {
   settingsInput,
   setupInput,
 } from './settings.ts'
-import { botPluginView, botView, commandView, overview, panelBots, pluginView } from './views.ts'
+import { botPluginView, commandView, overview, panelBot, panelBots, pluginView } from './views.ts'
 
 type Env = { Bindings: HttpBindings }
 type ServerContext = Context<Env>
@@ -529,7 +529,7 @@ export class HttpServer implements ServerService {
     }
     panel.all('/ext/:name', forwardPanelPlugin)
     panel.all('/ext/:name/*', forwardPanelPlugin)
-    panel.get('/bots', (c) => c.json(panelBots(this.app).map((bot) => botView(this.app, bot))))
+    panel.get('/bots', (c) => c.json(panelBots(this.app)))
     panel.get('/adapters', (c) => c.json(this.app.connections.catalog()))
     const setupSession = (c: ServerContext) => {
       const session = this.auth.session(c.req.header('cookie'))
@@ -581,14 +581,14 @@ export class HttpServer implements ServerService {
       return c.json(await this.settings.connections())
     })
     const requireBot = (platform: string, selfId: string) => {
-      const bot = panelBots(this.app).find((item) => item.platform === platform && item.selfId === selfId)
+      const bot = panelBot(this.app, { platform, selfId })
       if (!bot) throw new HttpError(404, 'NOT_FOUND', 'Bot not found')
       return bot
     }
     panel.get('/bots/:platform/:selfId', (c) => {
       const bot = requireBot(c.req.param('platform'), c.req.param('selfId'))
       return c.json({
-        bot: botView(this.app, bot),
+        bot,
         admins: this.app.policies.admins(bot),
         plugins: this.app.plugins.list().map((plugin) => botPluginView(this.app, bot, plugin.name)),
       })
@@ -624,7 +624,7 @@ export class HttpServer implements ServerService {
       this.requirePlugin(name)
       return c.json(
         panelBots(this.app).map((bot) => ({
-          bot: botView(this.app, bot),
+          bot,
           application: botPluginView(this.app, bot, name),
         })),
       )
@@ -673,8 +673,9 @@ export class HttpServer implements ServerService {
       })
     })
     panel.get('/bots/:platform/:selfId/groups', async (c) => {
-      const bot = this.app.getBot(c.req.param('platform'), c.req.param('selfId'))
-      if (!bot) throw new HttpError(404, 'NOT_FOUND', 'Bot not found')
+      const { platform, selfId } = requireBot(c.req.param('platform'), c.req.param('selfId'))
+      const bot = this.app.getBot(platform, selfId)
+      if (bot?.status !== 'online') throw new HttpError(409, 'NO_BOT_ONLINE', '机器人当前离线')
       const groups = await bot.getGroupList()
       return c.json(
         groups.map(({ groupId, groupName, memberCount }) => ({
@@ -913,7 +914,7 @@ export class HttpServer implements ServerService {
         throw new HttpError(401, 'UNAUTHORIZED', 'Invalid API token')
       await next()
     })
-    api.get('/bots', (c) => c.json(this.app.bots.list().map((bot) => botView(this.app, bot))))
+    api.get('/bots', (c) => c.json(this.app.bots.list().map((bot) => panelBot(this.app, bot))))
     api.post('/send', async (c) => c.json(await this.send(await body(c, sendSchema))))
     routes.route('/api/v1', api)
   }
@@ -1026,8 +1027,10 @@ export class HttpServer implements ServerService {
       event.kind === 'internal' &&
       (event.name === 'bot.online' || event.name === 'bot.offline') &&
       event.bot
-    )
-      return { type: 'bot', bot: botView(this.app, event.bot as Bot) }
+    ) {
+      const bot = panelBot(this.app, event.bot)
+      if (bot) return { type: 'bot', bot }
+    }
     if (event.kind === 'message')
       return {
         type: 'message',

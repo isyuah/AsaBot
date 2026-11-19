@@ -32,6 +32,9 @@ const definitionSchema = z
         typeof value.safeParse === 'function',
     ),
     create: z.custom<AdapterDefinition['create']>((value) => typeof value === 'function'),
+    botBinding: z
+      .custom<NonNullable<AdapterDefinition['botBinding']>>((value) => typeof value === 'function')
+      .optional(),
   })
   .and(
     z.union([

@@ -104,6 +104,8 @@ interface AdapterMetadata {
 
 type AdapterOptions<T> = AdapterMetadata & {
   configSchema: z.ZodType<T>
+  /** Identifies a remote account or listener before its platform IDs are known. */
+  botBinding?(config: T): { key: string; multiple?: true }
   create(config: T, host: AdapterHost): Adapter
 } & (
     | { setup: QrConnectionSetup; accountId(config: T): string }
@@ -114,9 +116,10 @@ type AdapterOptions<T> = AdapterMetadata & {
 export type AdapterDefinition = AdapterOptions<unknown>
 
 export function defineAdapter<T>(definition: AdapterOptions<T>): AdapterDefinition {
-  const { setup, accountId, ...metadata } = definition
+  const { setup, accountId, botBinding, ...metadata } = definition
   const shared = {
     ...metadata,
+    ...(botBinding && { botBinding: (config: unknown) => botBinding(config as T) }),
     create: (config: unknown, host: AdapterHost) => definition.create(config as T, host),
   }
   if (setup) return { ...shared, setup, accountId: (config) => accountId(config as T) }

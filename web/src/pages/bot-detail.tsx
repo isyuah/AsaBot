@@ -111,7 +111,11 @@ export function BotDetailPage({ path }: { path: string }) {
                 <div className="px-5 py-4">
                   <h2 className="text-sm font-semibold">机器人能力</h2>
                 </div>
-                <CapabilityPanel capabilities={bot.capabilities} />
+                {bot.capabilities ? (
+                  <CapabilityPanel capabilities={bot.capabilities} />
+                ) : (
+                  <p className="px-5 pb-4 text-[13px] text-fg-3">暂无能力记录</p>
+                )}
               </Card>
               <div className="space-y-4">
                 <Card className="space-y-3 p-5">
@@ -125,14 +129,14 @@ export function BotDetailPage({ path }: { path: string }) {
                         {connection.name}
                       </Link>
                       <ConnectionStatus state={connection.state} />
-                      <p className="text-[12px] text-fg-3">最近上线 {timeText(connection.lastConnectedAt)}</p>
                       {connection.lastError && (
                         <p className="break-words text-[12.5px] text-danger">{connection.lastError}</p>
                       )}
                     </>
                   ) : (
-                    <p className="text-[13px] text-fg-3">{bot.connection || '程序注册的机器人'}</p>
+                    <p className="text-[13px] text-fg-3">未关联连接</p>
                   )}
+                  <p className="text-[12px] text-fg-3">机器人最近上线 {timeText(bot.lastOnlineAt)}</p>
                 </Card>
                 <Card className="p-5">
                   <h2 className="text-sm font-semibold">插件应用</h2>
