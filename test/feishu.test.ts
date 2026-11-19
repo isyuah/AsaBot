@@ -1035,6 +1035,41 @@ describe('Feishu adapter', () => {
     }
   })
 
+  it('keeps the final page of group results when Feishu returns an empty cursor', async () => {
+    const t = await fixture()
+    t.transport.override = (method, path, input) => {
+      if (method !== 'GET' || path !== '/im/v1/chats') return
+      return {
+        code: 0,
+        data:
+          input?.params?.page_token === 'next'
+            ? { items: [{ chat_id: 'oc_second', name: 'Second group' }], has_more: false, page_token: '' }
+            : { items: [{ chat_id: 'oc_first', name: 'First group' }], has_more: true, page_token: 'next' },
+      }
+    }
+    try {
+      await expect(t.bot.getGroupList()).resolves.toEqual([
+        { groupId: 'oc_first', groupName: 'First group' },
+        { groupId: 'oc_second', groupName: 'Second group' },
+      ])
+    } finally {
+      await t.dispose()
+    }
+  })
+
+  it('rejects an empty cursor when Feishu reports more groups', async () => {
+    const t = await fixture()
+    t.transport.override = (method, path) => {
+      if (method === 'GET' && path === '/im/v1/chats')
+        return { code: 0, data: { items: [], has_more: true, page_token: '' } }
+    }
+    try {
+      await expect(t.bot.getGroupList()).rejects.toThrow('Feishu returned an invalid pagination token')
+    } finally {
+      await t.dispose()
+    }
+  })
+
   it('sends mixed messages in order, uploads media and records each emitted message', async () => {
     const t = await fixture()
     const sent: unknown[] = []

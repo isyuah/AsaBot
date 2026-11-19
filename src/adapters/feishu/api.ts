@@ -255,7 +255,7 @@ export class FeishuClient {
       z.object({
         items: z.array(schema).default([]),
         has_more: z.boolean().default(false),
-        page_token: idSchema.optional(),
+        page_token: z.string().optional(),
       }),
       { params: { ...params, page_size: pageSize, ...(pageToken ? { page_token: pageToken } : {}) } },
     )
