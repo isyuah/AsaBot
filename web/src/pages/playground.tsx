@@ -335,7 +335,7 @@ export function PlaygroundPage() {
           </Card>
           <Card>
             <CardHeader title="会话" description="消息发在哪里" />
-            <div className="space-y-4 px-5 pb-5">
+            <div className="grid gap-4 px-5 pb-5">
               <Segmented
                 className="w-full [&>button]:flex-1"
                 value={mode}
