@@ -123,6 +123,12 @@ describe('OneBot forward adapter', () => {
     const never = mock.onCall('get_group_list', () => new Promise(() => {}))
     await expect(bot.getGroupList()).rejects.toBeInstanceOf(ApiTimeoutError)
     never()
+    mock.onCall('send_group_msg', () => new Promise(() => {}))
+    await expect(app.send('onebot11:10000:group:200', 'waiting for ack')).rejects.toMatchObject({
+      code: 'DELIVERY_TIMEOUT',
+      outcome: 'unknown',
+      target: { platform: 'onebot11', selfId: '10000', type: 'group', id: '200' },
+    })
     const failed = mock.onCall('get_version_info', () => ({ status: 'ok', retcode: 42, wording: 'failed' }))
     await expect(bot.call('get_version_info')).rejects.toMatchObject({
       name: 'ApiError',
@@ -543,8 +549,15 @@ describe('OneBot forward adapter', () => {
     expect(event.bot.selfId).toBe('10002')
     expect(app.getBot('onebot11', '10001')).toBeUndefined()
     expect(app.getBot('onebot11', '10002')).not.toBe(oldBot)
-    await expect(oldBot.sendGroup('200', 'old account')).rejects.toBeInstanceOf(NotConnectedError)
-    await expect(oldBot.sendGroup('200', seg.image('missing-file'))).rejects.toBeInstanceOf(NotConnectedError)
+    expect(app.botAccounts.get(oldBot)).not.toHaveProperty('connectionId', 'primary')
+    expect(app.connections.list()[0]?.bots).toEqual([{ platform: 'onebot11', selfId: '10002' }])
+    await expect(oldBot.sendGroup('200', 'old account')).rejects.toMatchObject({
+      code: 'NO_BOT_ONLINE',
+      outcome: 'not_sent',
+    })
+    await expect(oldBot.sendGroup('200', seg.image('missing-file'))).rejects.toMatchObject({
+      code: 'NO_BOT_ONLINE',
+    })
   })
 
   it('reconnects when the server stops responding to ping and does not reconnect after stop', async () => {
@@ -816,7 +829,7 @@ describe('OneBot neutral management and forwarding', () => {
       bot.sendForward({ type: 'group', id: '200' }, [
         { userId: '300', nickname: 'Alice', message: 'blocked' },
       ]),
-    ).rejects.toMatchObject({ name: 'SendBlockedError', plugin: 'send-filter' })
+    ).rejects.toMatchObject({ code: 'DELIVERY_BLOCKED', outcome: 'not_sent' })
     expect(mock.calls.filter((call) => call.action === 'send_group_forward_msg')).toHaveLength(count)
   })
 

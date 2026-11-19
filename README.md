@@ -314,6 +314,8 @@ await session.send(message) // 不支持按钮时降级为“打开: https://exa
 
 `Target` 包含 `platform`、`type`、`id` 和可选的 `selfId`、`thread`。`session.target` 是当前会话的完整地址；要让后台任务发回飞书原话题，可以保存这个对象再交给 `ctx.send`。`formatTarget` 与 `parseTarget` 可在对象和字符串之间转换，普通会话格式为 `platform[:selfId]:type:id`，话题格式见 [飞书接入](docs/FEISHU.md#话题)。`targetSchema` 可用于插件配置。
 
+发送失败可用 `error instanceof DeliveryError` 识别。`code` 区分离线、限流、会话不可用、回执超时等，`outcome` 区分确定未发出（`not_sent`）、结果未知（`unknown`）和部分已送达（`partial`）。错误包含目标 `target`，部分成功时包含 `confirmedMessageIds`。面板发送接口和 `POST /api/v1/send` 返回相同字段。
+
 ```ts
 import { formatTarget, parseTarget, type Target } from '@asabot/core'
 
@@ -386,6 +388,8 @@ remind.schedule({ target: 'onebot11:group:123456', text: '开会了' }, { delay:
 `at` 与 `delay` 二选一；同键 schedule 替换旧任务并等待旧回调退出。自动重试默认关闭，超时与取消通过 `signal` 协作。`get(key)` 查看最新状态，`attempts(key)` 查看执行历史，`retry(key)` 重试失败任务，`cancel(key)` 取消未完成任务。处理器在插件 setup 成功后开始执行；中断后恢复采用至少一次语义，涉及外部副作用时应自行保证幂等。全局默认并发 4，终态历史保留 7 天、最多 10000 条。
 
 Web 面板的「任务中心」支持筛选、分页、查看参数和执行历史、取消未完成任务与重试失败任务。参数中的凭据字段会脱敏；定时器 `cron/interval/timeout` 不进入任务中心。
+
+任务的投递错误会记录在详情和执行历史里。已配置自动重试的任务会对确定未发出的离线或限流错误按原策略重试；部分送达或结果未知时，先在目标会话核对，再从面板确认重试。程序化重试通过 `retry(key, { confirmDelivery: true })` 明确确认。
 
 ### 机器人、群开关与热重载
 

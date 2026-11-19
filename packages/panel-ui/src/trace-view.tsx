@@ -1,4 +1,5 @@
 import { ScrollText, Workflow } from 'lucide-react'
+import { DeliveryFailureDetails } from './delivery-failure.tsx'
 import { formatClock, levelName, levelStyle } from './format.ts'
 import type { DispatchTrace, LogRecord, TraceOutcome, TraceStage } from './types.ts'
 import { Badge, type Tone } from './ui/primitives.tsx'
@@ -93,6 +94,11 @@ export function TraceView({ trace, logs }: { trace: DispatchTrace; logs?: LogRec
                   <span className="ml-auto text-fg-3 tabular">{ms(step.duration)}</span>
                 </div>
                 {step.error && <p className="mt-1 break-words text-danger">{step.error}</p>}
+                {step.deliveryFailure && (
+                  <div className="mt-2">
+                    <DeliveryFailureDetails failure={step.deliveryFailure} />
+                  </div>
+                )}
               </li>
             )
           })}

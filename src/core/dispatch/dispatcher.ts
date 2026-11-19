@@ -4,6 +4,7 @@ import { CommandBuilder, type CommandDefinition, type CommandRegistration } from
 import { formatUsage, parseArguments } from '../command/parse.ts'
 import { tokenize } from '../command/tokenizer.ts'
 import type { Config } from '../config/schema.ts'
+import { DeliveryError } from '../delivery.ts'
 import { CommandConflictError, SendBlockedError } from '../errors.ts'
 import type {
   EventMap,
@@ -23,6 +24,7 @@ import { resolvePermission } from '../permission.ts'
 import { pluginExecution } from '../plugin/execution.ts'
 import type { PluginStateEvent } from '../plugin/types.ts'
 import { RateLimiter } from '../ratelimit.ts'
+import { redactText } from '../utils/redact.ts'
 import { type Activity, ActivityTracker, trackPrompt } from './activity.ts'
 import { messages } from './messages.ts'
 import { PromptManager } from './prompt.ts'
@@ -758,10 +760,7 @@ export class Dispatcher implements SessionServices, CommandRegistration {
     try {
       await session.send(messages.suggest(`${prefix ?? this.config.command.prefixes[0] ?? ''}${results[0]}`))
     } catch (error) {
-      if (step) {
-        step.outcome = 'error'
-        step.error = error instanceof Error ? error.message : String(error)
-      }
+      if (step) this.traceFailure(step, error)
       throw error
     } finally {
       if (step) step.duration = performance.now() - started
@@ -803,6 +802,12 @@ export class Dispatcher implements SessionServices, CommandRegistration {
       }),
     }
     return view
+  }
+
+  private traceFailure(step: TraceStep, error: unknown): void {
+    step.outcome = 'error'
+    step.error = redactText(error instanceof Error ? error.message : String(error), this.config)
+    if (error instanceof DeliveryError) step.deliveryFailure = error.publicFailure(this.config)
   }
 
   private async invoke(
@@ -851,9 +856,17 @@ export class Dispatcher implements SessionServices, CommandRegistration {
     const current = dispatchContext.getStore()
     const handlerContext = current ? { ...current, plugin: scope.owner, parent: current } : undefined
     const logError = (error: unknown): void => {
-      this.logger[error instanceof SendBlockedError ? 'info' : 'error'](
+      const delivery = error instanceof DeliveryError ? error : undefined
+      this.logger[
+        error instanceof SendBlockedError || delivery?.code === 'DELIVERY_BLOCKED' ? 'info' : 'error'
+      ](
         {
-          err: error,
+          ...(delivery
+            ? {
+                deliveryFailure: delivery.publicFailure(this.config),
+                error: redactText(delivery.message, this.config),
+              }
+            : { err: error }),
           plugin: scope.owner,
           event: event.name,
           eventId: handlerContext?.active.value ? handlerContext.eventId : event.id,
@@ -886,18 +899,22 @@ export class Dispatcher implements SessionServices, CommandRegistration {
           )
         }
       } else {
-        if (step) {
-          step.outcome = 'error'
-          step.error = error instanceof Error ? error.message : String(error)
-        }
+        if (step) this.traceFailure(step, error)
         logError(error)
-        if (onError !== undefined && !(error instanceof SendBlockedError)) {
+        if (
+          onError !== undefined &&
+          !(error instanceof SendBlockedError) &&
+          !(error instanceof DeliveryError)
+        ) {
           try {
             await dispatchContext.run(handlerContext, () => onError(view))
           } catch (replyError) {
+            const deliveryFailure =
+              replyError instanceof DeliveryError ? replyError.publicFailure(this.config) : undefined
+            if (step && deliveryFailure) step.deliveryFailure = deliveryFailure
             this.logger[replyError instanceof SendBlockedError ? 'info' : 'error'](
               {
-                err: replyError,
+                ...(deliveryFailure ? { deliveryFailure } : { err: replyError }),
                 plugin: scope.owner,
                 event: event.name,
                 eventId: handlerContext?.eventId ?? event.id,

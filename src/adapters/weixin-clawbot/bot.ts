@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { AdapterHost } from '../../core/adapter.ts'
 import type { Bot, BotCapabilities, SendResult } from '../../core/bot.ts'
+import { DeliveryAttempt, type DeliveryCode, DeliveryError } from '../../core/delivery.ts'
 import { dispatchContext } from '../../core/dispatch/trace.ts'
-import { ConversationUnavailableError, NotConnectedError, UnsupportedError } from '../../core/errors.ts'
+import { NotConnectedError, UnsupportedError } from '../../core/errors.ts'
 import { isSegment, normalizeSendable, type Segment, type Sendable, seg } from '../../core/message/index.ts'
 import { WeixinMedia } from './media.ts'
 import { WeixinMessages } from './message.ts'
-import { errorSchema, type IlinkRequest, platform, sentSchema, typingSchema } from './protocol.ts'
+import { errorSchema, IlinkError, type IlinkRequest, platform, sentSchema, typingSchema } from './protocol.ts'
 
 export const weixinCapabilities: BotCapabilities = {
   segments: ['text', 'image', 'video', 'file'],
@@ -21,6 +22,20 @@ const downloadArgs = z.tuple([z.string().min(1), formatSchema])
 const typingArgs = z.tuple([z.string().regex(/^\S+$/).max(512), z.boolean()])
 export type ConnectionStore = NonNullable<AdapterHost['connection']>['store']
 export const contextKey = (userId: string) => `context:${userId}`
+
+function classifyIlinkSend(
+  error: unknown,
+): { code: DeliveryCode; platformCode?: number; message?: string } | undefined {
+  if (error instanceof DOMException && error.name === 'TimeoutError') return { code: 'DELIVERY_TIMEOUT' }
+  if (!(error instanceof IlinkError)) return undefined
+  const { httpStatus, platformCode } = error
+  if (error.expired)
+    return { code: 'NO_BOT_ONLINE', platformCode, message: '微信 ClawBot 授权已失效，请重新扫码' }
+  if (httpStatus === 429) return { code: 'RATE_LIMITED' }
+  if (httpStatus === 408 || httpStatus === 504) return { code: 'DELIVERY_TIMEOUT' }
+  if (platformCode !== undefined || (httpStatus !== undefined && httpStatus >= 400 && httpStatus < 500))
+    return { code: 'DELIVERY_REJECTED', platformCode }
+}
 
 function* splitText(text: string) {
   let offset = 0
@@ -114,7 +129,12 @@ export class WeixinBot implements Bot {
     )
   }
 
-  async sendPrivate(userId: string, content: Sendable): Promise<SendResult> {
+  sendPrivate(userId: string, content: Sendable): Promise<SendResult> {
+    const attempt = new DeliveryAttempt(this, { type: 'private', id: userId })
+    return attempt.run(() => this.#send(attempt, userId, content))
+  }
+
+  async #send(attempt: DeliveryAttempt, userId: string, content: Sendable): Promise<SendResult> {
     this.#assertOnline()
     const prepared = await this.#host.prepareOutgoing({
       bot: this,
@@ -127,31 +147,49 @@ export class WeixinBot implements Bot {
     for (const segment of prepared) {
       if (isSegment(segment, 'text')) {
         for (const text of splitText(segment.data.text)) {
-          last = await this.#deliver(userId, contextToken, { type: 1, text_item: { text } }, seg.text(text))
+          last = await this.#deliver(
+            attempt,
+            userId,
+            contextToken,
+            { type: 1, text_item: { text } },
+            seg.text(text),
+          )
         }
       } else if (isSegment(segment, 'image') || isSegment(segment, 'video') || isSegment(segment, 'file')) {
         const uploaded = await this.#media.upload(userId, segment, this.#request)
-        last = await this.#deliver(userId, contextToken, uploaded.item, uploaded.segment)
+        last = await this.#deliver(attempt, userId, contextToken, uploaded.item, uploaded.segment)
       }
     }
     if (!last) throw new Error('没有可发送的消息内容')
     return last
   }
 
-  async #deliver(userId: string, contextToken: string, item: object, segment: Segment): Promise<SendResult> {
+  async #deliver(
+    attempt: DeliveryAttempt,
+    userId: string,
+    contextToken: string,
+    item: object,
+    segment: Segment,
+  ): Promise<SendResult> {
+    this.#assertOnline()
     const clientId = randomUUID()
-    const response = await this.#request('sendmessage', sentSchema, {
-      msg: {
-        from_user_id: '',
-        to_user_id: userId,
-        client_id: clientId,
-        message_type: 2,
-        message_state: 2,
-        context_token: contextToken,
-        item_list: [item],
-      },
-    })
+    const response = await attempt.request(
+      () =>
+        this.#request('sendmessage', sentSchema, {
+          msg: {
+            from_user_id: '',
+            to_user_id: userId,
+            client_id: clientId,
+            message_type: 2,
+            message_state: 2,
+            context_token: contextToken,
+            item_list: [item],
+          },
+        }),
+      classifyIlinkSend,
+    )
     const messageId = response.message_id ?? clientId
+    const sent = attempt.confirm({ messageId })
     this.#messages.remember(userId, messageId, [segment])
     const context = dispatchContext.getStore()
     this.#host.emit({
@@ -169,7 +207,7 @@ export class WeixinBot implements Bot {
       ...(context?.active.value && { eventId: context.eventId }),
       message: [segment],
     })
-    return { messageId }
+    return sent
   }
 
   async #setTyping(userId: string, active: boolean): Promise<void> {
@@ -206,7 +244,14 @@ export class WeixinBot implements Bot {
 
   #context(userId: string): string {
     const token = this.#store.get<string>(contextKey(userId))
-    if (!token) throw new ConversationUnavailableError('请先让对方给这台微信 ClawBot 发送一条消息')
+    if (!token)
+      throw new DeliveryError(
+        { platform, selfId: this.selfId, type: 'private', id: userId },
+        {
+          code: 'CONVERSATION_UNAVAILABLE',
+          message: '请先让对方给这台微信 ClawBot 发送一条消息',
+        },
+      )
     return token
   }
 

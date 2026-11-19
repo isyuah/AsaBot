@@ -14,6 +14,7 @@ import {
   type ThreadTarget,
   type UserInfo,
 } from '../../core/bot.ts'
+import { DeliveryAttempt, DeliveryError } from '../../core/delivery.ts'
 import { dispatchContext } from '../../core/dispatch/trace.ts'
 import { NotConnectedError, UnsupportedError } from '../../core/errors.ts'
 import type { Session } from '../../core/event/index.ts'
@@ -26,6 +27,7 @@ import {
   chatMode,
   chatPath,
   chatRolesSchema,
+  classifyFeishuSend,
   type FeishuApi,
   FeishuClient,
   feishuOperations,
@@ -164,31 +166,39 @@ export class FeishuBotImpl implements FeishuBot {
       ),
       replyInThread: async (target, messageId, content) =>
         threadSendResult.parse(
-          await this.client.invoke('replyInThread', [target, messageId, content], async (args) => {
-            const [destination, root, message] = z
-              .tuple([messageTargetSchema, idSchema, sendableSchema])
-              .parse(args)
-            if (destination.thread) {
-              if (destination.thread.rootMessageId !== root)
-                throw new Error('The message is not the target thread root')
-              return this.send(destination, message)
-            }
-            return this.send(destination, message, root)
-          }),
+          await this.client.invokeSend(
+            target,
+            'replyInThread',
+            [target, messageId, content],
+            async (args) => {
+              const [destination, root, message] = z
+                .tuple([messageTargetSchema, idSchema, sendableSchema])
+                .parse(args)
+              if (destination.thread) {
+                if (destination.thread.rootMessageId !== root)
+                  throw new DeliveryError(
+                    { ...destination, platform: this.platform, selfId: this.selfId },
+                    { code: 'CONVERSATION_UNAVAILABLE', message: '指定的消息不是目标话题的根消息' },
+                  )
+                return this.send(destination, message)
+              }
+              return this.send(destination, message, root)
+            },
+          ),
         ),
       forwardMessage: (messageId, target) =>
-        this.client.invoke('forwardMessage', [messageId, target], async (args) => {
+        this.client.invokeSend(target, 'forwardMessage', [messageId, target], async (args) => {
           const [id, destination] = forwardMessageArgs.parse(args)
           return (await this.forward(`${messagePath(id)}/forward`, destination, false)).sent
         }),
       forwardThread: (threadId, target) =>
-        this.client.invoke('forwardThread', [threadId, target], async (args) => {
+        this.client.invokeSend(target, 'forwardThread', [threadId, target], async (args) => {
           const [id, destination] = forwardMessageArgs.parse(args)
           return (await this.forward(`/im/v1/threads/${encodeURIComponent(id)}/forward`, destination, true))
             .sent
         }),
       mergeForward: (messageIds, target) =>
-        this.client.invoke('mergeForward', [messageIds, target], async (args) => {
+        this.client.invokeSend(target, 'mergeForward', [messageIds, target], async (args) => {
           const [ids, destination] = z
             .tuple([z.array(idSchema).min(1).max(100), messageTargetSchema])
             .parse(args)
@@ -333,7 +343,7 @@ export class FeishuBotImpl implements FeishuBot {
     return this.send({ type: 'group', id: groupId }, content)
   }
   sendThread(target: ThreadTarget, content: Sendable): Promise<SendResult> {
-    return this.send(threadTargetSchema.parse(target), content)
+    return new DeliveryAttempt(this, target).run(() => this.send(threadTargetSchema.parse(target), content))
   }
 
   private async media(type: FeishuUploadKind, source: string, name = 'file'): Promise<string> {
@@ -347,7 +357,17 @@ export class FeishuBotImpl implements FeishuBot {
     return this.client.upload(type, bytes, name)
   }
 
-  private async send(target: MessageTarget, content: Sendable, openThreadAt?: string): Promise<SendResult> {
+  private send(target: MessageTarget, content: Sendable, openThreadAt?: string): Promise<SendResult> {
+    const attempt = new DeliveryAttempt(this, target)
+    return attempt.run(() => this.deliver(attempt, target, content, openThreadAt))
+  }
+
+  private async deliver(
+    attempt: DeliveryAttempt,
+    target: MessageTarget,
+    content: Sendable,
+    openThreadAt?: string,
+  ): Promise<SendResult> {
     this.assertOnline()
     const prepared = await this.host.prepareOutgoing({
       bot: this,
@@ -366,27 +386,36 @@ export class FeishuBotImpl implements FeishuBot {
     const deliver = async (type: string, body: Record<string, unknown>, message: Message) => {
       this.assertOnline()
       const reference = thread?.rootMessageId ?? openThreadAt ?? replyId
-      const response = await this.client.data(
-        'POST',
-        reference ? `${messagePath(reference)}/reply` : '/im/v1/messages',
-        sentSchema,
-        {
-          ...(reference
-            ? {}
-            : { params: { receive_id_type: target.type === 'group' ? 'chat_id' : 'open_id' } }),
-          data: {
-            ...(reference ? {} : { receive_id: target.id }),
-            ...(reference && (thread || openThreadAt) ? { reply_in_thread: true } : {}),
-            msg_type: type,
-            content: JSON.stringify(body),
-            uuid: randomUUID(),
-          },
-        },
+      const request = new DeliveryAttempt(this, { ...target, thread })
+      const response = await request.request(
+        () =>
+          this.client.data(
+            'POST',
+            reference ? `${messagePath(reference)}/reply` : '/im/v1/messages',
+            sentSchema,
+            {
+              ...(reference
+                ? {}
+                : { params: { receive_id_type: target.type === 'group' ? 'chat_id' : 'open_id' } }),
+              data: {
+                ...(reference ? {} : { receive_id: target.id }),
+                ...(reference && (thread || openThreadAt) ? { reply_in_thread: true } : {}),
+                msg_type: type,
+                content: JSON.stringify(body),
+                uuid: randomUUID(),
+              },
+            },
+          ),
+        classifyFeishuSend,
       )
       const deliveredThread = this.sentThread(response, thread, openThreadAt)
       thread = deliveredThread
-      last = this.recordSent(target, response, message, deliveredThread)
-      if (openThreadAt && !thread) throw new Error('Feishu did not return the created thread ID')
+      last = attempt.confirm(this.recordSent(target, response, message, deliveredThread))
+      if (openThreadAt && !thread)
+        throw new DeliveryError(attempt.target, {
+          code: 'DELIVERY_UNCONFIRMED',
+          message: '消息已发送，但飞书没有返回新话题的 ID',
+        })
     }
     const flush = async () => {
       const text = post.length === 1 ? post[0] : undefined
@@ -517,12 +546,16 @@ export class FeishuBotImpl implements FeishuBot {
     merged: boolean,
     data: Record<string, unknown> = {},
   ) {
-    const response = await this.client.data('POST', path, forwardedSchema, {
-      params: {
-        receive_id_type: target.thread ? 'thread_id' : target.type === 'group' ? 'chat_id' : 'open_id',
-      },
-      data: { ...data, receive_id: target.thread?.id ?? target.id, uuid: randomUUID() },
-    })
+    const response = await new DeliveryAttempt(this, target).request(
+      () =>
+        this.client.data('POST', path, forwardedSchema, {
+          params: {
+            receive_id_type: target.thread ? 'thread_id' : target.type === 'group' ? 'chat_id' : 'open_id',
+          },
+          data: { ...data, receive_id: target.thread?.id ?? target.id, uuid: randomUUID() },
+        }),
+      classifyFeishuSend,
+    )
     const message =
       merged || response.msg_type === 'merge_forward'
         ? seg.forward(response.message_id)

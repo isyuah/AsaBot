@@ -11,6 +11,7 @@ import {
 } from '@wecom/aibot-node-sdk'
 import { z } from 'zod'
 import type { MessageTarget } from '../../core/bot.ts'
+import type { DeliveryCode } from '../../core/delivery.ts'
 import type { WecomConfig } from './config.ts'
 
 export type ReplyBody = SendMsgBody | StreamReplyBody | WelcomeReplyBody | UpdateTemplateCardBody
@@ -46,13 +47,44 @@ const ackSchema = z.object({ errcode: z.number().int() })
 const messageAck = z.object({ body: z.object({ msgid: z.string().min(1) }) })
 const uploadAck = z.object({ media_id: z.string().min(1) })
 
+class WecomRequestError extends Error {
+  readonly code: DeliveryCode
+  readonly platformCode?: number
+
+  constructor(message: string, code: DeliveryCode, platformCode?: number) {
+    super(message)
+    this.name = 'WecomRequestError'
+    this.code = code
+    this.platformCode = platformCode
+  }
+}
+
+export function classifyWecomSend(error: unknown) {
+  if (error instanceof WecomRequestError) return { code: error.code, platformCode: error.platformCode }
+}
+
 async function request<Result>(operation: string, execute: () => Promise<Result>): Promise<Result> {
   try {
     return await execute()
   } catch (error) {
     const ack = ackSchema.safeParse(error)
-    if (ack.success) throw new Error(`企业微信${operation}被拒绝（错误码 ${ack.data.errcode}）`)
-    throw new Error(`企业微信${operation}失败或等待回执超时`)
+    if (ack.success && ack.data.errcode !== 0) {
+      const code = ack.data.errcode
+      throw new WecomRequestError(
+        `企业微信${operation}被拒绝（错误码 ${code}）`,
+        code === 45009 || code === 45011 ? 'RATE_LIMITED' : 'DELIVERY_REJECTED',
+        code,
+      )
+    }
+    // The SDK exposes typed server frames, but these transport failures are plain Error objects.
+    const message = error instanceof Error ? error.message : ''
+    if (/^Reply ack timeout \(\d+ms\) for reqId: /.test(message))
+      throw new WecomRequestError('企业微信等待发送回执超时', 'DELIVERY_TIMEOUT')
+    if (/^Reply queue for reqId .+ exceeds max size \(\d+\)$/.test(message))
+      throw new WecomRequestError('企业微信回复队列已满', 'RATE_LIMITED')
+    if (message === 'WebSocket not connected, unable to send data')
+      throw new WecomRequestError('企业微信未上线', 'NO_BOT_ONLINE')
+    throw new WecomRequestError(`企业微信${operation}未收到有效回执`, 'DELIVERY_UNCONFIRMED')
   }
 }
 

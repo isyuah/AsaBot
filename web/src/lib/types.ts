@@ -1,4 +1,11 @@
-import type { DispatchTrace, JsonSchema, LogRecord, Segment, StatsPoint } from '@asabot/panel-ui'
+import type {
+  DeliveryFailure,
+  DispatchTrace,
+  JsonSchema,
+  LogRecord,
+  Segment,
+  StatsPoint,
+} from '@asabot/panel-ui'
 // Types of the panel HTTP API. They mirror docs/DESIGN.md §18 exactly; that section is the contract.
 
 export type BotStatus = 'connecting' | 'online' | 'offline'
@@ -362,6 +369,7 @@ export interface TaskRecord {
   failures: number
   policy: { maxRetries: number; delay: number; maxDelay: number; timeout?: number }
   error?: string
+  deliveryFailure?: DeliveryFailure
   blockedReason?: string
   canRetry: boolean
 }
@@ -373,6 +381,7 @@ export interface TaskAttempt {
   finishedAt?: number
   outcome: 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted' | 'timeout'
   error?: string
+  deliveryFailure?: DeliveryFailure
 }
 
 export interface ActorIdentity {

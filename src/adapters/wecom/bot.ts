@@ -3,6 +3,7 @@ import { type ReplyFeedback, type StreamReplyBody, type WelcomeReplyBody, WsCmd 
 import { z } from 'zod'
 import type { AdapterHost } from '../../core/adapter.ts'
 import type { Bot, BotCapabilities, MessageTarget, SendResult } from '../../core/bot.ts'
+import { DeliveryAttempt, DeliveryError } from '../../core/delivery.ts'
 import { dispatchContext } from '../../core/dispatch/trace.ts'
 import { NotConnectedError, UnsupportedError } from '../../core/errors.ts'
 import type { Session } from '../../core/event/index.ts'
@@ -11,7 +12,7 @@ import { cardForSend, cardSchema, feedbackIdSchema, type WecomTemplateCard, weco
 import { platform, type WecomConfig } from './config.ts'
 import { WecomMedia } from './media.ts'
 import { contentText, outgoing } from './message.ts'
-import type { ReplyBody, WecomTransport } from './transport.ts'
+import { classifyWecomSend, type ReplyBody, type WecomTransport } from './transport.ts'
 
 export const wecomCapabilities: BotCapabilities = {
   segments: ['text', 'markdown', 'image', 'audio', 'video', 'file', 'wecom:card'],
@@ -65,7 +66,6 @@ export class WecomBotImpl implements WecomBot {
   readonly nickname?: string
   readonly #host: AdapterHost
   readonly #transport: WecomTransport
-  readonly #shutdown: AbortSignal
   readonly #media: WecomMedia
   #status: Bot['status'] = 'connecting'
 
@@ -74,7 +74,6 @@ export class WecomBotImpl implements WecomBot {
     this.nickname = config.botName
     this.#host = host
     this.#transport = transport
-    this.#shutdown = shutdown
     this.#media = new WecomMedia(shutdown)
   }
 
@@ -140,7 +139,7 @@ export class WecomBotImpl implements WecomBot {
   welcome(callback: WecomCallback): (content: string | WecomTemplateCard) => Promise<SendResult> {
     const consume = this.#oneShot(callback)
     return (content) =>
-      this.#invokeSend('wecom.replyWelcome', [content], async ([value]) => {
+      this.#invokeSend(callback.target, 'wecom.replyWelcome', [content], async ([value]) => {
         const parsed = welcome.parse(value)
         const input = typeof parsed === 'string' ? parsed : cardForSend(parsed)
         const body: WelcomeReplyBody =
@@ -163,7 +162,7 @@ export class WecomBotImpl implements WecomBot {
   ): (card: WecomTemplateCard, userIds?: string[]) => Promise<SendResult> {
     const consume = this.#oneShot(callback)
     return (card, userIds) =>
-      this.#invokeSend('wecom.updateCard', [card, userIds], async (args) => {
+      this.#invokeSend(callback.target, 'wecom.updateCard', [card, userIds], async (args) => {
         const [input, users] = cardUpdate.parse(args)
         const template = { ...input, task_id: taskId }
         consume()
@@ -193,20 +192,33 @@ export class WecomBotImpl implements WecomBot {
   }
 
   #reply(callback: WecomCallback, content: Sendable): Promise<SendResult> {
-    return this.#invokeSend('wecom.reply', [content], async ([value]) =>
+    return this.#invokeSend(callback.target, 'wecom.reply', [content], async ([value]) =>
       this.#send(callback.target, sendable.parse(value), callback),
     )
   }
 
   async #invokeSend(
+    target: MessageTarget,
     method: string,
     args: unknown[],
     execute: (args: unknown[]) => Promise<SendResult>,
   ): Promise<SendResult> {
-    return sendResult.parse(await this.#host.invokeApi({ bot: this, method, args }, execute))
+    return new DeliveryAttempt(this, target).run(async () =>
+      sendResult.parse(await this.#host.invokeApi({ bot: this, method, args }, execute)),
+    )
   }
 
-  async #send(target: MessageTarget, content: Sendable, callback?: WecomCallback): Promise<SendResult> {
+  #send(target: MessageTarget, content: Sendable, callback?: WecomCallback): Promise<SendResult> {
+    const attempt = new DeliveryAttempt(this, target)
+    return attempt.run(() => this.#deliver(attempt, target, content, callback))
+  }
+
+  async #deliver(
+    attempt: DeliveryAttempt,
+    target: MessageTarget,
+    content: Sendable,
+    callback?: WecomCallback,
+  ): Promise<SendResult> {
     this.#assertOnline()
     if (callback) this.#assertCallback(callback)
     const prepared = await this.#host.prepareOutgoing({
@@ -222,8 +234,10 @@ export class WecomBotImpl implements WecomBot {
       if (callback) this.#assertCallback(callback)
       const { body, message } = 'media' in part ? await this.#media.upload(part.media, this.#transport) : part
       this.#assertOnline()
-      const id = callback ? await this.#respond(callback, body) : await this.#transport.send(target, body)
-      sent = this.#record(target, message, id)
+      const id = callback
+        ? await this.#respond(callback, body)
+        : await attempt.request(() => this.#transport.send(target, body), classifyWecomSend)
+      sent = attempt.confirm(this.#record(target, message, id))
     }
     if (!sent) throw new Error('没有可发送的企业微信消息内容')
     return sent
@@ -241,10 +255,10 @@ export class WecomBotImpl implements WecomBot {
     const send = async (content: unknown, finish: boolean) => {
       const text = contentText.parse(content)
       if (busy) throw new Error('请等待企业微信上一帧流式回复完成')
-      if (finished) throw new Error('企业微信流式回复已结束')
+      if (finished) throw this.#unavailable(callback.target, '企业微信流式回复已结束')
       const now = Date.now()
       if (startedAt !== undefined && now >= startedAt + 10 * 60_000)
-        throw new Error('企业微信流式回复已超过 10 分钟')
+        throw this.#unavailable(callback.target, '企业微信流式回复已超过 10 分钟')
       this.#assertOnline()
       this.#assertCallback(callback)
       const body: StreamReplyBody = {
@@ -264,12 +278,14 @@ export class WecomBotImpl implements WecomBot {
     return {
       id,
       update: async (content) => {
-        await this.#host.invokeApi({ bot: this, method: 'wecom.stream.update', args: [content] }, ([value]) =>
-          send(value, false),
+        await new DeliveryAttempt(this, callback.target).run(() =>
+          this.#host.invokeApi({ bot: this, method: 'wecom.stream.update', args: [content] }, ([value]) =>
+            send(value, false),
+          ),
         )
       },
       finish: (content) =>
-        this.#invokeSend('wecom.stream.finish', [content], async ([value]) => {
+        this.#invokeSend(callback.target, 'wecom.stream.finish', [content], async ([value]) => {
           const { text, messageId } = await send(value, true)
           return this.#record(callback.target, [seg.markdown(text)], messageId)
         }),
@@ -281,7 +297,7 @@ export class WecomBotImpl implements WecomBot {
     return () => {
       this.#assertOnline()
       this.#assertCallback(callback)
-      if (used) throw new Error('此企业微信事件已回复')
+      if (used) throw this.#unavailable(callback.target, '此企业微信事件已回复')
       used = true
     }
   }
@@ -293,11 +309,21 @@ export class WecomBotImpl implements WecomBot {
   ): Promise<string | undefined> {
     this.#assertOnline()
     this.#assertCallback(callback)
-    return this.#transport.reply(callback.reqId, body, command)
+    return new DeliveryAttempt(this, callback.target).request(
+      () => this.#transport.reply(callback.reqId, body, command),
+      classifyWecomSend,
+    )
   }
 
   #assertCallback(callback: WecomCallback): void {
-    if (Date.now() >= callback.deadline) throw new Error('企业微信回调回复已超时')
+    if (Date.now() >= callback.deadline) throw this.#unavailable(callback.target, '企业微信回调回复已超时')
+  }
+
+  #unavailable(target: MessageTarget, message: string): DeliveryError {
+    return new DeliveryError(
+      { ...target, platform, selfId: this.selfId },
+      { code: 'CONVERSATION_UNAVAILABLE', message },
+    )
   }
 
   #assertOnline(): void {
@@ -305,7 +331,6 @@ export class WecomBotImpl implements WecomBot {
   }
 
   #record(target: MessageTarget, message: Message, messageId = `wecom-local:${randomUUID()}`): SendResult {
-    this.#shutdown.throwIfAborted()
     const context = dispatchContext.getStore()
     this.#host.emit({
       id: randomUUID(),

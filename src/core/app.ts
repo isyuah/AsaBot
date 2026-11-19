@@ -14,13 +14,14 @@ import { BotAccounts, type BotBinding } from './bot-accounts.ts'
 import { BotPolicies } from './bot-policies.ts'
 import type { Config } from './config/schema.ts'
 import { Connections } from './connections.ts'
+import { DeliveryError } from './delivery.ts'
 import { type ApiCall, ApiInterceptors } from './dispatch/api.ts'
 import { Dispatcher } from './dispatch/dispatcher.ts'
 import { OutgoingHooks } from './dispatch/outgoing.ts'
 import { MessageStats } from './dispatch/stats.ts'
 import { dispatchContext } from './dispatch/trace.ts'
 import type { DispatchEvent } from './dispatch/types.ts'
-import { NoBotOnlineError, PluginError } from './errors.ts'
+import { PluginError } from './errors.ts'
 import type {
   AnyEvent,
   EventMap,
@@ -379,7 +380,7 @@ export class App implements AdapterHost {
           item.platform === destination.platform &&
           (destination.selfId === undefined || item.selfId === destination.selfId),
       )
-    if (!bot) throw new NoBotOnlineError()
+    if (!bot) throw new DeliveryError(destination, { code: 'NO_BOT_ONLINE' })
     return sendTo(bot, destination, content)
   }
 

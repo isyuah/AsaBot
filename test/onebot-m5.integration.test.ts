@@ -214,7 +214,10 @@ describe('OneBot reverse WebSocket', () => {
     first.onCall('get_group_list', () => new Promise(() => {}))
     const pending = expect(bot.getGroupList()).rejects.toBeInstanceOf(NotConnectedError)
     await first.waitForCall('get_group_list')
-    const queued = expect(bot.sendGroup('10', 'queued')).rejects.toBeInstanceOf(NotConnectedError)
+    const queued = expect(bot.sendGroup('10', 'queued')).rejects.toMatchObject({
+      code: 'NO_BOT_ONLINE',
+      outcome: 'not_sent',
+    })
     const close = closed(socket)
     await second.connectReverse(url)
     expect(await close).toEqual({ code: 1000, reason: 'replaced' })
@@ -334,7 +337,8 @@ describe('OneBot reverse WebSocket', () => {
 
 describe('OneBot send queue', () => {
   it('spaces sends, while other actions bypass the queue', async () => {
-    const { app, url } = await setup({ interval: 40 })
+    const interval = 40
+    const { app, url } = await setup({ interval })
     const client = await mock({ token: 'reverse-secret' })
     const times: number[] = []
     const order: string[] = []
@@ -355,8 +359,9 @@ describe('OneBot send queue', () => {
     await Promise.all(sends)
     expect(order).toEqual(['send', 'get', 'send', 'send'])
     expect(times).toHaveLength(3)
-    expect((times[1] ?? 0) - (times[0] ?? 0)).toBeGreaterThanOrEqual(40)
-    expect((times[2] ?? 0) - (times[1] ?? 0)).toBeGreaterThanOrEqual(40)
+    // The mock measures receipt time, which includes WebSocket scheduling delay for each frame.
+    expect((times[1] ?? 0) - (times[0] ?? 0)).toBeGreaterThanOrEqual(interval - 5)
+    expect((times[2] ?? 0) - (times[1] ?? 0)).toBeGreaterThanOrEqual(interval - 5)
   })
 
   it('rejects overflow and queued requests on disconnect', async () => {
@@ -365,8 +370,14 @@ describe('OneBot send queue', () => {
     await client.connectReverse(url)
     const bot = await online(app, '10000')
     await bot.sendGroup('10', 'first')
-    const queued = expect(bot.sendGroup('10', 'queued')).rejects.toBeInstanceOf(NotConnectedError)
-    await expect(bot.sendGroup('10', 'overflow')).rejects.toBeInstanceOf(SendQueueFullError)
+    const queued = expect(bot.sendGroup('10', 'queued')).rejects.toMatchObject({
+      code: 'NO_BOT_ONLINE',
+      outcome: 'not_sent',
+    })
+    await expect(bot.sendGroup('10', 'overflow')).rejects.toMatchObject({
+      code: 'RATE_LIMITED',
+      outcome: 'not_sent',
+    })
     client.dropConnections()
     await queued
     expect(client.calls.filter((call) => call.action === 'send_group_msg')).toHaveLength(1)
@@ -396,8 +407,9 @@ describe('OneBot send queue', () => {
     client.onCall('send_group_msg', () => new Promise(() => {}))
     await client.connectReverse(url)
     const bot = await online(app, '10000')
-    const first = expect(bot.sendGroup('10', 'first')).rejects.toBeInstanceOf(NotConnectedError)
-    const second = expect(bot.sendGroup('10', 'second')).rejects.toBeInstanceOf(NotConnectedError)
+    const unconfirmed = { code: 'DELIVERY_UNCONFIRMED', outcome: 'unknown' }
+    const first = expect(bot.sendGroup('10', 'first')).rejects.toMatchObject(unconfirmed)
+    const second = expect(bot.sendGroup('10', 'second')).rejects.toMatchObject(unconfirmed)
     await vi.waitFor(
       () => expect(client.calls.filter((call) => call.action === 'send_group_msg')).toHaveLength(2),
       { interval: 5 },

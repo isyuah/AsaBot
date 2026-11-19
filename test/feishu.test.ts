@@ -469,7 +469,7 @@ describe('Feishu adapter', () => {
       ])
       await expect(
         t.bot.feishu.replyInThread({ ...group, thread: created.thread }, 'om_other', '忽略'),
-      ).rejects.toThrow('thread root')
+      ).rejects.toMatchObject({ code: 'CONVERSATION_UNAVAILABLE', outcome: 'not_sent' })
       const container = { type: 'thread', id: topic.id } as const
       const first = await t.bot.feishu.listMessages(container, { pageSize: 1, order: 'asc' })
       expect(first).toMatchObject({
@@ -1234,7 +1234,11 @@ describe('Feishu adapter', () => {
       t.transport.override = () => {
         throw new Error(`appSecret=${account.appSecret}`)
       }
-      await expect(t.bot.sendPrivate('ou_user', 'test')).rejects.toThrow('appSecret=[Redacted]')
+      await expect(t.bot.sendPrivate('ou_user', 'test')).rejects.toMatchObject({
+        code: 'DELIVERY_UNCONFIRMED',
+        outcome: 'unknown',
+        message: '未能确认消息是否送达',
+      })
     } finally {
       await t.dispose()
     }
@@ -1245,7 +1249,10 @@ describe('Feishu adapter', () => {
     try {
       t.transport.lifecycle.reconnecting()
       expect(t.bot.status).toBe('connecting')
-      await expect(t.bot.sendGroup('oc_group', 'hello')).rejects.toThrow('online')
+      await expect(t.bot.sendGroup('oc_group', 'hello')).rejects.toMatchObject({
+        code: 'NO_BOT_ONLINE',
+        outcome: 'not_sent',
+      })
       t.transport.lifecycle.ready()
       expect(t.bot.status).toBe('online')
       const other = { appId: 'cli_fedcba9876543210', appSecret: 'another-secret' }
@@ -1259,6 +1266,51 @@ describe('Feishu adapter', () => {
       expect(t.app.bots.list().filter(isFeishu)).toHaveLength(1)
       await t.adapter.stop()
       expect(t.app.bots.list().filter(isFeishu)).toHaveLength(0)
+    } finally {
+      await t.dispose()
+    }
+  })
+
+  it('classifies send receipts and keeps confirmed parts when a later part is limited', async () => {
+    const t = await fixture()
+    try {
+      const target = {
+        platform: 'feishu',
+        selfId: t.bot.selfId,
+        type: 'group' as const,
+        id: 'oc_group',
+        thread: topic,
+      }
+      t.transport.override = () => {
+        throw Object.assign(new Error(`appSecret=${account.appSecret}`), {
+          response: { status: 400, data: { code: 99991400, msg: account.appSecret } },
+        })
+      }
+      await expect(t.app.send(target, 'limited')).rejects.toMatchObject({
+        code: 'RATE_LIMITED',
+        outcome: 'not_sent',
+        target,
+        platformCode: 99991400,
+        message: '发送受限，请稍后重试',
+      })
+      t.transport.override = () => ({ code: 230003, msg: 'Bot is not in the chat' })
+      await expect(t.bot.sendThread(target, 'inaccessible')).rejects.toMatchObject({
+        code: 'CONVERSATION_UNAVAILABLE',
+        outcome: 'not_sent',
+        target,
+      })
+      let parts = 0
+      t.transport.override = () =>
+        ++parts === 1 ? { code: 0, data: { message_id: 'om_confirmed' } } : { code: 99991400, msg: 'limited' }
+      await expect(
+        t.bot.sendThread(target, [seg.text('first'), feishu.sticker('next')]),
+      ).rejects.toMatchObject({
+        code: 'RATE_LIMITED',
+        outcome: 'partial',
+        target,
+        confirmedMessageIds: ['om_confirmed'],
+      })
+      expect(parts).toBe(2)
     } finally {
       await t.dispose()
     }

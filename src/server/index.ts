@@ -15,13 +15,9 @@ import { supports } from '../core/bot.ts'
 import { commandOverrideSchema, logLevelSchema } from '../core/config/schema.ts'
 import { deleteConfigValue, writeConfigValue } from '../core/config/write.ts'
 import { connectionSchema } from '../core/connections.ts'
+import { type DeliveryCode, DeliveryError } from '../core/delivery.ts'
 import type { DispatchEvent } from '../core/dispatch/types.ts'
-import {
-  ConfigError,
-  ConversationUnavailableError,
-  NoBotOnlineError,
-  PluginConfigError,
-} from '../core/errors.ts'
+import { ConfigError, PluginConfigError } from '../core/errors.ts'
 import type { MessageSentEvent } from '../core/event/index.ts'
 import { groupIdentity } from '../core/identity.ts'
 import { getRecentLogs, subscribeLogs } from '../core/logger.ts'
@@ -29,7 +25,7 @@ import { plainText } from '../core/message/index.ts'
 import type { PackageOperation } from '../core/plugin/packages.ts'
 import { TaskConflictError, taskStates } from '../core/plugin/tasks.ts'
 import { ManagementError } from '../core/plugin/upload.ts'
-import { redactValue } from '../core/utils/redact.ts'
+import { redactText, redactValue } from '../core/utils/redact.ts'
 import { constantTimeEqual } from '../core/utils/security.ts'
 import { PanelAuth } from './auth.ts'
 import { ConnectionSetups, connectionSetupInput, verificationInput } from './connection-setups.ts'
@@ -61,6 +57,17 @@ import { botPluginView, commandView, overview, panelBot, panelBots, pluginView }
 type Env = { Bindings: HttpBindings }
 type ServerContext = Context<Env>
 type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 429 | 500
+const deliveryStatus = {
+  NO_BOT_ONLINE: 409,
+  CONVERSATION_UNAVAILABLE: 409,
+  RATE_LIMITED: 429,
+  DELIVERY_TIMEOUT: 504,
+  DELIVERY_UNCONFIRMED: 502,
+  DELIVERY_REJECTED: 502,
+  DELIVERY_UNSUPPORTED: 400,
+  DELIVERY_BLOCKED: 403,
+  DELIVERY_PREPARATION_FAILED: 400,
+} as const satisfies Record<DeliveryCode, number>
 
 class HttpError extends Error {
   readonly status: ErrorStatus
@@ -324,6 +331,16 @@ export class HttpServer implements ServerService {
     const routes = new Hono<Env>()
     routes.onError((error, c) => {
       if (error instanceof HttpError) return failure(c, error)
+      if (error instanceof DeliveryError)
+        return c.json(
+          {
+            error: {
+              message: redactText(error.message, this.app.config),
+              ...error.publicFailure(this.app.config),
+            },
+          },
+          error.outcome === 'partial' ? 409 : deliveryStatus[error.code],
+        )
       if (error instanceof PluginConfigError)
         return failure(c, new HttpError(400, 'BAD_REQUEST', 'Plugin configuration is invalid', error.issues))
       if (error instanceof SettingsValidationError)
@@ -509,7 +526,12 @@ export class HttpServer implements ServerService {
     panel.post('/tasks/:id/retry', (c) => {
       const id = requireTask(c.req.param('id')).id
       try {
-        return c.json(redactValue(this.app.tasks.retry(id), this.app.config))
+        return c.json(
+          redactValue(
+            this.app.tasks.retry(id, { confirmDelivery: c.req.query('confirmDelivery') === '1' }),
+            this.app.config,
+          ),
+        )
       } catch (error) {
         if (error instanceof TaskConflictError) throw new HttpError(409, 'CONFLICT', error.message)
         throw error
@@ -940,14 +962,8 @@ export class HttpServer implements ServerService {
     return { ...operation, ...(operation.plugin ? { plugin: pluginView(this.app, operation.plugin) } : {}) }
   }
 
-  private async send(input: z.output<typeof sendSchema>) {
-    try {
-      return await this.app.send(input.target, input.message)
-    } catch (error) {
-      if (error instanceof NoBotOnlineError) throw new HttpError(409, 'CONFLICT', 'No matching online bot')
-      if (error instanceof ConversationUnavailableError) throw new HttpError(409, 'CONFLICT', error.message)
-      throw error
-    }
+  private send(input: z.output<typeof sendSchema>) {
+    return this.app.send(input.target, input.message)
   }
 
   private connect(client: WebSocket, cookie: string | undefined): void {

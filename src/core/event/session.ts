@@ -1,4 +1,5 @@
 import { type Bot, type MessageThread, type SendResult, sendTo } from '../bot.ts'
+import { DeliveryAttempt } from '../delivery.ts'
 import type { Message, Sendable } from '../message/index.ts'
 import { isSegment, normalizeSendable, plainText, seg } from '../message/index.ts'
 import { formatTarget } from '../target.ts'
@@ -179,7 +180,7 @@ export function createSession(init: SessionInit, services: SessionServices): Ses
       return session.send([...prefix, ...normalizeSendable(content)])
     },
     async sendForward(nodes) {
-      return init.bot.sendForward(target, nodes)
+      return new DeliveryAttempt(init.bot, target).request(() => init.bot.sendForward(target, nodes))
     },
     ...dialogueMethods((work) => work((text, options) => services.prompt(session, text, options))),
   }

@@ -113,7 +113,10 @@ describe('session.prompt', () => {
   it('cleans up a waiter when sending the question fails', async () => {
     const { app, bot, session, say } = dispatchFixture()
     vi.spyOn(bot, 'sendGroup').mockRejectedValueOnce(new Error('send failed'))
-    await expect(session('start').prompt('question')).rejects.toThrow('send failed')
+    await expect(session('start').prompt('question')).rejects.toMatchObject({
+      code: 'DELIVERY_UNCONFIRMED',
+      outcome: 'unknown',
+    })
     const matched = vi.fn()
     app.dispatcher.match({ owner: 'test' }, '', matched)
     await say('answer')

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   type Context,
+  DeliveryError,
   definePlugin,
   formatTarget,
   type Message,
-  NoBotOnlineError,
   parseTarget,
   plainText,
   seg,
@@ -114,18 +114,19 @@ describe('batch 4 core', () => {
     const backup = new VirtualAdapter(app.app, { selfId: 'other' })
     await backup.start()
     app.mock.bot.status = 'offline'
-    await expect(context.send('virtual:10000:group:10', 'x')).rejects.toBeInstanceOf(NoBotOnlineError)
+    await expect(context.send('virtual:10000:group:10', 'x')).rejects.toMatchObject({
+      code: 'NO_BOT_ONLINE',
+      outcome: 'not_sent',
+    })
     app.mock.bot.status = 'online'
     await backup.stop()
     const results = await context.broadcast(
       ['virtual:group:1', 'virtual:offline:group:2', 'virtual:private:3'],
       'hi',
     )
-    expect(results.map((item) => item.error?.name ?? item.result?.messageId)).toEqual([
-      '1',
-      'NoBotOnlineError',
-      '2',
-    ])
+    expect(
+      results.map((item) => (item.error instanceof DeliveryError ? item.error.code : item.result?.messageId)),
+    ).toEqual(['1', 'NO_BOT_ONLINE', '2'])
     expect(app.mock.bot.sends.map((send) => send.target)).toEqual(['1', '3'])
     let sessionTarget: Target | undefined
     app.app.events.on('message', (session) => {

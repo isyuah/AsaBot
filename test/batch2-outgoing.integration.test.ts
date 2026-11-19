@@ -104,7 +104,10 @@ describe('outgoing messages', () => {
     ).rejects.toBeInstanceOf(SendBlockedError)
     expect(await app.say('/blocked')).toEqual([])
     expect(info).toHaveBeenCalledWith(
-      expect.objectContaining({ plugin: 'blocker', err: expect.any(SendBlockedError) }),
+      expect.objectContaining({
+        plugin: 'blocker',
+        deliveryFailure: expect.objectContaining({ code: 'DELIVERY_BLOCKED', outcome: 'not_sent' }),
+      }),
       expect.any(String),
     )
     expect(error).not.toHaveBeenCalled()

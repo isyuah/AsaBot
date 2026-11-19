@@ -80,6 +80,8 @@ const coreMigrations: Migration[] = [
    CREATE INDEX bot_accounts_connection ON bot_accounts(connection_id);
    INSERT INTO bot_accounts (bot_key)
      SELECT bot_key FROM bot_plugin_defaults WHERE json_extract(bot_key, '$[0]') <> 'virtual';`,
+  `ALTER TABLE tasks ADD COLUMN delivery_failure TEXT;
+   ALTER TABLE task_attempts ADD COLUMN delivery_failure TEXT;`,
 ]
 
 /** SQLite 存储及插件状态、迁移和访问控制管理器。 */

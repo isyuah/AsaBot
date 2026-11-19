@@ -101,8 +101,12 @@ export const api = {
     request<{ items: TaskRecord[]; total: number }>('GET', `/tasks?${new URLSearchParams(filters)}`),
   task: (id: string) => request<TaskRecord>('GET', `/tasks/${encode(id)}`),
   taskAttempts: (id: string) => request<TaskAttempt[]>('GET', `/tasks/${encode(id)}/attempts`),
-  taskAction: (id: string, action: 'cancel' | 'retry') =>
-    request<TaskRecord>('POST', `/tasks/${encode(id)}/${action}`, {}),
+  taskAction: (id: string, action: 'cancel' | 'retry', confirmDelivery = false) =>
+    request<TaskRecord>(
+      'POST',
+      `/tasks/${encode(id)}/${action}${confirmDelivery ? '?confirmDelivery=1' : ''}`,
+      {},
+    ),
   stats: (range: '1h' | '24h') => request<StatsPoint[]>('GET', `/stats/messages?range=${range}`),
 
   bots: () => request<BotView[]>('GET', '/bots'),

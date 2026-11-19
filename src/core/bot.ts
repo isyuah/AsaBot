@@ -1,3 +1,4 @@
+import { DeliveryAttempt } from './delivery.ts'
 import { UnsupportedError } from './errors.ts'
 import type { Message, Sendable, TextStyle } from './message/index.ts'
 
@@ -158,12 +159,14 @@ export interface Bot {
 
 /** 按完整会话目标发送，话题发送失败时不会回落到所在群聊或私聊。 */
 export async function sendTo(bot: Bot, target: MessageTarget, content: Sendable): Promise<SendResult> {
-  if (target.thread) {
-    if (!bot.sendThread || !bot.capabilities.actions.includes('sendThread'))
-      throw new UnsupportedError(bot.platform, 'sendThread')
-    return bot.sendThread({ ...target, thread: target.thread }, content)
-  }
-  return target.type === 'group' ? bot.sendGroup(target.id, content) : bot.sendPrivate(target.id, content)
+  return new DeliveryAttempt(bot, target).request(async () => {
+    if (target.thread) {
+      if (!bot.sendThread || !bot.capabilities.actions.includes('sendThread'))
+        throw new UnsupportedError(bot.platform, 'sendThread')
+      return bot.sendThread({ ...target, thread: target.thread }, content)
+    }
+    return target.type === 'group' ? bot.sendGroup(target.id, content) : bot.sendPrivate(target.id, content)
+  })
 }
 
 /** 按平台和账号 ID 管理机器人实例的注册表。 */

@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
+import type { DeliveryFailure } from '../delivery.ts'
 
 /** 一次事件分发中单个阶段的处理结果及耗时。 */
 export interface TraceStep {
@@ -8,6 +9,7 @@ export interface TraceStep {
   outcome: 'handled' | 'passed' | 'blocked' | 'denied' | 'cooldown' | 'invalid' | 'error' | 'timeout'
   duration: number
   error?: string
+  deliveryFailure?: DeliveryFailure
 }
 
 /** 事件的完整分发阶段、耗时和发送消息 ID。 */

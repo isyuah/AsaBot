@@ -47,6 +47,20 @@ export type TraceOutcome =
   | 'error'
   | 'timeout'
 
+export interface DeliveryFailure {
+  code: string
+  outcome: 'not_sent' | 'unknown' | 'partial'
+  target: {
+    platform: string
+    selfId?: string
+    type: 'group' | 'private'
+    id: string
+    thread?: { id: string; rootMessageId: string }
+  }
+  platformCode?: number
+  confirmedMessageIds?: readonly string[]
+}
+
 export interface TraceStep {
   stage: TraceStage
   plugin?: string
@@ -54,6 +68,7 @@ export interface TraceStep {
   outcome: TraceOutcome
   duration: number
   error?: string
+  deliveryFailure?: DeliveryFailure
 }
 
 export interface DispatchTrace {

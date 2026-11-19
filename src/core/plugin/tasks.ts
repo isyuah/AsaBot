@@ -3,6 +3,7 @@ import type { SQLInputValue } from 'node:sqlite'
 import type { Logger } from 'pino'
 import { z } from 'zod'
 import { type Config, durationSchema } from '../config/schema.ts'
+import { DeliveryError, type DeliveryFailure } from '../delivery.ts'
 import { scheduleTimeout } from '../dispatch/timer.ts'
 import type { Storage } from '../storage/index.ts'
 import { type Duration, parseDuration } from '../utils/duration.ts'
@@ -58,6 +59,7 @@ export interface TaskRecord<T = unknown> {
   failures: number
   policy: TaskPolicy
   error?: string
+  deliveryFailure?: DeliveryFailure
   blockedReason?: string
   canRetry: boolean
 }
@@ -70,6 +72,7 @@ export interface TaskAttempt {
   finishedAt?: number
   outcome: TaskOutcome
   error?: string
+  deliveryFailure?: DeliveryFailure
 }
 
 export interface TaskQuery {
@@ -88,7 +91,7 @@ export interface TaskHandle<T> {
   list(): TaskRecord<T>[]
   get(key: string): TaskRecord<T> | undefined
   attempts(key: string): TaskAttempt[]
-  retry(key: string): boolean
+  retry(key: string, options?: { confirmDelivery?: boolean }): boolean
 }
 
 export type TaskHandler<T> = (
@@ -347,12 +350,18 @@ export class TaskService {
         ...(row.finished_at === null ? {} : { finishedAt: Number(row.finished_at) }),
         outcome: row.outcome as TaskOutcome,
         ...(row.error === null ? {} : { error: String(row.error) }),
+        deliveryFailure:
+          row.delivery_failure === null
+            ? undefined
+            : (JSON.parse(String(row.delivery_failure)) as DeliveryFailure),
       }))
   }
 
-  retry(id: string): TaskRecord {
+  retry(id: string, options?: { confirmDelivery?: boolean }): TaskRecord {
     const task = this.get(id)
     if (!task?.canRetry) throw new TaskConflictError('任务必须处于失败状态，且处理器已激活')
+    if (task.deliveryFailure && task.deliveryFailure.outcome !== 'not_sent' && !options?.confirmDelivery)
+      throw new TaskConflictError('请先核对已发送的消息，再确认重试')
     const now = Date.now()
     this.storage.db
       .prepare(
@@ -431,6 +440,10 @@ export class TaskService {
       ...(row.started_at === null ? {} : { startedAt: Number(row.started_at) }),
       ...(row.finished_at === null ? {} : { finishedAt: Number(row.finished_at) }),
       ...(row.error === null ? {} : { error: String(row.error) }),
+      deliveryFailure:
+        row.delivery_failure === null
+          ? undefined
+          : (JSON.parse(String(row.delivery_failure)) as DeliveryFailure),
       ...(blockedReason === undefined || terminal.has(state) ? {} : { blockedReason }),
       canRetry:
         state === 'failed' &&
@@ -506,7 +519,7 @@ export class TaskService {
     db.exec('BEGIN IMMEDIATE')
     try {
       db.prepare(
-        "UPDATE tasks SET state = 'running', attempt = attempt + 1, started_at = ?, updated_at = ?, error = NULL WHERE id = ?",
+        "UPDATE tasks SET state = 'running', attempt = attempt + 1, started_at = ?, updated_at = ?, error = NULL, delivery_failure = NULL WHERE id = ?",
       ).run(now, now, task.id)
       db.prepare(
         "INSERT INTO task_attempts (id, task_id, plugin, attempt, started_at, outcome) VALUES (?, ?, ?, ?, ?, 'running')",
@@ -609,7 +622,14 @@ export class TaskService {
     const cancelled = reason === 'user' || reason === 'superseded'
     const failed = reason === 'timeout' || failure !== undefined
     const failures = task.failures + (failed ? 1 : 0)
-    const retry = failed && !cancelled && failures <= task.policy.maxRetries
+    const delivery =
+      failure?.error instanceof DeliveryError ? failure.error.publicFailure(this.config) : undefined
+    const safeToRetry =
+      !delivery ||
+      (delivery.outcome === 'not_sent' &&
+        (delivery.code === 'NO_BOT_ONLINE' || delivery.code === 'RATE_LIMITED'))
+    const retry = failed && !cancelled && safeToRetry && failures <= task.policy.maxRetries
+    const savedDelivery = delivery ? JSON.stringify(delivery) : null
     const error = reason === 'timeout' ? '任务执行超时' : failure ? this.errorText(failure.error) : undefined
     const state: TaskState = cancelled ? 'cancelled' : retry ? 'retry_wait' : failed ? 'failed' : 'succeeded'
     const nextRunAt = retry
@@ -618,15 +638,27 @@ export class TaskService {
     const db = this.storage.db
     db.exec('BEGIN IMMEDIATE')
     try {
-      db.prepare('UPDATE task_attempts SET outcome = ?, finished_at = ?, error = ? WHERE id = ?').run(
+      db.prepare(
+        'UPDATE task_attempts SET outcome = ?, finished_at = ?, error = ?, delivery_failure = ? WHERE id = ?',
+      ).run(
         cancelled ? 'cancelled' : reason === 'timeout' ? 'timeout' : failed ? 'failed' : 'succeeded',
         now,
         error ?? null,
+        savedDelivery,
         execution.attemptId,
       )
       db.prepare(
-        'UPDATE tasks SET state = ?, failures = ?, next_run_at = ?, updated_at = ?, finished_at = ?, error = ?, cancel_reason = NULL WHERE id = ?',
-      ).run(state, failures, nextRunAt, now, terminal.has(state) ? now : null, error ?? null, task.id)
+        'UPDATE tasks SET state = ?, failures = ?, next_run_at = ?, updated_at = ?, finished_at = ?, error = ?, delivery_failure = ?, cancel_reason = NULL WHERE id = ?',
+      ).run(
+        state,
+        failures,
+        nextRunAt,
+        now,
+        terminal.has(state) ? now : null,
+        error ?? null,
+        savedDelivery,
+        task.id,
+      )
       db.exec('COMMIT')
     } catch (cause) {
       db.exec('ROLLBACK')
@@ -634,7 +666,14 @@ export class TaskService {
     }
     if (failed)
       this.logger.error(
-        { plugin: task.plugin, task: task.name, taskId: task.id, attempt: task.attempt + 1, error },
+        {
+          plugin: task.plugin,
+          task: task.name,
+          taskId: task.id,
+          attempt: task.attempt + 1,
+          error,
+          deliveryFailure: delivery,
+        },
         'Scheduled task failed',
       )
   }
@@ -692,10 +731,10 @@ export class PersistentTasks {
         const task = get(key)
         return task ? this.service.attempts(task.id) : []
       },
-      retry: (key) => {
+      retry: (key, options) => {
         const task = get(key)
         if (!task?.canRetry) return false
-        this.service.retry(task.id)
+        this.service.retry(task.id, options)
         return true
       },
     }

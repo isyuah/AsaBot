@@ -122,11 +122,24 @@ export type IlinkRequest = <T extends z.ZodType>(
 export class IlinkError extends Error {
   readonly expired: boolean
   readonly retryable: boolean
+  readonly httpStatus?: number
+  readonly platformCode?: number
 
-  constructor(operation: string, details: string, { expired = false, retryable = false } = {}) {
+  constructor(
+    operation: string,
+    details: string,
+    {
+      expired = false,
+      retryable = false,
+      httpStatus,
+      platformCode,
+    }: { expired?: boolean; retryable?: boolean; httpStatus?: number; platformCode?: number } = {},
+  ) {
     super(`微信 ${operation} ${details}`)
     this.expired = expired
     this.retryable = retryable
+    this.httpStatus = httpStatus
+    this.platformCode = platformCode
   }
 }
 
@@ -164,6 +177,7 @@ export async function ilink<T extends z.ZodType>(
       const status = response.status
       throw new IlinkError(operation, `失败（HTTP ${status}）`, {
         expired: !!token && status === 401,
+        httpStatus: status,
         retryable: status === 408 || status === 429 || status >= 500,
       })
     }
@@ -190,9 +204,9 @@ export async function ilink<T extends z.ZodType>(
   if (status.success) {
     const { ret, errcode } = status.data
     if (ret === -14 || errcode === -14)
-      throw new IlinkError(operation, '授权已失效，请重新扫码', { expired: true })
+      throw new IlinkError(operation, '授权已失效，请重新扫码', { expired: true, platformCode: -14 })
     const code = ret || errcode
-    if (code) throw new IlinkError(operation, `失败（错误码 ${code}）`)
+    if (code) throw new IlinkError(operation, `失败（错误码 ${code}）`, { platformCode: code })
   }
   const parsed = schema.safeParse(result)
   if (!status.success || !parsed.success) throw new IlinkError(operation, '响应格式不正确')

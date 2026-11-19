@@ -1067,12 +1067,15 @@ parseTarget(text): Target                       // 第二段是 group/private �
 targetSchema                                    // zod：接受上面的字符串或对象，输出 Target，供插件配置使用
 ```
 - **选择 Bot**：
-  - 指定了 `selfId` 时，只用这个 Bot；它不在线时抛 `NoBotOnlineError`。
+  - 指定了 `selfId` 时，只用这个 Bot；它不在线时抛出 `DeliveryError`，错误码为 `NO_BOT_ONLINE`。
   - 没有指定时，用该平台第一个在线的 Bot。
 - `broadcast` 逐个发送：单个目标失败不影响其余目标，失败记在对应结果的 `error` 中。`interval` 默认为 0，各 Bot 的发送队列照常限速。
 - `Target` 是可以序列化的普通对象，可以直接存进 KV 或持久任务（A6）。`MessageTarget { type, id }` 仍然用于 Bot 自己的方法。
 - 字符串形式要求 platform 和 selfId 不含冒号，并且 selfId 不能恰好是 `group` 或 `private`；不满足时只能使用对象形式。
 - 面板的 `/send` 和对外 API 的 `/api/v1/send` 请求体改为 `{ target: Target | string, message }`，不再接受单独的 `platform`、`selfId` 字段。
+- `DeliveryError` 使用稳定的 `code`、`outcome` 和实际目标 `target`，可带 `platformCode`、`confirmedMessageIds`。`not_sent` 表示确定未发出，`unknown` 表示没有可信回执，`partial` 表示至少一段已确认送达。适配器应按回执和请求阶段分类，避免把发出后的断线归为未发送。原始平台错误文本不进入 HTTP 响应。
+- 发送 HTTP 错误返回 `{ error: { code, message, outcome, target, platformCode?, confirmedMessageIds? } }`。离线和会话不可用返回 409，限流返回 429，回执超时返回 504，平台拒绝或结果未知返回 502；部分送达一律返回 409，客户端根据 `outcome` 判断能否重发。
+- 执行记录和分发步骤保留 `deliveryFailure`，普通投递错误不会触发同一会话的通用错误回复。任务自动重试既要符合任务策略，也要满足投递错误属于确定未发出的离线或限流；收到部分送达或未知结果时需手动确认（`POST /api/panel/tasks/:id/retry?confirmDelivery=1`）。进程在任务运行中异常退出时仍采用既有的至少一次恢复语义。
 
 ### 24.4 F4 命令增强（修订 9、10）
 

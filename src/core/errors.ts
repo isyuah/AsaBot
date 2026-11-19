@@ -58,13 +58,6 @@ export class NotConnectedError extends Error {
   }
 }
 
-export class ConversationUnavailableError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'ConversationUnavailableError'
-  }
-}
-
 /** 发送队列已满，无法继续排队。 */
 export class SendQueueFullError extends Error {
   constructor() {
@@ -73,7 +66,7 @@ export class SendQueueFullError extends Error {
   }
 }
 
-/** 没有符合条件的在线机器人。 */
+/** 没有符合查询条件的在线机器人。 */
 export class NoBotOnlineError extends Error {
   constructor() {
     super('No bot is online')

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { AdapterHost } from '../../core/adapter.ts'
 import type { Bot, MessageTarget, MessageThread, SendResult } from '../../core/bot.ts'
+import { DeliveryAttempt, type DeliveryCode } from '../../core/delivery.ts'
 import { NotConnectedError } from '../../core/errors.ts'
 import type { Sendable } from '../../core/message/index.ts'
 import { redactText } from '../../core/utils/redact.ts'
@@ -102,6 +103,38 @@ export interface FeishuMergeForwardResult extends SendResult {
 export type FeishuMessagePage = FeishuPage<FeishuMessageInfo>
 
 const envelope = z.object({ code: z.number(), msg: z.string().optional() }).passthrough()
+const transportFailure = z.object({
+  code: z.string().optional(),
+  name: z.string().optional(),
+  response: z.object({ status: z.number(), data: z.unknown().optional() }).optional(),
+})
+
+class FeishuRequestError extends Error {
+  readonly platformCode?: number
+  readonly status?: number
+  readonly timeout: boolean
+
+  constructor(message: string, platformCode?: number, status?: number, timeout = false) {
+    super(message)
+    this.name = 'FeishuRequestError'
+    this.platformCode = platformCode
+    this.status = status
+    this.timeout = timeout
+  }
+}
+
+export function classifyFeishuSend(
+  error: unknown,
+): { code: DeliveryCode; platformCode?: number } | undefined {
+  if (!(error instanceof FeishuRequestError)) return undefined
+  const { platformCode, status } = error
+  if (status === 429 || platformCode === 99991400) return { code: 'RATE_LIMITED', platformCode }
+  if (error.timeout || status === 408 || status === 504) return { code: 'DELIVERY_TIMEOUT', platformCode }
+  if (status === 404 || platformCode === 230003) return { code: 'CONVERSATION_UNAVAILABLE', platformCode }
+  if (status !== undefined && status >= 500) return { code: 'DELIVERY_UNCONFIRMED', platformCode }
+  if (platformCode || (status !== undefined && status >= 400))
+    return { code: 'DELIVERY_REJECTED', platformCode }
+}
 export const idSchema = z.string().min(1)
 const timeSchema = z.coerce.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const ids = z.array(idSchema).default([])
@@ -210,14 +243,37 @@ export class FeishuClient {
     return result as T
   }
 
+  invokeSend<T>(
+    target: MessageTarget,
+    method: keyof FeishuApi,
+    args: unknown[],
+    run: (args: unknown[]) => Promise<T>,
+  ): Promise<T> {
+    return new DeliveryAttempt(this.bot, target).request(() => this.invoke(method, args, run))
+  }
+
   private async checked(work: () => Promise<unknown>): Promise<z.output<typeof envelope>> {
+    let raw: unknown
     try {
-      const result = envelope.parse(await work())
-      if (result.code !== 0) throw new Error(`Feishu API ${result.code}: ${result.msg ?? 'request failed'}`)
-      return result
+      raw = await work()
     } catch (error) {
-      throw new Error(redactText(error instanceof Error ? error.message : String(error), this.config))
+      const failure = transportFailure.safeParse(error).data
+      const response = failure?.response
+      const code = envelope.safeParse(response?.data).data?.code
+      throw new FeishuRequestError(
+        redactText(error instanceof Error ? error.message : String(error), this.config),
+        code,
+        response?.status,
+        failure?.name === 'TimeoutError' || failure?.code === 'ECONNABORTED' || failure?.code === 'ETIMEDOUT',
+      )
     }
+    const result = envelope.parse(raw)
+    if (result.code !== 0)
+      throw new FeishuRequestError(
+        redactText(`Feishu API ${result.code}: ${result.msg ?? 'request failed'}`, this.config),
+        result.code,
+      )
+    return result
   }
 
   raw(method: string, path: string, input?: FeishuRequest): Promise<z.output<typeof envelope>> {

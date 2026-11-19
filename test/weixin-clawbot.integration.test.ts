@@ -25,6 +25,7 @@ type QrResponse = Fields | (() => Response)
 class MockIlink {
   readonly password = randomUUID()
   readonly sent: { token: string; msg: Fields }[] = []
+  readonly sendResponses: Response[] = []
   readonly updateRequests: { token: string; cursor: unknown }[] = []
   readonly qrRequests: { id: string; host: string; code: string | null; signal: AbortSignal }[] = []
   readonly pendingQr: QrResponse[][] = []
@@ -143,7 +144,10 @@ class MockIlink {
       }
       case 'sendmessage':
         this.sent.push({ token, msg: data.msg as Fields })
-        return new Response(`{"ret":0,"message_id":${9223372036854775807n + BigInt(this.sent.length)}}`)
+        return (
+          this.sendResponses.shift() ??
+          new Response(`{"ret":0,"message_id":${9223372036854775807n + BigInt(this.sent.length)}}`)
+        )
       case 'getuploadurl': {
         const param = randomUUID()
         this.uploadKeys.set(param, data)
@@ -286,6 +290,36 @@ function encryptedAsset(mock: MockIlink, bytes: Buffer, rawKey = false) {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('微信 ClawBot', () => {
+  it('reports HTTP limits and preserves the confirmed first chunk of a split send', async () => {
+    const mock = new MockIlink()
+    const token = randomUUID()
+    const selfId = 'sender@im.bot'
+    mock.message(token, 'peer', 'session-only', 'intro', 'cursor')
+    const t = await fixture(mock, [{ id: 'one', name: 'One', adapter: platform, config: { selfId, token } }])
+    try {
+      await vi.waitFor(() => expect(t.sessions).toHaveLength(1))
+      const bot = t.app.getBot(platform, selfId)
+      if (!bot) throw new Error('Missing Weixin Bot')
+      mock.sendResponses.push(new Response(null, { status: 429 }))
+      await expect(bot.sendPrivate('peer', 'limited')).rejects.toMatchObject({
+        code: 'RATE_LIMITED',
+        outcome: 'not_sent',
+      })
+      mock.sendResponses.push(
+        Response.json({ ret: 0, message_id: 'sent-1' }),
+        new Response(null, { status: 504 }),
+      )
+      await expect(bot.sendPrivate('peer', 'a'.repeat(4001))).rejects.toMatchObject({
+        code: 'DELIVERY_TIMEOUT',
+        outcome: 'partial',
+        confirmedMessageIds: ['sent-1'],
+      })
+      expect(mock.sent).toHaveLength(3)
+    } finally {
+      await t.dispose()
+    }
+  })
+
   it('checks regional handoff and verification, then saves once and grants only bot.admin', async () => {
     const mock = new MockIlink()
     const token = `v1:${randomUUID()}`
@@ -380,7 +414,11 @@ describe('微信 ClawBot', () => {
       expect(t.app.policies.admins({ platform, selfId })).toEqual(['scanner'])
       const bot = t.app.getBot(platform, selfId)
       if (!bot) throw new Error('Missing Weixin Bot')
-      await expect(bot.sendPrivate('unknown', 'hello')).rejects.toThrow('请先让对方')
+      await expect(bot.sendPrivate('unknown', 'hello')).rejects.toMatchObject({
+        code: 'CONVERSATION_UNAVAILABLE',
+        outcome: 'not_sent',
+        target: { platform, selfId, type: 'private', id: 'unknown' },
+      })
       expect(await bot.sendPrivate('scanner', '再次回复')).toEqual({ messageId: '9223372036854775811' })
       t.app.storage.access.add('block', 'user', `${platform}:ordinary`)
       mock.message(token, 'ordinary', 'ordinary-context', 'ping', 'blocked-cursor')
@@ -737,7 +775,7 @@ describe('微信 ClawBot', () => {
       await expect(bot.weixin.downloadMedia(image.data.file)).rejects.toThrow('微信媒体下载、解密或转码失败')
       await expect(
         bot.sendPrivate('peer', seg.image(`http://127.0.0.1/media?secret=${secret}`)),
-      ).rejects.toThrow('无法读取微信待发送媒体')
+      ).rejects.toMatchObject({ code: 'DELIVERY_PREPARATION_FAILED', outcome: 'not_sent' })
       expect(mock.mediaRequests).toEqual([])
       expect(mock.sent).toEqual([])
       expect(JSON.stringify(t.log)).not.toContain(secret)

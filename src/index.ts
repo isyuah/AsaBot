@@ -50,6 +50,12 @@ export {
 } from './core/config/schema.ts'
 export { writeConfigValue } from './core/config/write.ts'
 export type { ConnectionConfig, ConnectionState } from './core/connections.ts'
+export {
+  type DeliveryCode,
+  DeliveryError,
+  type DeliveryFailure,
+  type DeliveryOutcome,
+} from './core/delivery.ts'
 export type { ApiCall, ApiInterceptor } from './core/dispatch/api.ts'
 export { Dispatcher } from './core/dispatch/dispatcher.ts'
 export type { DispatchTrace, TraceStep } from './core/dispatch/trace.ts'

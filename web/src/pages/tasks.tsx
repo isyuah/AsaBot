@@ -2,6 +2,7 @@ import {
   Badge,
   Button,
   Card,
+  DeliveryFailureDetails,
   EmptyState,
   ErrorState,
   Input,
@@ -203,6 +204,7 @@ export function TasksPage() {
 
 function TaskSheet({ id }: { id: string | null }) {
   const client = useQueryClient()
+  const [confirming, setConfirming] = useState<string | null>(null)
   const task = useQuery({
     queryKey: ['tasks', id],
     queryFn: () => api.task(id as string),
@@ -216,19 +218,31 @@ function TaskSheet({ id }: { id: string | null }) {
     refetchInterval: 15_000,
   })
   const action = useMutation({
-    mutationFn: (operation: 'retry' | 'cancel') => api.taskAction(id as string, operation),
+    mutationFn: ({
+      operation,
+      confirmDelivery,
+    }: {
+      operation: 'retry' | 'cancel'
+      confirmDelivery?: boolean
+    }) => api.taskAction(id as string, operation, confirmDelivery),
     onSuccess: () => {
+      setConfirming(null)
       void client.invalidateQueries({ queryKey: ['tasks'] })
     },
     onError: (error) => toast.error(error.message),
   })
   const item = task.data
   const cancellable = item && ['pending', 'running', 'retry_wait'].includes(item.state)
+  const confirmationKey = item ? `${item.id}:${item.attempt}` : null
+  const needsConfirmation = item?.deliveryFailure && item.deliveryFailure.outcome !== 'not_sent'
   return (
     <Sheet
       open={id !== null}
       onOpenChange={(open) => {
-        if (!open) navigate(`/tasks${window.location.search}`)
+        if (!open) {
+          setConfirming(null)
+          navigate(`/tasks${window.location.search}`)
+        }
       }}
       title={item?.name ?? '任务详情'}
       subtitle={item?.plugin}
@@ -243,11 +257,15 @@ function TaskSheet({ id }: { id: string | null }) {
             <div className="flex items-center gap-3">
               <Badge tone={states[item.state].tone}>{states[item.state].label}</Badge>
               <div className="ml-auto flex gap-2">
-                {item.canRetry && (
+                {item.canRetry && confirming !== confirmationKey && (
                   <Button
                     variant="secondary"
                     loading={action.isPending}
-                    onClick={() => action.mutate('retry')}
+                    onClick={() =>
+                      needsConfirmation
+                        ? setConfirming(confirmationKey)
+                        : action.mutate({ operation: 'retry' })
+                    }
                   >
                     重试
                   </Button>
@@ -256,13 +274,28 @@ function TaskSheet({ id }: { id: string | null }) {
                   <Button
                     variant="secondary"
                     loading={action.isPending}
-                    onClick={() => action.mutate('cancel')}
+                    onClick={() => action.mutate({ operation: 'cancel' })}
                   >
                     取消任务
                   </Button>
                 )}
               </div>
             </div>
+            {item.canRetry && needsConfirmation && confirming === confirmationKey && (
+              <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border p-3">
+                <p className="mr-auto text-[13px] text-warning">重试可能重复发送。请先核对会话中的消息。</p>
+                <Button variant="ghost" onClick={() => setConfirming(null)}>
+                  取消
+                </Button>
+                <Button
+                  variant="secondary"
+                  loading={action.isPending}
+                  onClick={() => action.mutate({ operation: 'retry', confirmDelivery: true })}
+                >
+                  确认重试
+                </Button>
+              </div>
+            )}
             {item.blockedReason && <p className="text-sm text-warning">{item.blockedReason}</p>}
             {item.state === 'cancelling' && (
               <p className="text-sm text-fg-3">已发送中止信号，等待处理函数退出后释放执行名额。</p>
@@ -289,6 +322,11 @@ function TaskSheet({ id }: { id: string | null }) {
                 <pre className="whitespace-pre-wrap break-all rounded-lg bg-danger-soft p-3 text-xs text-danger">
                   {item.error}
                 </pre>
+                {item.deliveryFailure && (
+                  <div className="mt-3">
+                    <DeliveryFailureDetails failure={item.deliveryFailure} />
+                  </div>
+                )}
               </div>
             )}
             <div>
@@ -321,6 +359,11 @@ function TaskSheet({ id }: { id: string | null }) {
                       )}
                       {attempt.error && (
                         <pre className="mt-2 whitespace-pre-wrap break-all text-danger">{attempt.error}</pre>
+                      )}
+                      {attempt.deliveryFailure && (
+                        <div className="mt-2">
+                          <DeliveryFailureDetails failure={attempt.deliveryFailure} />
+                        </div>
                       )}
                     </li>
                   ))}

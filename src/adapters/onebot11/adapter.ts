@@ -29,7 +29,7 @@ import { LruSet } from '../../core/utils/lru.ts'
 import { constantTimeEqual } from '../../core/utils/security.ts'
 import { OneBotApiImpl, type OneBotOutgoingRequest } from './api.ts'
 import type { OneBotApi, OneBotBot } from './bot.ts'
-import { ApiError } from './errors.ts'
+import { ApiError, ReceiptLostError } from './errors.ts'
 import { incomingMessage } from './message.ts'
 import { SendQueue } from './send-queue.ts'
 import type { OneBot11Config, OneBotConnectionConfig, OneBotFrame, OneBotMessageEvent } from './types.ts'
@@ -142,7 +142,7 @@ class OneBotBotImpl implements OneBotBot {
     this.connection = connection
     this.selfId = selfId
     this.sendQueue = new SendQueue(options.sendQueue, options.logger, selfId)
-    this.onebot = new OneBotApiImpl((action, params) => this.call(action, params), {
+    this.onebot = new OneBotApiImpl(this, (action, params) => this.call(action, params), {
       assertOnline: () => this.connection.assertOnline(this),
       prepareOutgoing: (target, message) => this.connection.prepareOutgoing(this, target, message),
       executeOutgoing: (action, params, execute) =>
@@ -871,7 +871,7 @@ class OneBotSession {
     this.heartbeatPeriod = undefined
     this.lastHeartbeatAt = undefined
     this.pendingEvents.length = 0
-    this.rejectPending(new NotConnectedError())
+    this.rejectPending()
     if (this.currentBot?.usesConnection(this)) {
       this.currentBot.sendQueue.cancel()
       if (this.currentBot.status === 'online') {
@@ -885,11 +885,11 @@ class OneBotSession {
     }
   }
 
-  private rejectPending(error: Error): void {
+  private rejectPending(): void {
     for (const [echo, pending] of this.pending) {
       clearTimeout(pending.timer)
       this.pending.delete(echo)
-      pending.reject(error)
+      pending.reject(sendActions.has(pending.action) ? new ReceiptLostError() : new NotConnectedError())
     }
   }
 

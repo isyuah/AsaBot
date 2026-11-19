@@ -12,3 +12,10 @@ export class ApiError extends Error {
     this.wording = wording
   }
 }
+
+export class ReceiptLostError extends Error {
+  constructor() {
+    super('OneBot disconnected while waiting for a send receipt')
+    this.name = 'ReceiptLostError'
+  }
+}

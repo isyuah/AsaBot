@@ -1,10 +1,76 @@
 import { once } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import WebSocket from 'ws'
-import { definePlugin, type TaskHandle } from '../src/index.ts'
+import { DeliveryError, definePlugin, type TaskHandle } from '../src/index.ts'
 import { createTestApp } from '../src/testing/index.ts'
 
 describe('task center', () => {
+  it('records uncertain sends, prevents automatic replay and requires confirmation for manual replay', async () => {
+    const target = { platform: 'virtual', selfId: '10000', type: 'group' as const, id: '10' }
+    let job!: TaskHandle<null>
+    let sends = 0
+    const t = await createTestApp({
+      config: { server: { port: 0, panelPassword: 'task-panel-secret', apiToken: 'send-api-secret' } },
+      plugins: [
+        definePlugin({
+          name: 'delivery-job',
+          setup(ctx) {
+            job = ctx.task('send', () => ctx.send(target, 'test'), { retry: { maxRetries: 2, delay: 5 } })
+          },
+        }),
+      ],
+    })
+    const origin = `http://127.0.0.1:${t.app.server?.address()?.port}`
+    const timeout = { code: 'DELIVERY_TIMEOUT' as const, outcome: 'unknown', target }
+    let issue: 'DELIVERY_TIMEOUT' | 'RATE_LIMITED' | undefined = timeout.code
+    t.mock.bot.sendGroup = async () => {
+      sends += 1
+      if (issue) throw new DeliveryError(target, { code: issue })
+      return { messageId: 'confirmed' }
+    }
+    try {
+      const response = await fetch(`${origin}/api/v1/send`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer send-api-secret', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target, message: 'test' }),
+      })
+      expect(response.status).toBe(504)
+      expect(await response.json()).toMatchObject({ error: timeout })
+      const login = await fetch(`${origin}/api/panel/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'task-panel-secret' }),
+      })
+      const cookie = login.headers.get('set-cookie')?.split(';')[0]
+      if (!cookie) throw new Error('Panel login failed')
+      const panel = (path: string, method = 'GET') =>
+        fetch(`${origin}/api/panel${path}`, {
+          method,
+          headers: { cookie, 'Content-Type': 'application/json' },
+        })
+      const key = job.schedule(null, { delay: 0, key: 'timed-out' })
+      await vi.waitFor(() =>
+        expect(job.get(key)).toMatchObject({ state: 'failed', attempt: 1, canRetry: true }),
+      )
+      const task = `/tasks/${job.get(key)?.id}`
+      expect(await (await panel(task)).json()).toMatchObject({ deliveryFailure: timeout, canRetry: true })
+      expect(await (await panel(`${task}/attempts`)).json()).toMatchObject([{ deliveryFailure: timeout }])
+      expect((await panel(`${task}/retry`, 'POST')).status).toBe(409)
+      expect(sends).toBe(2)
+      issue = undefined
+      expect((await panel(`${task}/retry?confirmDelivery=1`, 'POST')).status).toBe(200)
+      await vi.waitFor(() => expect(job.get('timed-out')).toMatchObject({ state: 'succeeded', attempt: 2 }))
+      expect(job.attempts('timed-out')[1]?.deliveryFailure).toMatchObject(timeout)
+      issue = 'RATE_LIMITED'
+      job.schedule(null, { delay: 0, key: 'limited' })
+      await vi.waitFor(() => expect(job.get('limited')).toMatchObject({ state: 'failed', attempt: 3 }))
+      expect(job.get('limited')?.deliveryFailure).toMatchObject({ code: 'RATE_LIMITED', outcome: 'not_sent' })
+      expect(sends).toBe(6)
+    } finally {
+      await t.dispose()
+    }
+  })
+
   it('authenticates, filters, redacts, pushes changes and validates actions', async () => {
     let task!: TaskHandle<unknown>
     let fail = true

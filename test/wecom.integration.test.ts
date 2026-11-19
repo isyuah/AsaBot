@@ -334,7 +334,11 @@ describe('WeCom built-in adapter', () => {
     )
     expect(transport.send).not.toHaveBeenCalled()
     transport.reply.mockRejectedValueOnce(new Error('platform rejected'))
-    await expect(session.reply('test')).rejects.toThrow('platform rejected')
+    await expect(session.reply('test')).rejects.toMatchObject({
+      code: 'DELIVERY_UNCONFIRMED',
+      outcome: 'unknown',
+      target: { platform: 'wecom', type: 'group', id: groupId },
+    })
     expect(transport.send).not.toHaveBeenCalled()
     await session.reply('push', { quote: false })
     await session.send('send')
@@ -346,7 +350,10 @@ describe('WeCom built-in adapter', () => {
     )
     const now = Date.now()
     vi.spyOn(Date, 'now').mockReturnValue(now + 24 * 60 * 60_000)
-    await expect(session.reply('late')).rejects.toThrow('回调回复已超时')
+    await expect(session.reply('late')).rejects.toMatchObject({
+      code: 'CONVERSATION_UNAVAILABLE',
+      outcome: 'not_sent',
+    })
     expect(transport.reply).toHaveBeenCalledTimes(4)
     expect(apiCalls).toEqual(expect.arrayContaining(['wecom.reply', 'sendGroup']))
   })
@@ -374,7 +381,10 @@ describe('WeCom built-in adapter', () => {
     expect(app.connections.list()).toMatchObject([
       { state: 'online', bots: [{ selfId: 'replacement' }], lastError: undefined },
     ])
-    await expect(originalSession.reply('old')).rejects.toThrow('未上线')
+    await expect(originalSession.reply('old')).rejects.toMatchObject({
+      code: 'NO_BOT_ONLINE',
+      outcome: 'not_sent',
+    })
     await app.connections.apply([
       { ...rotated, enabled: false, config: { botId: 'replacement', secret: randomUUID() } },
     ])
@@ -749,11 +759,15 @@ describe('official WeCom SDK transport', () => {
     expect(
       Buffer.concat(chunks.map((frame) => Buffer.from(String(frame.body.base64_data), 'base64'))),
     ).toEqual(bytes)
-    await expect(bot().sendPrivate(userId, seg.image(Buffer.from('unsupported image')))).rejects.toThrow(
-      '仅支持 PNG',
-    )
+    await expect(
+      bot().sendPrivate(userId, seg.image(Buffer.from('unsupported image'))),
+    ).rejects.toMatchObject({ code: 'DELIVERY_PREPARATION_FAILED', outcome: 'not_sent' })
     pushFailure.next = true
-    await expect(session.send('rejected')).rejects.toThrow(/^企业微信主动发送被拒绝（错误码 60001）$/)
+    await expect(session.send('rejected')).rejects.toMatchObject({
+      code: 'DELIVERY_REJECTED',
+      outcome: 'not_sent',
+      platformCode: 60001,
+    })
     auth.mode = 'accept'
     socket.terminate()
     await vi.waitFor(() => expect(sockets).toHaveLength(2))

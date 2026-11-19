@@ -9,10 +9,13 @@ import type {
   SendResult,
   UserInfo,
 } from '../../core/bot.ts'
+import { DeliveryAttempt } from '../../core/delivery.ts'
+import type { BotIdentity } from '../../core/identity.ts'
 import type { Message, Segment, Sendable } from '../../core/message/index.ts'
 import { normalizeSendable, seg } from '../../core/message/index.ts'
 import type { OneBotApi, OneBotForwardNode, OneBotMessageInfo, OneBotVersionInfo } from './bot.ts'
 import { idNumber, outgoingSegment } from './conversion.ts'
+import { ApiError } from './errors.ts'
 import { incomingMessage } from './message.ts'
 import type { OneBotMessage } from './types.ts'
 
@@ -178,10 +181,12 @@ function memberInfo(value: unknown): GroupMemberInfo {
 
 /** 基于 OneBot 请求函数实现的平台专属 API。 */
 export class OneBotApiImpl implements OneBotApi {
+  private readonly bot: BotIdentity
   private readonly request: Request
   private readonly hooks: OneBotApiHooks
 
-  constructor(request: Request, hooks: OneBotApiHooks = {}) {
+  constructor(bot: BotIdentity, request: Request, hooks: OneBotApiHooks = {}) {
+    this.bot = bot
     this.request = request
     this.hooks = hooks
   }
@@ -334,7 +339,18 @@ export class OneBotApiImpl implements OneBotApi {
     return this.sendOutgoing('send_private_forward_msg', { type: 'private', id: userId }, messages, true)
   }
 
-  private async sendOutgoing(
+  private sendOutgoing(
+    action: string,
+    destination: MessageTarget,
+    content: Sendable | OneBotForwardNode[],
+    forward: boolean,
+  ): Promise<SendResult> {
+    const delivery = new DeliveryAttempt(this.bot, destination)
+    return delivery.run(() => this.deliverOutgoing(delivery, action, destination, content, forward))
+  }
+
+  private async deliverOutgoing(
+    delivery: DeliveryAttempt,
     action: string,
     destination: MessageTarget,
     content: Sendable | OneBotForwardNode[],
@@ -366,12 +382,21 @@ export class OneBotApiImpl implements OneBotApi {
         wireContent = await normalizeOutbound(prepared)
         eventMessage = prepared
       }
-      const response = await this.request(actualAction, {
-        ...actualParams,
-        [idKey]: idNumber(id),
-        [messageKey]: wireContent,
-      })
-      const result = messageResult(response)
+      const wireParams = { ...actualParams, [idKey]: idNumber(id), [messageKey]: wireContent }
+      const { response, result } = await new DeliveryAttempt(this.bot, target).request(
+        async () => {
+          const response = await this.request(actualAction, wireParams)
+          return { response, result: messageResult(response) }
+        },
+        (error) =>
+          error instanceof ApiError
+            ? {
+                code: error.retcode === 1 ? 'DELIVERY_UNCONFIRMED' : 'DELIVERY_REJECTED',
+                platformCode: error.retcode,
+              }
+            : undefined,
+      )
+      delivery.confirm(result)
       this.hooks.onMessageSent?.({
         messageType: destination.type,
         ...(destination.type === 'group' ? { groupId: id } : { userId: id }),

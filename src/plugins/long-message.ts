@@ -2,6 +2,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { z } from 'zod'
 import { sendTo, supports } from '../core/bot.ts'
 import { durationSchema } from '../core/config/schema.ts'
+import { DeliveryAttempt } from '../core/delivery.ts'
 import type { Message, Segment } from '../core/message/index.ts'
 import { isSegment, seg } from '../core/message/index.ts'
 import { definePlugin } from '../core/plugin/definition.ts'
@@ -142,23 +143,27 @@ export default definePlugin({
           return { deliver: () => bot.sendForward(target, nodes) }
         }
         // Split sending can take far longer than the hook timeout, so it runs as a delivery after the hook chain.
+        const attempt = new DeliveryAttempt(bot, target)
         return {
-          deliver: async () => {
-            const first = await imageMarkdown(chunks[0] as Message)
-            let sent = await (sendFirst
-              ? sendFirst(first)
-              : sendPart
-                ? sendPart(first)
-                : sendTo(bot, target, first))
-            let destination = { ...target, thread: target.thread ?? sent.thread }
-            for (const chunk of chunks.slice(1)) {
-              if (config.splitInterval) await delay(config.splitInterval, undefined, { signal })
-              const part = await imageMarkdown(chunk)
-              sent = await (sendPart ? sendPart(part) : sendTo(bot, destination, part))
-              if (!destination.thread && sent.thread) destination = { ...destination, thread: sent.thread }
-            }
-            return sent
-          },
+          deliver: () =>
+            attempt.run(async () => {
+              const first = await imageMarkdown(chunks[0] as Message)
+              let sent = attempt.confirm(
+                await (sendFirst
+                  ? sendFirst(first)
+                  : sendPart
+                    ? sendPart(first)
+                    : sendTo(bot, target, first)),
+              )
+              let destination = { ...target, thread: target.thread ?? sent.thread }
+              for (const chunk of chunks.slice(1)) {
+                if (config.splitInterval) await delay(config.splitInterval, undefined, { signal })
+                const part = await imageMarkdown(chunk)
+                sent = attempt.confirm(await (sendPart ? sendPart(part) : sendTo(bot, destination, part)))
+                if (!destination.thread && sent.thread) destination = { ...destination, thread: sent.thread }
+              }
+              return sent
+            }),
         }
       },
       { priority: -100 },

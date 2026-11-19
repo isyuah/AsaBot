@@ -1,5 +1,6 @@
 export { Avatar } from './avatar.tsx'
 export { CompatibilityInfo } from './compatibility-info.tsx'
+export { DeliveryFailureDetails } from './delivery-failure.tsx'
 export { formatClock, formatNumber, levelName, levelStyle, logLevels } from './format.ts'
 export { Logo } from './logo.tsx'
 export { MessageChart } from './message-chart.tsx'
@@ -10,6 +11,7 @@ export { ListControl, SchemaForm } from './schema-form.tsx'
 export { Segments } from './segments.tsx'
 export { TraceView } from './trace-view.tsx'
 export type {
+  DeliveryFailure,
   DispatchTrace,
   JsonSchema,
   LogRecord,
