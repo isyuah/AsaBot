@@ -63,7 +63,7 @@ export class Connections {
   }
   catalog() {
     return [...this.definitions.values()].map(({ definition, source }) => {
-      const { create: _create, configSchema, setup, ...metadata } = definition
+      const { create: _create, configSchema, setup, accountId: _accountId, ...metadata } = definition
       return {
         ...metadata,
         ...(setup && { setup: { kind: setup.kind } }),
@@ -84,8 +84,8 @@ export class Connections {
       const result = definition.configSchema.safeParse(config.config)
       if (!result.success)
         throw new ConfigError(`connections.${config.id}.config: ${this.error(config, result.error)}`)
-      if (definition.setup) {
-        const selfId = definition.setup.accountId(result.data)
+      if (definition.accountId) {
+        const selfId = definition.accountId(result.data)
         if (!botIdentitySchema.shape.selfId.safeParse(selfId).success)
           throw new ConfigError(`connections.${config.id}: invalid Bot ID`)
         const key = botKey({ platform: definition.platform, selfId })
@@ -146,11 +146,11 @@ export class Connections {
     for (const config of parsed) {
       let entry = this.entries.get(config.id)
       if (entry && isDeepStrictEqual(entry.config, config)) continue
-      const setup = this.definition(config.adapter).setup
+      const { accountId } = this.definition(config.adapter)
       const replaced =
         entry &&
         (entry.config.adapter !== config.adapter ||
-          (setup && setup.accountId(entry.config.config) !== setup.accountId(config.config)))
+          (accountId && accountId(entry.config.config) !== accountId(config.config)))
       if (entry?.adapter && !replaced && entry.config.enabled && config.enabled) {
         const changed = !isDeepStrictEqual(entry.config.config, config.config)
         entry.config = config
@@ -235,7 +235,7 @@ export class Connections {
     const { config } = entry
     const definition = this.definition(config.adapter)
     const store = app.storage.store(
-      `@adapter:${JSON.stringify([config.adapter, config.id, definition.setup?.accountId(config.config)])}`,
+      `@adapter:${JSON.stringify([config.adapter, config.id, definition.accountId?.(config.config)])}`,
       () => {
         if (!current()) throw new Error('Connection is stopped')
       },

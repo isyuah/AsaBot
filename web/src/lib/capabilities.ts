@@ -70,6 +70,13 @@ const platformLabels: Record<string, string> = {
   'feishu.setChatMessageMode': '切换群消息模式',
   'feishu.addChatMembers': '添加群成员',
   'feishu.urgentApp': '应用内加急',
+  'wecom:card': '企业微信模板卡片',
+  'wecom.reply': '回复原消息',
+  'wecom.downloadMedia': '下载并解密媒体',
+  'wecom.stream.update': '更新流式回复',
+  'wecom.stream.finish': '结束流式回复',
+  'wecom.replyWelcome': '回复欢迎语',
+  'wecom.updateCard': '更新模板卡片',
   'weixin-clawbot.downloadMedia': '下载并解密媒体',
   'weixin-clawbot.setTyping': '设置或取消正在输入',
 }

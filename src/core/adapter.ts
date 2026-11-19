@@ -16,6 +16,8 @@ export interface OutgoingMessage {
   message: Message
   /** 创建话题时，接管发送的钩子可用它发送首段并获取后续分段的目标。 */
   sendFirst?: (content: Sendable) => Promise<SendResult & { thread: MessageThread }>
+  /** 接管发送的钩子可用它沿原回调通道发送每一段。 */
+  sendPart?: (content: Sendable) => Promise<SendResult>
 }
 
 /**
@@ -85,14 +87,12 @@ export interface QrSetupChallenge {
   poll(verifyCode?: string): Promise<QrSetupUpdate>
 }
 
-export interface QrConnectionSetup<T = unknown> {
+export interface QrConnectionSetup {
   kind: 'qr'
-  accountId(config: T): string
   start(signal: AbortSignal): Promise<QrSetupChallenge>
 }
 
-/** 独立适配器包的公开契约；配置由框架在创建连接前校验。 */
-export interface AdapterDefinition {
+interface AdapterMetadata {
   id: string
   platform: string
   name: string
@@ -100,24 +100,27 @@ export interface AdapterDefinition {
   description: string
   connectionTypes: string[]
   capabilities: BotCapabilities
-  configSchema: z.ZodType
-  setup?: QrConnectionSetup
-  create(config: unknown, host: AdapterHost): Adapter
 }
 
-export function defineAdapter<T>(
-  definition: Omit<AdapterDefinition, 'configSchema' | 'create' | 'setup'> & {
-    configSchema: z.ZodType<T>
-    setup?: QrConnectionSetup<T>
-    create(config: T, host: AdapterHost): Adapter
-  },
-): AdapterDefinition {
-  const { setup, ...metadata } = definition
-  return {
+type AdapterOptions<T> = AdapterMetadata & {
+  configSchema: z.ZodType<T>
+  create(config: T, host: AdapterHost): Adapter
+} & (
+    | { setup: QrConnectionSetup; accountId(config: T): string }
+    | { setup?: undefined; accountId?(config: T): string }
+  )
+
+/** 独立适配器包的公开契约；配置由框架在创建连接前校验。 */
+export type AdapterDefinition = AdapterOptions<unknown>
+
+export function defineAdapter<T>(definition: AdapterOptions<T>): AdapterDefinition {
+  const { setup, accountId, ...metadata } = definition
+  const shared = {
     ...metadata,
-    ...(setup && { setup: { ...setup, accountId: (config: unknown) => setup.accountId(config as T) } }),
-    create: (config, host) => definition.create(config as T, host),
+    create: (config: unknown, host: AdapterHost) => definition.create(config as T, host),
   }
+  if (setup) return { ...shared, setup, accountId: (config) => accountId(config as T) }
+  return { ...shared, ...(accountId && { accountId: (config: unknown) => accountId(config as T) }) }
 }
 
 /** 处理 HTTP 升级请求的适配器回调。 */

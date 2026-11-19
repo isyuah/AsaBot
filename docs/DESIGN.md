@@ -1468,6 +1468,7 @@ type HttpInit = RequestInit & { timeout?: Duration; proxy?: boolean | string; ma
 - 连接状态包括 disabled、connecting、waiting、online、retrying、error、offline；真实驱动通过可选 `AdapterHost.connection.update()` 上报。成功上线会保留最近一次错误及发生时间，便于排查，当前状态单独展示。
 - 反向接入点为 `/connections/<id>/onebot/v11/ws`。连接单独编辑、停用、重连和删除；同协议的其他连接不受影响。
 - 核心公开 `AdapterDefinition`、`defineAdapter()`。独立包默认导出适配器定义，包含 id、platform、name、version、description、connectionTypes、capabilities、configSchema 和 create。内置驱动与外部包使用同一注册契约。
+- 已知固定账号的驱动可声明 `accountId(config)`（扫码驱动必填）。配置保存和启动前按平台及账号查重；换号时停止原驱动、清除状态并使用新账号的存储命名空间。企业微信按 BotID 绑定，认证失败、订阅超时或服务端通知被另一连接替换时停在错误状态，普通断线自动重连。
 - 用户先用项目包管理器安装包，再在 `adapterModules` 中填写 npm 包名（可包含子路径），CLI 从项目工作目录按 Node import 条件解析并在启动时加载。程序化 `createApp` 可通过 options.adapters 注入定义。面板展示来源、schema 和实现能力，本轮不提供适配器市场或热升级。
 - 连接表单从 schema 生成；常见敏感字段及 schema 的 writeOnly 字段掩码返回，保留环境变量引用和 YAML 注释，错误返回也按 schema 脱敏。
 - 插件的机器人应用与群配置接口返回有效配置和字段来源（global、bot、group、default）。`connections` 和 `policies` 实时帧用于失效缓存并重新拉取真实数据，断线重连时统一刷新缓存。

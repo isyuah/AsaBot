@@ -69,6 +69,14 @@ connections:
   #     appSecret: ${FEISHU_APP_SECRET}
   #     apiTimeout: 30s
   #     mediaMaxBytes: 20971520
+  # - id: wecom-main
+  #   name: 企业微信主机器人
+  #   adapter: wecom
+  #   enabled: true
+  #   config:
+  #     botId: ${WECOM_BOT_ID}
+  #     secret: ${WECOM_BOT_SECRET}
+  #     botName: 研发助手
 
 pluginLoader:
   # 从这些目录加载插件入口文件

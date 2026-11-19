@@ -58,7 +58,7 @@ export class ConnectionSetups {
   start(owner: { token: string; expiresAt: number }, input: z.output<typeof connectionSetupInput>) {
     const { adapter, connectionId } = input
     const definition = this.app.connections.definition(adapter)
-    const { setup } = definition
+    const { setup, accountId } = definition
     if (!setup) throw new ConnectionSetupError(400, '此适配器不支持扫码接入')
     const existing = connectionId && this.app.config.connections.find((record) => record.id === connectionId)
     if (connectionId && (!existing || existing.adapter !== adapter))
@@ -74,14 +74,14 @@ export class ConnectionSetups {
       owner: owner.token,
       adapter,
       connectionId: connectionId ?? randomUUID(),
-      ...(existing && { previousAccount: { selfId: setup.accountId(config), config } }),
+      ...(existing && { previousAccount: { selfId: accountId(config), config } }),
       expiresAt,
       controller: new AbortController(),
       timer: setTimeout(() => this.drop(id), Math.max(0, expiresAt - Date.now())).unref(),
       state: { status: 'starting' },
     }
     this.drafts.set(id, draft)
-    void this.poll(draft, setup)
+    void this.poll(draft, setup, accountId)
     return this.view(draft)
   }
 
@@ -93,9 +93,9 @@ export class ConnectionSetups {
     const draft = this.require(owner, id)
     if (draft.state.status !== 'verification') throw new ConnectionSetupError(409, '当前不需要验证码')
     draft.state = { status: 'scanned' }
-    const setup = this.app.connections.definition(draft.adapter).setup
+    const { setup, accountId } = this.app.connections.definition(draft.adapter)
     if (!setup) throw new Error('Missing QR provider')
-    void this.poll(draft, setup, code)
+    void this.poll(draft, setup, accountId, code)
     return this.view(draft)
   }
 
@@ -169,7 +169,12 @@ export class ConnectionSetups {
     draft.controller.abort()
   }
 
-  private async poll(draft: Draft, setup: QrConnectionSetup, code?: string): Promise<void> {
+  private async poll(
+    draft: Draft,
+    setup: QrConnectionSetup,
+    accountId: (config: unknown) => string,
+    code?: string,
+  ): Promise<void> {
     const signal = draft.controller.signal
     try {
       if (!draft.challenge) {
@@ -191,7 +196,7 @@ export class ConnectionSetups {
           case 'authorized': {
             const definition = this.app.connections.definition(draft.adapter)
             const config = definition.configSchema.parse(update.config)
-            const selfId = botIdentitySchema.shape.selfId.parse(setup.accountId(config))
+            const selfId = botIdentitySchema.shape.selfId.parse(accountId(config))
             const adminUserId = actorIdentitySchema.shape.userId.optional().parse(update.adminUserId)
             const previous = draft.previousAccount?.selfId
             draft.challenge = undefined

@@ -309,10 +309,7 @@ export class SettingsService {
         current.some((record) => {
           if (record.id === id) return false
           const other = this.app.connections.definition(record.adapter)
-          return (
-            other.platform === definition.platform &&
-            other.setup?.accountId(other.configSchema.parse(record.config)) === account.selfId
-          )
+          return other.platform === definition.platform && other.accountId?.(record.config) === account.selfId
         })
       )
         throw new ConnectionSetupError(409, '该机器人已绑定到另一条连接')

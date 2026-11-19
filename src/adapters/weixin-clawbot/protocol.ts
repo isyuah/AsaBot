@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { botIdentitySchema } from '../../core/identity.ts'
+import { limitedBytes } from '../media-source.ts'
 
 export const platform = 'weixin-clawbot'
 export const apiOrigin = 'https://ilinkai.weixin.qq.com'
@@ -126,30 +127,6 @@ export class IlinkError extends Error {
     super(`微信 ${operation} ${details}`)
     this.expired = expired
     this.retryable = retryable
-  }
-}
-
-export async function limitedBytes(response: Response, limit: number): Promise<Buffer> {
-  const reader = response.body?.getReader()
-  if (!reader) return Buffer.alloc(0)
-  const chunks: Uint8Array[] = []
-  let size = 0
-  let done = false
-  try {
-    if (Number(response.headers.get('content-length')) > limit) throw new Error('响应超过大小限制')
-    for (;;) {
-      const part = await reader.read()
-      if (part.done) {
-        done = true
-        return Buffer.concat(chunks, size)
-      }
-      size += part.value.length
-      if (size > limit) throw new Error('响应超过大小限制')
-      chunks.push(part.value)
-    }
-  } finally {
-    if (!done) await reader.cancel()
-    reader.releaseLock()
   }
 }
 

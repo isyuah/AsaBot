@@ -124,7 +124,8 @@ describe('adapter registration', () => {
       `import { z } from ${JSON.stringify(import.meta.resolve('zod'))}; export default {
       id: 'fixture', platform: 'fixture', name: 'Fixture', version: '1.0.0', description: '', connectionTypes: ['custom'],
       capabilities: { segments: ['text'], textStyles: [], actions: [] }, configSchema: z.object({}),
-      setup: { kind: 'qr', accountId: () => 'fixture-bot', async start() { return { content: 'local-test', async poll() { return { status: 'expired' } } } } },
+      accountId: () => 'fixture-bot',
+      setup: { kind: 'qr', async start() { return { content: 'local-test', async poll() { return { status: 'expired' } } } } },
       create: () => ({ platform: 'fixture', async start() {}, async stop() {}, async reconfigure() {} }),
     }`,
     )

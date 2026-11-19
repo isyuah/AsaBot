@@ -7,30 +7,38 @@ import type { AdapterDefinition, QrConnectionSetup } from '../core/adapter.ts'
 import { capabilitySchema } from '../core/capabilities.ts'
 import { ConfigError } from '../core/errors.ts'
 
-const definitionSchema = z.object({
-  id: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/),
-  platform: z.string().regex(/^[^:\s]+$/),
-  name: z.string().min(1),
-  version: z.string().min(1),
-  description: z.string(),
-  connectionTypes: z.array(z.string()),
-  capabilities: capabilitySchema,
-  configSchema: z.custom<z.ZodType>(
-    (value) =>
-      typeof value === 'object' &&
-      value !== null &&
-      'safeParse' in value &&
-      typeof value.safeParse === 'function',
-  ),
-  setup: z
-    .object({
-      kind: z.literal('qr'),
-      accountId: z.custom<QrConnectionSetup['accountId']>((value) => typeof value === 'function'),
-      start: z.custom<QrConnectionSetup['start']>((value) => typeof value === 'function'),
-    })
-    .optional(),
-  create: z.custom<AdapterDefinition['create']>((value) => typeof value === 'function'),
+const accountId = z.custom<NonNullable<AdapterDefinition['accountId']>>(
+  (value) => typeof value === 'function',
+)
+const qrSetup = z.object({
+  kind: z.literal('qr'),
+  start: z.custom<QrConnectionSetup['start']>((value) => typeof value === 'function'),
 })
+
+const definitionSchema = z
+  .object({
+    id: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/),
+    platform: z.string().regex(/^[^:\s]+$/),
+    name: z.string().min(1),
+    version: z.string().min(1),
+    description: z.string(),
+    connectionTypes: z.array(z.string()),
+    capabilities: capabilitySchema,
+    configSchema: z.custom<z.ZodType>(
+      (value) =>
+        typeof value === 'object' &&
+        value !== null &&
+        'safeParse' in value &&
+        typeof value.safeParse === 'function',
+    ),
+    create: z.custom<AdapterDefinition['create']>((value) => typeof value === 'function'),
+  })
+  .and(
+    z.union([
+      z.object({ setup: qrSetup, accountId }),
+      z.object({ setup: z.undefined().optional(), accountId: accountId.optional() }),
+    ]),
+  )
 
 /** 从用户项目解析包，保留 Node 的 import 条件导出语义。 */
 export async function loadAdapterModules(

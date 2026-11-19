@@ -15,6 +15,7 @@ export const weixinClawbot = defineAdapter({
   connectionTypes: ['long-polling'],
   capabilities: weixinCapabilities,
   configSchema: accountSchema,
+  accountId: (config) => config.selfId,
   setup: weixinSetup,
   create: (config, host) => new WeixinAdapter(config, host),
 })

@@ -1,5 +1,6 @@
 import { type Message, type Segment, seg } from '../../core/message/index.ts'
-import { mediaName, type WeixinMedia } from './media.ts'
+import { mediaName } from '../media-source.ts'
+import type { WeixinMedia } from './media.ts'
 import type { Item } from './protocol.ts'
 
 const maxRecent = 512

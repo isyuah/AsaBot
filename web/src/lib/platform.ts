@@ -16,6 +16,7 @@ const platformNames: Record<string, string> = {
   onebot11: 'OneBot 11',
   feishu: '飞书',
   virtual: '虚拟适配器',
+  wecom: '企业微信',
   'weixin-clawbot': '微信 ClawBot',
 }
 

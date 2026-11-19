@@ -2,7 +2,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { z } from 'zod'
 import type { QrConnectionSetup } from '../../core/adapter.ts'
 import { QrSetupError } from '../../core/errors.ts'
-import { type Account, accountSchema, apiOrigin, IlinkError, ilink, ilinkOrigin } from './protocol.ts'
+import { accountSchema, apiOrigin, IlinkError, ilink, ilinkOrigin } from './protocol.ts'
 
 const qrSchema = z.object({
   qrcode: z.string().min(1).max(4096),
@@ -56,9 +56,8 @@ function setupOrigin(value: string, label: string): string {
   }
 }
 
-export const weixinSetup: QrConnectionSetup<Account> = {
+export const weixinSetup: QrConnectionSetup = {
   kind: 'qr',
-  accountId: (config) => config.selfId,
   async start(signal) {
     const { qrcode, qrcode_img_content } = await ilink(
       new URL('/ilink/bot/get_bot_qrcode?bot_type=3', apiOrigin),

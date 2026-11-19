@@ -104,7 +104,7 @@ export default definePlugin({
     const render = ctx.injectOptional('render') as Renderer | undefined
     const signal = ctx.signal
     ctx.beforeSend(
-      async ({ bot, target, message, sendFirst }) => {
+      async ({ bot, target, message, sendFirst, sendPart }) => {
         if (message.some((segment) => !['text', 'at', 'face', 'reply', 'markdown'].includes(segment.type)))
           return
         const config = ctx.configFor({
@@ -130,7 +130,7 @@ export default definePlugin({
           return [...message.filter((segment) => isSegment(segment, 'reply')), seg.image(image)]
         }
         const chunks = splitMessage(message, config.chunkSize)
-        if (!sendFirst && config.strategy !== 'split' && supports(bot, 'sendForward')) {
+        if (!sendFirst && !sendPart && config.strategy !== 'split' && supports(bot, 'sendForward')) {
           const nodes = await Promise.all(
             chunks.map(async (chunk) => ({
               userId: bot.selfId,
@@ -144,11 +144,16 @@ export default definePlugin({
         return {
           deliver: async () => {
             const first = await imageMarkdown(chunks[0] as Message)
-            let sent = await (sendFirst ? sendFirst(first) : sendTo(bot, target, first))
+            let sent = await (sendFirst
+              ? sendFirst(first)
+              : sendPart
+                ? sendPart(first)
+                : sendTo(bot, target, first))
             let destination = { ...target, thread: target.thread ?? sent.thread }
             for (const chunk of chunks.slice(1)) {
               if (config.splitInterval) await delay(config.splitInterval, undefined, { signal })
-              sent = await sendTo(bot, destination, await imageMarkdown(chunk))
+              const part = await imageMarkdown(chunk)
+              sent = await (sendPart ? sendPart(part) : sendTo(bot, destination, part))
               if (!destination.thread && sent.thread) destination = { ...destination, thread: sent.thread }
             }
             return sent
