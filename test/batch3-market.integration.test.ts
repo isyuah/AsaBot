@@ -11,6 +11,8 @@ import { configSchema } from '../src/core/config/schema.ts'
 
 describe('package market', () => {
   it('sorts and pages a cached registry search, and caches complete package information', async () => {
+    const iconUrl = 'https://assets.example.test/market.svg'
+    const keywords = ['asabot-plugin', `asabot-icon:${iconUrl}`]
     const dir = await mkdtemp(join(tmpdir(), 'asabot-market-'))
     const packageDir = join(dir, 'packages')
     const installedDir = join(packageDir, 'node_modules', 'asabot-market-001')
@@ -26,7 +28,7 @@ describe('package market', () => {
         version: '1.0.0',
         type: 'module',
         main: 'index.js',
-        keywords: ['asabot-plugin'],
+        keywords,
         peerDependencies: { '@asabot/core': '^0.2.0' },
       }),
     )
@@ -40,6 +42,10 @@ describe('package market', () => {
         package: {
           name: `asabot-market-${String(id).padStart(3, '0')}`,
           version: '1.0.0',
+          ...(id === 1 ? { keywords } : {}),
+          ...(id === 2
+            ? { keywords: ['asabot-plugin', 'asabot-icon:http://assets.example.test/icon.png'] }
+            : {}),
           date: new Date(Date.UTC(2024, 0, id)).toISOString(),
           links: { npm: 'https://example.test' },
         },
@@ -51,7 +57,7 @@ describe('package market', () => {
         {
           name: 'asabot-market-001',
           version: `1.0.${index}`,
-          keywords: ['asabot-plugin'],
+          keywords: index === 51 || index === 0 ? keywords : ['asabot-plugin'],
           peerDependencies: { '@asabot/core': index === 51 ? '^0.2.0' : '^9.0.0' },
           ...(index === 50 ? { deprecated: 'obsolete' } : {}),
         },
@@ -91,6 +97,7 @@ describe('package market', () => {
       }),
       { logger: pino({ level: 'silent' }) },
     )
+    app.plugins.register({ name: 'local-icon', iconUrl, setup() {} })
     try {
       await app.start()
       const base = `http://127.0.0.1:${app.server?.address()?.port}/api/panel`
@@ -115,7 +122,10 @@ describe('package market', () => {
         name: 'asabot-market-001',
         installed: true,
         installedVersion: '1.0.0',
+        iconUrl,
       })
+      expect(named.items[1]).not.toHaveProperty('iconUrl')
+      expect(named.items[2]).not.toHaveProperty('iconUrl')
       const second = (await (await get('/packages/search?q=market&sort=name&from=20')).json()) as Search
       expect(second.items[0]?.name).toBe('asabot-market-021')
       const updated = (await (await get('/packages/search?q=market&sort=updated&from=230')).json()) as Search
@@ -124,6 +134,12 @@ describe('package market', () => {
       expect(searchRequests).toHaveLength(1)
       expect(searchRequests[0]?.searchParams.get('size')).toBe('250')
       expect(searchRequests[0]?.searchParams.get('from')).toBe('0')
+      expect(await (await get('/plugins')).json()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'market-fixture', iconUrl }),
+          expect.objectContaining({ name: 'local-icon', iconUrl }),
+        ]),
+      )
       const installedReadme = await get('/plugins/market-fixture/readme')
       expect(installedReadme.status).toBe(200)
       expect(await installedReadme.json()).toEqual({ readme: '# Installed v1.0.0' })
@@ -140,8 +156,10 @@ describe('package market', () => {
         version: '1.0.51',
         compatible: true,
         date: '2025-01-01T00:00:00.000Z',
+        iconUrl,
       })
       expect(info.versions[1]).toMatchObject({ version: '1.0.50', compatible: false, deprecated: 'obsolete' })
+      expect(info.versions[1]).not.toHaveProperty('iconUrl')
       expect(Buffer.byteLength(info.readme)).toBeLessThanOrEqual(200 * 1024)
       expect(info.readme.endsWith('😀')).toBe(false)
       await get('/packages/info?name=asabot-market-001')

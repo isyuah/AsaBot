@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { gunzipSync } from 'fflate'
 import { maxSatisfying, rcompare, satisfies, valid, validRange } from 'semver'
 import { z } from 'zod'
+import { pluginIconFromKeywords } from './icon.ts'
 import type { PluginState } from './types.ts'
 import { ManagementError } from './upload.ts'
 
@@ -58,6 +59,7 @@ export interface PackageSearchItem {
   name: string
   version: string
   description?: string
+  iconUrl?: string
   author?: string
   date?: string
   links: { npm: string; homepage?: string; repository?: string }
@@ -258,6 +260,7 @@ export class FetchRegistry implements RegistryClient {
           name: string
           version: string
           description?: string
+          keywords?: unknown
           author?: { name?: string } | string
           date?: string
           links: PackageSearchItem['links']
@@ -270,6 +273,7 @@ export class FetchRegistry implements RegistryClient {
         name: item.name,
         version: item.version,
         ...(item.description === undefined ? {} : { description: item.description }),
+        iconUrl: pluginIconFromKeywords(item.keywords),
         ...(item.author === undefined
           ? {}
           : { author: typeof item.author === 'string' ? item.author : item.author.name }),
@@ -568,6 +572,7 @@ export class PackageService {
           .object({
             peerDependencies: z.record(z.string(), z.string()).optional(),
             deprecated: z.string().optional(),
+            keywords: z.unknown().optional(),
           })
           .safeParse(data.versions[version])
         const peerRange = value.success ? value.data.peerDependencies?.['@asabot/core'] : undefined
@@ -575,6 +580,7 @@ export class PackageService {
         const date = data.time?.[version]
         return {
           version,
+          iconUrl: value.success ? pluginIconFromKeywords(value.data.keywords) : undefined,
           ...(date === undefined ? {} : { date }),
           ...(peerRange === undefined ? {} : { peerRange }),
           compatible: !!peerRange && !!validRange(peerRange) && satisfies(frameworkVersion, peerRange),

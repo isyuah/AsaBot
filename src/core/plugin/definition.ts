@@ -10,6 +10,8 @@ export interface PluginDefinition<Schema extends z.ZodType | undefined = z.ZodTy
   version?: string
   /** 插件说明，用于展示。 */
   description?: string
+  /** 内置和文件插件的 HTTPS 图标 URL；npm 插件在 keywords 中声明 asabot-icon:<URL>。 */
+  iconUrl?: string
   /** 安装时用于初始化「新机器人默认启用」；不声明时为 false。 */
   defaultOnNewBots?: boolean
   /** 校验配置并推导 ctx.config 类型的 zod schema。 */

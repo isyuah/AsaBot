@@ -71,6 +71,7 @@ export interface PluginView {
   name: string
   version?: string
   description?: string
+  iconUrl?: string
   depends?: string[]
   source: 'builtin' | 'file' | 'package'
   /** file and package plugins can be uninstalled; builtin ones only disabled. */
@@ -118,6 +119,7 @@ export interface PackageSearchItem {
   name: string
   version: string
   description?: string
+  iconUrl?: string
   author?: string
   date?: string
   links: { npm: string; homepage?: string; repository?: string }
@@ -165,6 +167,7 @@ export type PackageSort = 'relevance' | 'updated' | 'name'
 
 export interface PackageVersion {
   version: string
+  iconUrl?: string
   date?: string
   peerRange?: string
   compatible: boolean

@@ -16,7 +16,7 @@ import {
   stagger,
   staggerItem,
 } from '@asabot/panel-ui'
-import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query'
+import { skipToken, useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query'
 import {
   AlertTriangle,
   ArrowUpCircle,
@@ -35,6 +35,7 @@ import { formatRelative } from '../lib/format.ts'
 import { useTrackOperation } from '../lib/realtime.tsx'
 import type { PackageDetail, PackageSearchItem, PackageSort, PackageVersion } from '../lib/types.ts'
 import { PackageReadme } from './package-readme.tsx'
+import { PluginIcon } from './plugin-icon.tsx'
 
 interface InstallTarget {
   name: string
@@ -75,7 +76,7 @@ export function PackageMarket() {
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<PackageSort>('relevance')
   const debounced = useDebounced(query.trim(), 350)
-  const [detail, setDetail] = useState<string | null>(null)
+  const [detail, setDetail] = useState<PackageSearchItem | null>(null)
   const [installing, setInstalling] = useState<InstallTarget | null>(null)
   const search = useInfiniteQuery({
     queryKey: ['packageSearch', debounced, sort],
@@ -130,7 +131,7 @@ export function PackageMarket() {
             initial="initial"
             animate="animate"
             className={cn(
-              'grid gap-3 sm:grid-cols-2 transition-opacity',
+              'grid grid-cols-1 gap-3 sm:grid-cols-2 transition-opacity',
               search.isPlaceholderData && 'opacity-60',
             )}
           >
@@ -138,7 +139,7 @@ export function PackageMarket() {
               <MarketCard
                 key={item.name}
                 item={item}
-                onOpen={() => setDetail(item.name)}
+                onOpen={() => setDetail(item)}
                 onInstall={() =>
                   setInstalling({
                     name: item.name,
@@ -166,7 +167,7 @@ export function PackageMarket() {
           )}
         </>
       )}
-      <PackageSheet name={detail} onClose={() => setDetail(null)} onInstall={setInstalling} />
+      <PackageSheet item={detail} onClose={() => setDetail(null)} onInstall={setInstalling} />
       <InstallDialog target={installing} onClose={() => setInstalling(null)} />
     </div>
   )
@@ -190,22 +191,27 @@ function MarketCard({
         onClick={onOpen}
       >
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onOpen()
-                }}
-                className="cursor-pointer truncate rounded font-mono text-[13.5px] font-semibold outline-none focus-visible:shadow-[0_0_0_3px_var(--ring)]"
-              >
-                {item.name}
-              </button>
-              <span className="font-mono text-[11px] text-fg-3">v{item.version}</span>
-            </div>
-            <div className="mt-0.5 text-[11.5px] text-fg-3">
-              {[item.author, item.date && formatRelative(Date.parse(item.date))].filter(Boolean).join(' · ')}
+          <div className="flex min-w-0 items-center gap-3">
+            <PluginIcon src={item.iconUrl} />
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onOpen()
+                  }}
+                  className="cursor-pointer truncate rounded font-mono text-[13.5px] font-semibold outline-none focus-visible:shadow-[0_0_0_3px_var(--ring)]"
+                >
+                  {item.name}
+                </button>
+                <span className="font-mono text-[11px] text-fg-3">v{item.version}</span>
+              </div>
+              <div className="mt-0.5 text-[11.5px] text-fg-3">
+                {[item.author, item.date && formatRelative(Date.parse(item.date))]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </div>
             </div>
           </div>
           {item.installed ? (
@@ -284,37 +290,42 @@ function versionLabel(item: PackageVersion, detail: PackageDetail) {
 }
 
 function PackageSheet({
-  name,
+  item,
   onClose,
   onInstall,
 }: {
-  name: string | null
+  item: PackageSearchItem | null
   onClose: () => void
   onInstall: (target: InstallTarget) => void
 }) {
-  // Keep the last name while the sheet animates out so the content does not blank mid-exit.
-  const [shown, setShown] = useState(name)
+  // Keep the last result while the sheet animates out so the content does not blank mid-exit.
+  const [lastItem, setLastItem] = useState(item)
   useEffect(() => {
-    if (name !== null) setShown(name)
-  }, [name])
+    if (item !== null) setLastItem(item)
+  }, [item])
+  const shown = item ?? lastItem
   const info = useQuery({
-    queryKey: ['packageInfo', shown],
-    queryFn: () => api.packageInfo(shown as string),
-    enabled: shown !== null,
+    queryKey: ['packageInfo', shown?.name],
+    queryFn: shown === null ? skipToken : () => api.packageInfo(shown.name),
     staleTime: 5 * 60_000,
     retry: false,
   })
   // Remembered per package, so opening another package starts from its own default version.
   const [picked, setPicked] = useState<{ name: string; version: string }>()
   const detail = info.data
-  const version = picked?.name === shown ? picked.version : detail && preferredVersion(detail)
+  const version = picked && picked.name === shown?.name ? picked.version : detail && preferredVersion(detail)
   const selected = detail?.versions.find((item) => item.version === version)
 
   return (
     <Sheet
-      open={name !== null}
+      open={item !== null}
       onOpenChange={(open) => !open && onClose()}
-      title={<span className="font-mono">{shown}</span>}
+      title={
+        <span className="flex min-w-0 items-center gap-2.5">
+          <PluginIcon src={selected ? selected.iconUrl : shown?.iconUrl} className="size-7 rounded-lg" />
+          <span className="truncate font-mono">{shown?.name}</span>
+        </span>
+      }
       subtitle={detail?.description ?? (info.isPending ? '加载中…' : undefined)}
     >
       {info.error && !detail ? (

@@ -32,7 +32,6 @@ import {
   FileUp,
   FlaskConical,
   MoreHorizontal,
-  Package,
   Plus,
   Puzzle,
   RefreshCw,
@@ -49,6 +48,7 @@ import { type ReactNode, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { PackageMarket } from '../components/market.tsx'
 import { InstalledPluginReadme } from '../components/package-readme.tsx'
+import { PluginIcon } from '../components/plugin-icon.tsx'
 import { hasUpdate, UninstallDialog, UpdateButton, UploadDialog } from '../components/plugin-manage.tsx'
 import { ApiError, api } from '../lib/api.ts'
 import { groupPath } from '../lib/groups.ts'
@@ -369,14 +369,10 @@ function PluginCard({
         className="group flex h-full cursor-pointer flex-col p-4 transition-[border-color,box-shadow] hover:border-border-strong hover:shadow-pop"
       >
         <div className="flex items-start gap-3">
-          <div
-            className={cn(
-              'flex size-9 shrink-0 items-center justify-center rounded-[10px] border border-border transition-colors',
-              plugin.state === 'active' ? 'bg-accent-soft text-accent-soft-fg' : 'bg-surface-2 text-fg-3',
-            )}
-          >
-            <Package className="size-4" />
-          </div>
+          <PluginIcon
+            src={plugin.iconUrl}
+            className={plugin.state === 'active' ? 'bg-accent-soft text-accent-soft-fg' : undefined}
+          />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <span className="truncate text-[14px] font-semibold tracking-[-0.01em]">{plugin.name}</span>
@@ -498,7 +494,8 @@ export function PluginDetailPage() {
       <PageHeader
         title={
           <span className="flex items-center gap-3">
-            {plugin.name}
+            <PluginIcon src={plugin.iconUrl} />
+            <span className="break-all">{plugin.name}</span>
             <Badge tone={stateMeta[plugin.state].tone} dot>
               {stateMeta[plugin.state].label}
             </Badge>

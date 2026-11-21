@@ -148,6 +148,16 @@ curl -X POST http://127.0.0.1:5140/api/v1/send \
 
 发布前将 TypeScript 编译成 JS 并附带 `.d.ts`，因为 Node 不会剥离 `node_modules` 中的 TypeScript。插件入口使用 `import { definePlugin } from '@asabot/core'`；运行时会连接当前框架实例。也可以运行 `npm create @asabot@latest -- --template plugin` 创建带构建和测试配置的插件项目。
 
+要让插件市场和安装后的管理界面显示自定义图标，在 `package.json` 的 `keywords` 里加一条 `asabot-icon:` 声明，指向可公开访问的 HTTPS 图片（如 SVG 或 PNG）：
+
+```json
+{
+  "keywords": ["asabot-plugin", "asabot-icon:https://assets.example.com/my-plugin.svg"]
+}
+```
+
+两处使用同一条声明。没有声明、地址无效或图片加载失败时，面板显示默认的 `Package` 图标。
+
 ## 开发插件
 
 ### 最小插件
@@ -169,6 +179,8 @@ export default definePlugin({
 ```
 
 默认发现 `plugins/<name>.ts` 和 `plugins/<name>/index.ts`；文件默认导出 `definePlugin(...)` 的结果。顶层以 `_` 或 `.` 开头的文件和目录，以及 `*.test.*`、`*.spec.*`、`*.d.ts` 均被忽略。`name` 由小写英文字母、数字、`-` 和 `_` 组成且必须全局唯一，`core` 是保留名。插件可声明 `version`、`description`、`depends: ['其他插件名']` 和 zod 配置 schema；从 `@asabot/core` 导入 `z`。脚手架生成的 `plugins/hello.ts` 包含配置和命令示例。
+
+文件插件可直接在 `definePlugin()` 中声明 `iconUrl: 'https://assets.example.com/my-plugin.svg'`。
 
 ### Context 一览
 

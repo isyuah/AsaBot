@@ -13,6 +13,7 @@ import { mergeConfig } from '../utils/merge.ts'
 import { Context } from './context.ts'
 import { type PluginDefinition, serviceDependencies } from './definition.ts'
 import { pluginExecution } from './execution.ts'
+import { parsePluginIconUrl, pluginIconFromKeywords } from './icon.ts'
 import { importPlugin, registerPluginRoots } from './loader.ts'
 import { type PackageManifest, type PackageOptions, PackageService, redact } from './packages.ts'
 import type { PluginState } from './types.ts'
@@ -356,6 +357,7 @@ export class PluginManager {
           while (this.entries.has(pluginName) || pluginName === 'core') pluginName = `${base}-${suffix++}`
           const state: PluginState = {
             name: pluginName,
+            iconUrl: pluginIconFromKeywords(manifest.keywords),
             source: 'package',
             state: 'failed',
             enabled: this.app.config.plugins[pluginName]?.enabled ?? true,
@@ -691,6 +693,7 @@ export class PluginManager {
     path?: string,
     files = new Set<string>(),
     release?: () => void,
+    manifest?: PackageManifest,
   ): Entry {
     const name = definition.name
     const state: PluginState = {
@@ -703,7 +706,7 @@ export class PluginManager {
       inject: [],
       capabilities: definition.capabilities,
     }
-    const entry: Entry = { state, definition, files, release }
+    const entry: Entry = { state, definition, files, release, manifest }
     this.metadata(entry)
     if (this.entries.has(name)) {
       entry.failure = 'duplicate'
@@ -721,6 +724,9 @@ export class PluginManager {
     entry.state.capabilities = definition.capabilities
     entry.state.version = definition.version
     entry.state.description = definition.description
+    entry.state.iconUrl = entry.manifest
+      ? pluginIconFromKeywords(entry.manifest.keywords)
+      : parsePluginIconUrl(definition.iconUrl)
     entry.state.depends = definition.depends
     const dependencies = serviceDependencies(definition.inject)
     entry.state.inject = [
@@ -914,9 +920,7 @@ export class PluginManager {
         throw new ManagementError(409, 'Updated package changed its plugin name')
       if (!existing) {
         await this.initializeDefaultOnNewBots(definition)
-        const entry = this.add(definition, 'package', path, imported.files, imported.release)
-        entry.manifest = manifest
-        return entry
+        return this.add(definition, 'package', path, imported.files, imported.release, manifest)
       }
       const oldPath = existing.state.path
       const oldManifest = existing.manifest
