@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { credentialGroupId } from '../core/plugin/credentials.ts'
 import { targetSchema } from '../core/target.ts'
 
 const mediaTypes = new Set(['image', 'audio', 'video', 'file'])
@@ -62,6 +63,28 @@ export const sendSchema = z
     message: z.union([z.string(), z.array(segment)]),
   })
   .strict()
+
+const credentialFields = { group: credentialGroupId, label: z.string().trim().min(1).max(80) }
+export const pluginCredentialInput = z
+  .discriminatedUnion('mode', [
+    z.object({ ...credentialFields, mode: z.literal('generate') }),
+    z.object({
+      ...credentialFields,
+      mode: z.literal('import'),
+      value: z
+        .string()
+        .min(1)
+        .max(4096)
+        .refine(
+          (value) => value.trim() && value.isWellFormed() && !/[\r\n]/.test(value),
+          '请输入单行凭据原值',
+        ),
+    }),
+  ])
+  .refine((input) => input.mode === 'generate' || !input.label.includes(input.value), {
+    path: ['label'],
+    message: '凭据名称不能包含凭据原值',
+  })
 
 const playgroundUser = z.object({
   id: z.string().min(1),

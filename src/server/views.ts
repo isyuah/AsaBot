@@ -51,6 +51,7 @@ export function commandView(app: App, command: CommandDefinition) {
 }
 
 export function pluginView(app: App, state: PluginState) {
+  const { credentialGroups, ...view } = state
   const value = app.plugins.getConfig(state.name)
   const page = app.getPanelPage(state.name)
   let config: unknown
@@ -63,7 +64,8 @@ export function pluginView(app: App, state: PluginState) {
     }
   }
   return {
-    ...state,
+    ...view,
+    hasCredentials: Boolean(credentialGroups?.length) || app.storage.credentials.has(state.name),
     defaultOnNewBots: app.config.plugins[state.name]?.defaultOnNewBots ?? false,
     provides: [...state.provides],
     inject: [...state.inject],

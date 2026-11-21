@@ -462,6 +462,7 @@ export default definePlugin({
 | `ctx.signal` / `ctx.onDispose(fn)` | 插件卸载时 abort；登记自定义清理逻辑 |
 | `ctx.route(...)` | M5：挂载 `/plugins/<name>/*` HTTP 路由 |
 | `ctx.plugins.list()` / `ctx.plugins.get(name)` | 读取插件目录快照，仅含公开元数据和服务声明 |
+| `ctx.credentials.list/readAll/match/bearer` | 查询插件自己的凭据，并为自定义 HTTP 鉴权提供原值和比较工具 |
 
 **生命周期与状态**：`loading → active | failed`，`active → disposing → disabled`。setup 失败（抛异常、配置校验失败、命令冲突、依赖缺失）时，回收它已注册的资源，标记为 `failed` 并记录原因，其他插件不受影响。卸载按依赖的逆序进行。
 
@@ -526,6 +527,7 @@ t.app; t.mock; await t.dispose()
 - 框架表：`kv(plugin, key, value, expires_at)`、`migrations(plugin, version)`、`plugin_group_state(plugin, group_key, enabled)`、`access_list(list, subject, key)`。框架表结构本身也通过迁移管理，owner 为 `core`。
 - KV 过期：读取时惰性删除，另有定期清扫。
 - 插件代码是受信任的进程内代码，`ctx.db` 直接暴露句柄，命名规范只是约定。
+- 插件凭据存于核心表 `plugin_credentials`，采用 AES-256-GCM 加密；独立的 `data/plugin-credentials.key` 使用受限文件权限保存。密文的附加认证数据绑定插件和用途。已有密文时，缺失或错误主密钥会阻止凭据创建、读取和解密，不会重新生成密钥。卸载时保留，purge 时删除。插件移除已声明用途后，该用途的凭据会停用，但允许在面板中查看和撤销。面板默认只拿凭据元数据；用户显式查看后才通过 `Cache-Control: no-store` 接口读单条原值。
 
 ## 14. 日志与错误
 
@@ -608,7 +610,8 @@ t.app; t.mock; await t.dispose()
 
 ```ts
 type BotView = { platform: string; selfId: string; nickname?: string; avatar?: string; status: 'connecting' | 'online' | 'offline'; connection: string; connectionId?: string; capabilities?: BotCapabilities; lastOnlineAt?: number }
-type PluginView = PluginState & { commands: CommandView[]; config?: unknown }   // PluginState 见 12.1；config 为当前生效的配置（经 schema 解析后，没有 schema 时省略）
+type PluginView = PluginState & { hasCredentials: boolean; commands: CommandView[]; config?: unknown }   // PluginState 见 12.1；hasCredentials 只告知详情页是否显示凭据管理入口，不暴露凭据用途或原值
+type PluginCredentialInfo = { id: string; group: string; label: string; createdAt: number; active: boolean }
 type CommandView = { owner: string; path: string; usage: string; description: string; aliases: string[]; options: { flags: string[]; description?: string; default?: unknown }[]; examples: string[]; permission: boolean; scope: 'all' | 'group' | 'private'; hidden: boolean }
 type StatsPoint = { t: number; received: number; sent: number }   // t：分钟起点的毫秒时间戳
 type LogRecord = { time: number; level: number; msg: string; plugin?: string; [key: string]: unknown }
@@ -625,6 +628,10 @@ type Target = { type: 'group' | 'private'; id: string }
 | `GET /plugins` | `PluginView[]` |
 | `GET /plugin-catalog` | 与 `ctx.plugins.list()` 相同的目录，供配置下拉选项使用 |
 | `GET /plugins/:name/readme` | 读取已安装 npm 插件随包附带的 README，返回 `{ readme?: string }`；文档缺失时省略 `readme` |
+| `GET /plugins/:name/credentials` | `{ groups: { id, title, description? }[]; items: PluginCredentialInfo[] }`，响应不含原值并使用 `Cache-Control: no-store` |
+| `POST /plugins/:name/credentials` | `{ group, label, mode: 'generate' }` 或 `{ group, label, mode: 'import', value }` → `PluginCredentialInfo`；重复值返回 409 |
+| `POST /plugins/:name/credentials/:id/reveal` | 显式读取该条原值 `{ value }`，响应 `Cache-Control: no-store` |
+| `DELETE /plugins/:name/credentials/:id` | 撤销并删除属于该插件的凭据 |
 | `POST /plugins/:name/enable` / `disable` / `reload` | 返回最新的 `PluginView`；失败（例如 admin 不允许停用）返回 409 和原因 |
 | `PUT /plugins/:name/bot-default` | `{ defaultOnNewBots: boolean }`。设置新机器人的初始开关，返回最新的 `PluginView` |
 | `PUT /plugins/:name/config` | `{ config }`。校验失败返回 400，`issues` 带字段路径；成功返回最新的 `PluginView` |
@@ -1464,6 +1471,7 @@ type HttpInit = RequestInit & { timeout?: Duration; proxy?: boolean | string; ma
 - **按群配置只对 `configFor` 生效**：插件在 setup 中读取的全局配置（例如 cron 表达式）不会随群覆盖变化。
 - **satori 的 CSS 子集**：`render.html` 只支持 flex 布局和 satori 支持的属性，需要完整 CSS 时用浏览器后端的 `render.page`。
 - **插件页面的静态文件公开**：`/plugin-pages/<name>/*` 无需登录即可访问，数据必须走需要登录的 `ctx.panel.route`。
+- **插件信任边界**：插件和宿主在同一进程内；凭据加密用于保护数据库文件、备份与面板默认响应，不构成插件沙箱。`ctx.credentials.readAll()` 明确授予当前插件读取所绑定凭据用途的权限，Webhook 是否、何时验证请求完全由该插件控制。
 
 
 ## 机器人作用域与插件配置

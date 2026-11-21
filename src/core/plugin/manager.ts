@@ -11,6 +11,7 @@ import { PluginConfigError, PluginError } from '../errors.ts'
 import { type BotIdentity, groupIdentity } from '../identity.ts'
 import { mergeConfig } from '../utils/merge.ts'
 import { Context } from './context.ts'
+import { credentialGroupsSchema } from './credentials.ts'
 import { type PluginDefinition, serviceDependencies } from './definition.ts'
 import { pluginExecution } from './execution.ts'
 import { parsePluginIconUrl, pluginIconFromKeywords } from './icon.ts'
@@ -110,6 +111,12 @@ function validateDefinition(value: unknown): PluginDefinition {
     !requirementsSchema.safeParse(value.capabilities).success
   )
     throw new PluginError(`Invalid capability requirements for plugin "${value.name}"`)
+  if (
+    'credentials' in value &&
+    value.credentials !== undefined &&
+    !credentialGroupsSchema.safeParse(value.credentials).success
+  )
+    throw new PluginError(`Invalid credential groups for plugin "${value.name}"`)
   return value as PluginDefinition
 }
 
@@ -390,8 +397,10 @@ export class PluginManager {
     this.started = true
     await this.packages.init()
     this.releaseRoots = registerPluginRoots([...this.dirs, this.packages.dir])
-    for (const { definition } of this.entries.values()) {
-      if (definition) await this.initializeDefaultOnNewBots(definition)
+    for (const entry of this.entries.values()) {
+      if (!entry.definition) continue
+      await this.initializeDefaultOnNewBots(entry.definition)
+      this.syncCredentialGroups(entry)
     }
     for (const dir of this.dirs) await this.discover(dir)
     for (const name of Object.keys(await this.packages.dependencies())) {
@@ -572,9 +581,11 @@ export class PluginManager {
         } catch (error) {
           await this.unload(old)
           old.definition = undefined
+          old.state.credentialGroups = undefined
           old.failure = 'import'
           this.setState(old, 'failed', errorMessage(error))
           await this.reconcile()
+          this.publishListChange()
         }
       } else await this.rescanFiles()
       const entry = [...this.files.values()].find(
@@ -785,7 +796,10 @@ export class PluginManager {
       entry.state.state = 'failed'
       entry.state.error = `Duplicate plugin name "${name}"`
       this.duplicates.push(entry)
-    } else this.entries.set(name, entry)
+    } else {
+      if (this.started) this.syncCredentialGroups(entry)
+      this.entries.set(name, entry)
+    }
     if (path) this.files.set(path, entry)
     return entry
   }
@@ -800,6 +814,11 @@ export class PluginManager {
       ? pluginIconFromKeywords(entry.manifest.keywords)
       : parsePluginIconUrl(definition.iconUrl)
     entry.state.depends = definition.depends
+    entry.state.credentialGroups =
+      definition.credentials &&
+      Object.entries(definition.credentials).map(([id, { title, description }]) =>
+        Object.freeze({ id, title: title.trim(), description: description?.trim() }),
+      )
     const dependencies = serviceDependencies(definition.inject)
     entry.state.inject = [
       ...dependencies.required.map((name) => ({ name, optional: false })),
@@ -808,6 +827,13 @@ export class PluginManager {
     entry.state.configSchema = definition.config
       ? z.toJSONSchema(definition.config, { unrepresentable: 'any' })
       : undefined
+  }
+
+  private syncCredentialGroups(entry: Entry): void {
+    this.app.storage.credentials.retireMissingGroups(
+      entry.state.name,
+      entry.state.credentialGroups?.map(({ id }) => id) ?? [],
+    )
   }
 
   private async discover(dir: string): Promise<void> {
@@ -1372,6 +1398,7 @@ export class PluginManager {
     entry.release?.()
     entry.release = release
     this.metadata(entry)
+    this.syncCredentialGroups(entry)
     await this.reconcile()
     this.publishListChange()
   }

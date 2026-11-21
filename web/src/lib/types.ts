@@ -82,6 +82,7 @@ export interface PluginView {
   error?: string
   enabled: boolean
   defaultOnNewBots: boolean
+  hasCredentials: boolean
   configSchema?: JsonSchema
   capabilities?: { required?: Partial<BotCapabilities>; optional?: Partial<BotCapabilities> }
   commands: CommandView[]
@@ -99,6 +100,30 @@ export type PluginCatalogEntry = Pick<
   PluginView,
   'name' | 'version' | 'description' | 'source' | 'state' | 'enabled' | 'provides' | 'inject'
 >
+
+export interface PluginCredentialInfo {
+  id: string
+  group: string
+  label: string
+  createdAt: number
+  active: boolean
+}
+
+export interface PluginCredentialGroup {
+  id: string
+  title: string
+  description?: string
+}
+
+export interface PluginCredentialList {
+  groups: PluginCredentialGroup[]
+  items: PluginCredentialInfo[]
+}
+
+export type PluginCredentialInput = { group: string; label: string } & (
+  | { mode: 'generate' }
+  | { mode: 'import'; value: string }
+)
 
 export interface PackageInfo {
   name: string

@@ -25,6 +25,7 @@ import { plainText } from '../core/message/index.ts'
 import type { PackageOperation } from '../core/plugin/packages.ts'
 import { TaskConflictError, taskStates } from '../core/plugin/tasks.ts'
 import { ManagementError } from '../core/plugin/upload.ts'
+import { CredentialUnavailableError, DuplicateCredentialError } from '../core/storage/credentials.ts'
 import { redactText, redactValue } from '../core/utils/redact.ts'
 import { constantTimeEqual } from '../core/utils/security.ts'
 import { PanelAuth } from './auth.ts'
@@ -39,6 +40,7 @@ import {
   packageUninstallSchema,
   playgroundEventSchema,
   playgroundSchema,
+  pluginCredentialInput,
   purgeSchema,
   sendSchema,
   uploadSchema,
@@ -56,7 +58,7 @@ import { botPluginView, commandView, overview, panelBot, panelBots, pluginView }
 
 type Env = { Bindings: HttpBindings }
 type ServerContext = Context<Env>
-type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 429 | 500
+type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 429 | 500 | 503
 const deliveryStatus = {
   NO_BOT_ONLINE: 409,
   CONVERSATION_UNAVAILABLE: 409,
@@ -139,13 +141,14 @@ async function body<T extends z.ZodType>(
   c: ServerContext,
   schema: T,
   maxBytes?: number,
+  tooLargeMessage = 'Request exceeds 2 MB',
 ): Promise<z.output<T>> {
   let value: unknown
   try {
     if (maxBytes === undefined) value = await c.req.json()
     else {
       if (Number(c.req.header('content-length') ?? 0) > maxBytes)
-        throw new HttpError(400, 'BAD_REQUEST', 'Request exceeds 2 MB')
+        throw new HttpError(400, 'BAD_REQUEST', tooLargeMessage)
       const reader = c.req.raw.body?.getReader()
       if (!reader) throw new HttpError(400, 'BAD_REQUEST', 'Invalid JSON')
       const chunks: Uint8Array[] = []
@@ -156,7 +159,7 @@ async function body<T extends z.ZodType>(
         size += part.value.length
         if (size > maxBytes) {
           await reader.cancel()
-          throw new HttpError(400, 'BAD_REQUEST', 'Request exceeds 2 MB')
+          throw new HttpError(400, 'BAD_REQUEST', tooLargeMessage)
         }
         chunks.push(part.value)
       }
@@ -361,6 +364,10 @@ export class HttpServer implements ServerService {
       if (error instanceof ConfigError) return failure(c, new HttpError(400, 'BAD_REQUEST', error.message))
       if (error instanceof SetupCodeError)
         return failure(c, new HttpError(401, 'UNAUTHORIZED', 'Invalid setup code'))
+      if (error instanceof CredentialUnavailableError)
+        return failure(c, new HttpError(503, 'CREDENTIAL_UNAVAILABLE', error.message))
+      if (error instanceof DuplicateCredentialError)
+        return failure(c, new HttpError(409, 'CONFLICT', error.message))
       if (error instanceof ManagementError)
         return failure(
           c,
@@ -722,6 +729,50 @@ export class HttpServer implements ServerService {
     panel.get('/plugins/:name/readme', async (c) =>
       c.json({ readme: await this.app.plugins.packageReadme(c.req.param('name')) }),
     )
+    const credentials = this.app.storage.credentials
+    panel.get('/plugins/:name/credentials', (c) => {
+      const name = c.req.param('name')
+      const plugin = this.requirePlugin(name)
+      const groups = plugin.credentialGroups ?? []
+      const declared = new Set(groups.map(({ id }) => id))
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        groups,
+        items: credentials
+          .list(name)
+          .map((item) => ({ ...item, active: item.active && declared.has(item.group) })),
+      })
+    })
+    panel.post('/plugins/:name/credentials', async (c) => {
+      const name = c.req.param('name')
+      const input = await body(c, pluginCredentialInput, 32 * 1024, 'Request body is too large')
+      const plugin = this.requirePlugin(name)
+      if (!plugin.credentialGroups?.some(({ id }) => id === input.group))
+        throw new HttpError(400, 'BAD_REQUEST', '插件没有声明这个凭据用途')
+      const created = credentials.create(
+        name,
+        input.group,
+        input.label,
+        input.mode === 'import' ? input.value : undefined,
+      )
+      c.header('Cache-Control', 'no-store')
+      return c.json(created, 201)
+    })
+    panel.post('/plugins/:name/credentials/:id/reveal', (c) => {
+      const name = c.req.param('name')
+      this.requirePlugin(name)
+      c.header('Cache-Control', 'no-store')
+      const value = credentials.read(name, c.req.param('id'))
+      if (value === undefined) throw new HttpError(404, 'NOT_FOUND', '凭据不存在或已撤销')
+      return c.json({ value })
+    })
+    panel.delete('/plugins/:name/credentials/:id', (c) => {
+      const name = c.req.param('name')
+      this.requirePlugin(name)
+      if (!credentials.revoke(name, c.req.param('id')))
+        throw new HttpError(404, 'NOT_FOUND', '凭据不存在或已撤销')
+      return c.body(null, 204)
+    })
     panel.post('/plugins/rescan', async (c) => {
       const result = await this.app.plugins.rescan()
       return c.json({

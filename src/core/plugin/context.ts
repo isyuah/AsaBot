@@ -34,6 +34,7 @@ import { Scheduler } from '../scheduler.ts'
 import type { KVStore } from '../storage/index.ts'
 import { type Target, targetSchema } from '../target.ts'
 import { type Duration, parseDuration } from '../utils/duration.ts'
+import { PluginCredentials } from './credentials.ts'
 import { type PluginDefinition, serviceDependencies } from './definition.ts'
 import { pluginExecution } from './execution.ts'
 import { PersistentTasks, type TaskHandle, type TaskHandler, type TaskRegistrationOptions } from './tasks.ts'
@@ -62,6 +63,9 @@ export class Context<Config = undefined> {
   private routeApp?: Hono
   private panelRouteApp?: Hono
   private disposed = false
+
+  /** 读取当前插件的凭据，或用它们校验外部请求。 */
+  readonly credentials: PluginCredentials
 
   /** 查询插件目录；每次调用返回当前快照，包含停用或加载失败的插件。 */
   readonly plugins = {
@@ -129,6 +133,7 @@ export class Context<Config = undefined> {
     this.scope = { owner: name, signal: this.controller.signal }
     this.scheduler = new Scheduler(this.childLogger, this.controller.signal, app.config.timezone)
     this.kv = app.storage.store(name, () => this.assertActive())
+    this.credentials = new PluginCredentials(app.storage.credentials, name, () => this.assertActive())
     this.tasks = new PersistentTasks(app.tasks, name, this.controller.signal, () => this.assertActive())
   }
 

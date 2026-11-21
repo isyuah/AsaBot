@@ -44,7 +44,7 @@ import {
   Users,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { type ReactNode, useMemo, useState } from 'react'
+import { lazy, type ReactNode, Suspense, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { PackageMarket } from '../components/market.tsx'
 import { InstalledPluginReadme } from '../components/package-readme.tsx'
@@ -75,6 +75,9 @@ function sourceLabel(plugin: PluginView): string {
 }
 
 const skeletonKeys = ['a', 'b', 'c', 'd', 'e', 'f']
+const PluginCredentialsTab = lazy(() =>
+  import('../components/plugin-credentials.tsx').then((module) => ({ default: module.PluginCredentialsTab })),
+)
 
 function cachePlugin(client: QueryClient, plugin: PluginView) {
   client.setQueryData<PluginView[]>(['plugins'], (list) =>
@@ -478,6 +481,7 @@ export function PluginDetailPage() {
     { value: 'overview', label: '概览' },
     ...(plugin.package ? [{ value: 'readme', label: 'README' }] : []),
     { value: 'config', label: '全局配置' },
+    ...(plugin.hasCredentials ? [{ value: 'credentials', label: '凭据' }] : []),
     { value: 'commands', label: '命令' },
     { value: 'bots', label: '机器人' },
     { value: 'groups', label: '群组' },
@@ -550,6 +554,11 @@ export function PluginDetailPage() {
             </p>
             <ConfigTab plugin={plugin} />
           </>
+        )}
+        {tab === 'credentials' && (
+          <Suspense fallback={<Skeleton className="h-32" />}>
+            <PluginCredentialsTab key={name} name={name} />
+          </Suspense>
         )}
         {tab === 'commands' && <CommandsTab plugin={plugin} />}
         {tab === 'bots' && <PluginBots plugin={plugin} />}

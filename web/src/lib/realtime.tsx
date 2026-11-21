@@ -75,6 +75,7 @@ function applyFrame(
     case 'plugins-changed':
       void client.invalidateQueries({ queryKey: ['plugins'] })
       void client.invalidateQueries({ queryKey: ['pluginCatalog'] })
+      void client.invalidateQueries({ queryKey: ['pluginCredentials'] })
       void client.invalidateQueries({ queryKey: ['overview'] })
       void client.invalidateQueries({ queryKey: ['commands'] })
       void client.invalidateQueries({ queryKey: ['bot'] })

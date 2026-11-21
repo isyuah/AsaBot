@@ -24,6 +24,9 @@ import type {
   PlaygroundRequest,
   PlaygroundResult,
   PluginCatalogEntry,
+  PluginCredentialInfo,
+  PluginCredentialInput,
+  PluginCredentialList,
   PluginGroupSetting,
   PluginView,
   Session,
@@ -163,6 +166,19 @@ export const api = {
   pluginCatalog: (signal: AbortSignal) =>
     request<PluginCatalogEntry[]>('GET', '/plugin-catalog', undefined, signal),
   pluginReadme: (name: string) => request<{ readme?: string }>('GET', `/plugins/${encode(name)}/readme`),
+  pluginCredentials: (name: string) =>
+    request<PluginCredentialList>('GET', `/plugins/${encode(name)}/credentials`),
+  createPluginCredential: (name: string, input: PluginCredentialInput) =>
+    request<PluginCredentialInfo>('POST', `/plugins/${encode(name)}/credentials`, input),
+  revealPluginCredential: (name: string, id: string, signal: AbortSignal) =>
+    request<{ value: string }>(
+      'POST',
+      `/plugins/${encode(name)}/credentials/${encode(id)}/reveal`,
+      {},
+      signal,
+    ),
+  revokePluginCredential: (name: string, id: string) =>
+    request<void>('DELETE', `/plugins/${encode(name)}/credentials/${encode(id)}`, {}),
   pluginAction: (name: string, action: 'enable' | 'disable' | 'reload') =>
     request<PluginView>('POST', `/plugins/${encode(name)}/${action}`, {}),
   pluginBotDefault: (name: string, defaultOnNewBots: boolean) =>

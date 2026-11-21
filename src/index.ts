@@ -144,6 +144,14 @@ export {
 export type { Permission, Rule } from './core/permission.ts'
 export { perm } from './core/permission.ts'
 export { Context, type FilteredContext } from './core/plugin/context.ts'
+export type {
+  PluginCredentialFilter,
+  PluginCredentialGroup,
+  PluginCredentialGroups,
+  PluginCredentialInfo,
+  PluginCredentials,
+  PluginCredentialValue,
+} from './core/plugin/credentials.ts'
 export { definePlugin, type PluginDefinition } from './core/plugin/definition.ts'
 export { PluginManager } from './core/plugin/manager.ts'
 export type {
