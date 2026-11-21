@@ -78,17 +78,17 @@ describe('package operation contract', () => {
     }
     const registry: RegistryClient = {
       async fullMetadata() {
-        throw new Error('not used')
-      },
-      async tarball() {
-        throw new Error('not used')
-      },
-      async metadata() {
         return {
           name: manifest.name,
           'dist-tags': { latest: manifest.version },
           versions: { '1.0.0': manifest },
         }
+      },
+      async tarball() {
+        throw new Error('not used')
+      },
+      async metadata() {
+        throw new Error('not used')
       },
       async search() {
         return { total: 0, items: [] }

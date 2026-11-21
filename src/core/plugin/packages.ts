@@ -584,7 +584,8 @@ export class PackageService {
         (version.length > 256 || (!validRange(version) && !/^[a-zA-Z0-9][a-zA-Z0-9._+-]*$/.test(version))))
     )
       throw new ManagementError(400, 'Invalid package name or version')
-    const metadata = await this.registry.metadata(name)
+    // The abbreviated npm packument omits keywords from version manifests.
+    const metadata = await this.registry.fullMetadata(name)
     this.latestCache.set(name, { value: metadata['dist-tags']?.latest, expires: Date.now() + 3_600_000 })
     const selected =
       version === undefined

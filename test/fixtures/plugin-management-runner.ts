@@ -138,11 +138,13 @@ const registry = createServer((req, res) => {
     res.writeHead(404).end()
     return
   }
+  const abbreviated = req.headers.accept?.includes('application/vnd.npm.install-v1+json')
   const list = Object.fromEntries(
     [...group].map(([version, item]) => [
       version,
       {
         ...item.manifest,
+        keywords: abbreviated ? undefined : item.manifest.keywords,
         dist: {
           tarball: `${registryUrl}/tar/${name}/${version}`,
           shasum: createHash('sha1').update(item.bytes).digest('hex'),
@@ -151,7 +153,7 @@ const registry = createServer((req, res) => {
       },
     ]),
   )
-  res.setHeader('Content-Type', 'application/json')
+  res.setHeader('Content-Type', abbreviated ? 'application/vnd.npm.install-v1+json' : 'application/json')
   res.end(
     JSON.stringify({
       name,
