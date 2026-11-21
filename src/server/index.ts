@@ -96,6 +96,13 @@ function failure(c: ServerContext, error: HttpError): Response {
   )
 }
 
+function requestWithUrl(request: Request, url: URL): Request {
+  // Hono's lightweight Request cannot be passed directly as RequestInit.
+  const { method, headers, body, signal } = request
+  const init = { method, headers, body, signal, duplex: 'half' as const }
+  return new Request(url, init)
+}
+
 function issuePath(path: PropertyKey[]): string {
   return (
     path.reduce<string>(
@@ -380,7 +387,7 @@ export class HttpServer implements ServerService {
       if (!app) throw new HttpError(404, 'NOT_FOUND', 'Plugin route not found')
       const url = new URL(c.req.url)
       url.pathname = url.pathname.replace(/^\/plugins\/[^/]+/, '') || '/'
-      return app.fetch(new Request(url, c.req.raw))
+      return app.fetch(requestWithUrl(c.req.raw, url))
     }
     routes.all('/plugins/:name', forwardPlugin)
     routes.all('/plugins/:name/*', forwardPlugin)
@@ -547,7 +554,7 @@ export class HttpServer implements ServerService {
       if (!app) throw new HttpError(404, 'NOT_FOUND', 'Plugin route not found')
       const url = new URL(c.req.url)
       url.pathname = url.pathname.replace(/^\/api\/panel\/ext\/[^/]+/, '') || '/'
-      return app.fetch(new Request(url, c.req.raw))
+      return app.fetch(requestWithUrl(c.req.raw, url))
     }
     panel.all('/ext/:name', forwardPanelPlugin)
     panel.all('/ext/:name/*', forwardPanelPlugin)
