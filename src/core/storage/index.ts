@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite'
 import type { Logger } from 'pino'
 import type { DispatchEvent } from '../dispatch/types.ts'
 import { parseDuration } from '../utils/duration.ts'
+import { CredentialStore } from './credentials.ts'
 
 /** 访问控制列表类型：黑名单或白名单。 */
 export type AccessList = 'block' | 'allow'
@@ -82,6 +83,11 @@ const coreMigrations: Migration[] = [
      SELECT bot_key FROM bot_plugin_defaults WHERE json_extract(bot_key, '$[0]') <> 'virtual';`,
   `ALTER TABLE tasks ADD COLUMN delivery_failure TEXT;
    ALTER TABLE task_attempts ADD COLUMN delivery_failure TEXT;`,
+  `CREATE TABLE plugin_credentials (
+     id TEXT PRIMARY KEY, plugin TEXT NOT NULL, purpose TEXT NOT NULL, label TEXT NOT NULL,
+     created_at INTEGER NOT NULL, ciphertext BLOB NOT NULL, retired INTEGER NOT NULL DEFAULT 0
+   );
+   CREATE INDEX plugin_credentials_purpose ON plugin_credentials(plugin, purpose, retired);`,
 ]
 
 /** SQLite 存储及插件状态、迁移和访问控制管理器。 */
@@ -93,6 +99,7 @@ export class Storage {
   private readonly groups = new Map<string, boolean>()
   private readonly commandGroups = new Map<string, boolean>()
   private readonly accessEntries = new Map<string, Set<string>>()
+  readonly credentials: CredentialStore
   readonly access: {
     add: (list: AccessList, subject: AccessSubject, key: string) => void
     remove: (list: AccessList, subject: AccessSubject, key: string) => void
@@ -102,6 +109,7 @@ export class Storage {
   constructor(dataDir: string, logger?: Logger) {
     this.dataDir = dataDir
     this.logger = logger
+    this.credentials = new CredentialStore(() => this.db, dataDir)
     this.access = {
       add: (list, subject, key) => {
         this.db.prepare('INSERT OR IGNORE INTO access_list VALUES (?, ?, ?)').run(list, subject, key)
@@ -333,6 +341,7 @@ export class Storage {
         'plugin_group_state',
         'plugin_group_config',
         'plugin_bot_policy',
+        'plugin_credentials',
         'task_attempts',
         'tasks',
       ]) {

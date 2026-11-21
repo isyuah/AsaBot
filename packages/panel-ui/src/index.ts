@@ -7,7 +7,7 @@ export { MessageChart } from './message-chart.tsx'
 export { snappy, softSpring, spring, stagger, staggerItem, useFadeUp } from './motion.ts'
 export { PluginPageLayout } from './plugin-page-layout.tsx'
 export { PanelUIProvider } from './provider.tsx'
-export { ListControl, SchemaForm } from './schema-form.tsx'
+export { ListControl, SchemaForm, type SchemaOptions, type SchemaOptionsResolver } from './schema-form.tsx'
 export { Segments } from './segments.tsx'
 export { TraceView } from './trace-view.tsx'
 export type {
@@ -15,6 +15,7 @@ export type {
   DispatchTrace,
   JsonSchema,
   LogRecord,
+  SchemaOptionSource,
   Segment,
   StatsPoint,
   TraceOutcome,

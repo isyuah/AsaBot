@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query'
 import { RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '../lib/api.ts'
+import { usePluginConfigOptions } from '../lib/plugin-config-options.ts'
 import type { PluginView } from '../lib/types.ts'
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -14,8 +15,12 @@ function difference(
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {}
   for (const [key, item] of Object.entries(value)) {
-    if (JSON.stringify(item) === JSON.stringify(inherited[key])) continue
-    result[key] = object(item) && object(inherited[key]) ? difference(item, inherited[key]) : item
+    const parent = inherited[key]
+    if (item === undefined || JSON.stringify(item) === JSON.stringify(parent)) continue
+    if (object(item) && object(parent)) {
+      const children = difference(item, parent)
+      if (Object.keys(children).length) result[key] = children
+    } else result[key] = item
   }
   return result
 }
@@ -43,6 +48,7 @@ export function ScopedConfig({
   save: (config: Record<string, unknown> | null) => Promise<unknown>
   onSaved: () => void
 }) {
+  const resolveOptions = usePluginConfigOptions('继承上级配置')
   const save = useMutation({
     mutationFn: persist,
     onSuccess: (_, value) => {
@@ -77,6 +83,7 @@ export function ScopedConfig({
         value={effective}
         issues={issues}
         saving={save.isPending}
+        resolveOptions={resolveOptions}
         note="只保存修改的字段，立即生效"
         submitLabel="保存覆盖"
         onSubmit={(value) => {

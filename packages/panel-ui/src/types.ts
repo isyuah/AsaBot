@@ -1,4 +1,11 @@
+/** 动态下拉的选项来源；组件库由调用方提供实际选项。 */
+export interface SchemaOptionSource {
+  source: 'plugins'
+  consumes?: string
+}
+
 export interface JsonSchema {
+  'x-asabot-options'?: SchemaOptionSource
   writeOnly?: boolean
   type?: string | string[]
   title?: string

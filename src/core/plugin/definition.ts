@@ -1,6 +1,7 @@
 import type { z } from 'zod'
 import type { CapabilityRequirements } from '../capabilities.ts'
 import type { Context } from './context.ts'
+import type { PluginCredentialGroups } from './credentials.ts'
 
 /** 插件名称、可选配置 schema、依赖及 setup 入口的定义。 */
 export interface PluginDefinition<Schema extends z.ZodType | undefined = z.ZodType | undefined> {
@@ -22,6 +23,8 @@ export interface PluginDefinition<Schema extends z.ZodType | undefined = z.ZodTy
   inject?: string[] | { required?: string[]; optional?: string[] }
   /** 能力需求只用于兼容性提示，不阻止插件在机器人上启用。 */
   capabilities?: CapabilityRequirements
+  /** 可在面板管理的凭据用途，由插件决定如何鉴权。 */
+  credentials?: PluginCredentialGroups
   /** 插件启动入口；可以注册命令和其他资源。 */
   setup(ctx: Context<Schema extends z.ZodType ? z.output<Schema> : undefined>): void | Promise<void>
 }

@@ -82,6 +82,7 @@ export interface PluginView {
   error?: string
   enabled: boolean
   defaultOnNewBots: boolean
+  hasCredentials: boolean
   configSchema?: JsonSchema
   capabilities?: { required?: Partial<BotCapabilities>; optional?: Partial<BotCapabilities> }
   commands: CommandView[]
@@ -94,6 +95,35 @@ export interface PluginView {
   /** A page the plugin adds to the panel (ctx.panel.page), shown in a sandboxed iframe. */
   page?: { title: string; icon?: string }
 }
+
+export type PluginCatalogEntry = Pick<
+  PluginView,
+  'name' | 'version' | 'description' | 'source' | 'state' | 'enabled' | 'provides' | 'inject'
+>
+
+export interface PluginCredentialInfo {
+  id: string
+  group: string
+  label: string
+  createdAt: number
+  active: boolean
+}
+
+export interface PluginCredentialGroup {
+  id: string
+  title: string
+  description?: string
+}
+
+export interface PluginCredentialList {
+  groups: PluginCredentialGroup[]
+  items: PluginCredentialInfo[]
+}
+
+export type PluginCredentialInput = { group: string; label: string } & (
+  | { mode: 'generate' }
+  | { mode: 'import'; value: string }
+)
 
 export interface PackageInfo {
   name: string
@@ -338,6 +368,7 @@ export type ServerFrame =
   | { type: 'log'; record: LogRecord }
   | { type: 'bot'; bot: BotView }
   | { type: 'plugin'; plugin: PluginView }
+  | { type: 'plugins-changed' }
   | ({ type: 'message' } & LiveMessage)
   | { type: 'stats'; point: StatsPoint }
   | { type: 'package'; operation: PackageOperation }

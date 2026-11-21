@@ -144,6 +144,14 @@ export {
 export type { Permission, Rule } from './core/permission.ts'
 export { perm } from './core/permission.ts'
 export { Context, type FilteredContext } from './core/plugin/context.ts'
+export type {
+  PluginCredentialFilter,
+  PluginCredentialGroup,
+  PluginCredentialGroups,
+  PluginCredentialInfo,
+  PluginCredentials,
+  PluginCredentialValue,
+} from './core/plugin/credentials.ts'
 export { definePlugin, type PluginDefinition } from './core/plugin/definition.ts'
 export { PluginManager } from './core/plugin/manager.ts'
 export type {
@@ -159,7 +167,13 @@ export type {
   TaskState,
 } from './core/plugin/tasks.ts'
 export { TaskConflictError } from './core/plugin/tasks.ts'
-export type { PanelPageOptions, PluginState, PluginStateEvent, ServiceConsumer } from './core/plugin/types.ts'
+export type {
+  PanelPageOptions,
+  PluginCatalogEntry,
+  PluginState,
+  PluginStateEvent,
+  ServiceConsumer,
+} from './core/plugin/types.ts'
 export type { CooldownScope } from './core/ratelimit.ts'
 export {
   type AccessEntry,

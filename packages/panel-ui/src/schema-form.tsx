@@ -2,15 +2,22 @@ import { Braces, Plus, RotateCcw, Trash2, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { softSpring } from './motion.ts'
-import type { JsonSchema } from './types.ts'
+import type { JsonSchema, SchemaOptionSource } from './types.ts'
 import { Button } from './ui/button.tsx'
 import { Field, Input, Textarea } from './ui/input.tsx'
-import { Select } from './ui/select.tsx'
+import { Select, type SelectOption } from './ui/select.tsx'
 import { Switch } from './ui/switch.tsx'
 import { cn, createUuid } from './utils.ts'
 
 type Value = unknown
 type Issues = Record<string, string>
+
+export type SchemaOptions =
+  | { state: 'loading' }
+  | { state: 'error'; retry: () => void }
+  | { state: 'ready'; options: readonly SelectOption<string>[]; emptyLabel?: string }
+
+export type SchemaOptionsResolver = (source: SchemaOptionSource) => SchemaOptions
 
 const primitives = new Set(['string', 'number', 'integer', 'boolean'])
 /** Keys whose values the server masks; mirrors the redaction list of the backend. */
@@ -102,6 +109,7 @@ export function SchemaForm({
   issues: rawIssues,
   saving,
   onSubmit,
+  resolveOptions,
   note = '保存后写回配置文件并重载插件',
   submitLabel = '保存并重载',
   submitWhenPristine = false,
@@ -111,6 +119,7 @@ export function SchemaForm({
   issues: Issues
   saving: boolean
   onSubmit: (value: Value) => void
+  resolveOptions?: SchemaOptionsResolver
   note?: ReactNode
   submitWhenPristine?: boolean
   submitLabel?: string
@@ -218,6 +227,7 @@ export function SchemaForm({
               value={draft}
               path={[]}
               issues={issues}
+              resolveOptions={resolveOptions}
               onChange={(path, next) => setDraft((current: Value) => setAt(current, path, next))}
             />
           </motion.div>
@@ -263,12 +273,14 @@ function SchemaFields({
   value,
   path,
   issues,
+  resolveOptions,
   onChange,
 }: {
   schema: JsonSchema
   value: Value
   path: string[]
   issues: Issues
+  resolveOptions?: SchemaOptionsResolver
   onChange: (path: string[], value: Value) => void
 }) {
   const properties = Object.entries(schema.properties ?? {})
@@ -295,6 +307,7 @@ function SchemaFields({
                 value={Array.isArray(current) ? current : []}
                 path={childPath}
                 issues={issues}
+                resolveOptions={resolveOptions}
                 onChange={onChange}
               />
             </Field>
@@ -310,6 +323,7 @@ function SchemaFields({
                 value={current}
                 path={childPath}
                 issues={issues}
+                resolveOptions={resolveOptions}
                 onChange={onChange}
               />
             </fieldset>
@@ -338,6 +352,7 @@ function SchemaFields({
           )
         }
 
+        const source = type === 'string' ? child['x-asabot-options'] : undefined
         return (
           <Field
             key={key}
@@ -347,17 +362,82 @@ function SchemaFields({
             required={required}
             htmlFor={id}
           >
-            <PrimitiveControl
-              id={id}
-              schema={child}
-              value={current}
-              secret={secretKeys.has(key) || child.writeOnly === true}
-              invalid={Boolean(error)}
-              onChange={(next) => onChange(childPath, next)}
-            />
+            {source?.source === 'plugins' && resolveOptions ? (
+              <DynamicSelect
+                id={id}
+                value={typeof current === 'string' && current !== '' ? current : undefined}
+                options={resolveOptions(source)}
+                clearable={!required}
+                invalid={Boolean(error)}
+                onChange={(next) => onChange(childPath, next)}
+              />
+            ) : (
+              <PrimitiveControl
+                id={id}
+                schema={child}
+                value={current}
+                secret={secretKeys.has(key) || child.writeOnly === true}
+                invalid={Boolean(error)}
+                onChange={(next) => onChange(childPath, next)}
+              />
+            )}
           </Field>
         )
       })}
+    </>
+  )
+}
+
+function DynamicSelect({
+  id,
+  value,
+  options,
+  clearable,
+  invalid,
+  onChange,
+}: {
+  id: string
+  value: string | undefined
+  options: SchemaOptions
+  clearable: boolean
+  invalid: boolean
+  onChange: (value: string | undefined) => void
+}) {
+  const ready = options.state === 'ready'
+  const choices = ready ? options.options : []
+  const selected = value !== undefined && !choices.some((item) => item.value === value)
+  return (
+    <>
+      <Select
+        id={id}
+        className="w-full"
+        aria-invalid={invalid}
+        value={value}
+        disabled={!ready || (!choices.length && !(clearable && value !== undefined))}
+        placeholder={
+          options.state === 'loading'
+            ? '正在加载插件…'
+            : options.state === 'error'
+              ? '无法加载插件'
+              : choices.length
+                ? '选择插件'
+                : '没有匹配的插件'
+        }
+        options={[
+          ...(clearable && ready ? [{ value: '', label: options.emptyLabel ?? '不选择' }] : []),
+          ...(selected ? [{ value, label: ready ? `${value}（不可用）` : value, disabled: true }] : []),
+          ...choices,
+        ]}
+        onValueChange={(next) => onChange(next === '' ? undefined : next)}
+      />
+      {options.state === 'error' && (
+        <div className="mt-1 flex items-center gap-2 text-[12px] text-fg-3" role="status">
+          无法加载插件选项
+          <Button size="sm" variant="ghost" onClick={options.retry}>
+            重试
+          </Button>
+        </div>
+      )}
     </>
   )
 }
@@ -472,12 +552,14 @@ function ObjectListControl({
   value,
   path,
   issues,
+  resolveOptions,
   onChange,
 }: {
   schema: JsonSchema
   value: Value[]
   path: string[]
   issues: Issues
+  resolveOptions?: SchemaOptionsResolver
   onChange: (path: string[], value: Value) => void
 }) {
   // Items have no identity of their own; a parallel list of keys keeps animations and inputs stable on removal.
@@ -519,6 +601,7 @@ function ObjectListControl({
                 value={item}
                 path={[...path, String(index)]}
                 issues={issues}
+                resolveOptions={resolveOptions}
                 onChange={onChange}
               />
             </div>

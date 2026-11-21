@@ -203,9 +203,53 @@ export default definePlugin({
 | `ctx.send`、`ctx.broadcast` | 向指定平台和会话主动发送或批量发送 |
 | `ctx.beforeSend`、`ctx.interceptApi` | 处理出站消息或拦截 Bot API 调用 |
 | `ctx.provide`、`ctx.provideScoped`、`ctx.inject`、`ctx.injectOptional` | 提供共享或按调用方绑定的服务，或注入已声明的服务 |
+| `ctx.plugins.list()`、`ctx.plugins.get(name)` | 查询已发现插件的只读目录快照 |
+| `ctx.credentials.list()`、`readAll({ group })`、`match(value, { group })`、`bearer(request, { group })` | 读取插件自己的凭据，并为自定义路由提供常用鉴权方式 |
 | `ctx.dataDir`、`ctx.signal`、`ctx.onDispose(fn)` | 插件数据目录、卸载信号、自定义清理函数 |
 
 观察者、命令、中间件、匹配器和定时任务随插件卸载自动回收。事件处理器应配合 `signal` 取消耗时操作；插件代码仍运行在主进程中。
+
+### 选择其他插件
+
+`ctx.plugins.list()` 和 `ctx.plugins.get(name)` 可以查询插件的名称、版本、描述、来源、状态以及提供和依赖的服务。目录包含停用和加载失败的插件；`provides` 只包含当前已注册的服务。`get` 在插件不存在时返回 `undefined`。
+
+配置里的字符串可以在面板中显示为插件选择框。例如，只列出声明使用 `ai` 服务的插件：
+
+```ts
+const config = z.object({
+  plugin: z.string().meta({
+    title: '使用 AI 的插件',
+    'x-asabot-options': { source: 'plugins', consumes: 'ai' },
+  }).optional(),
+})
+```
+
+省略 `consumes` 会列出所有已发现的插件。必需和可选服务依赖都能匹配。全局、机器人和群组配置保存的都是插件名；所选插件卸载后，原值仍保留并标记为不可用。运行时可以用 `ctx.plugins.get(name)` 判断它是否仍在目录中。
+
+### 插件凭据
+
+插件可通过 `credentials` 声明用途；每个用途提供稳定的 ID、面板显示标题和可选说明。面板可以按用途生成或导入多个凭据，也可以查看和撤销。框架生成的值是 32 字节随机值的 base64url 编码；导入值和密文都不写入普通日志，插件凭据使用 AES-GCM 加密后存入 SQLite，主密钥保存于 `data/plugin-credentials.key`。备份插件凭据时，必须同时保留这个主密钥；带有凭据密文但缺少密钥或密钥损坏的数据库不能解密凭据，也不能继续添加新凭据。
+
+验证策略由插件自身的路由决定。下面的 Bearer 示例与面板共用 HTTP 服务，访问路径为 `POST /plugins/incoming-hook/notify`：
+
+```ts
+export default definePlugin({
+  name: 'incoming-hook',
+  credentials: { webhook: { title: 'Webhook' } },
+  setup(ctx) {
+    ctx.route((app) => app.post('/notify', async (c) => {
+      if (!ctx.credentials.bearer(c.req.raw, { group: 'webhook' }))
+        return c.json({ error: 'Invalid credential' }, 401)
+      // 已验证；在此解析并处理请求。
+      return c.body(null, 204)
+    }))
+  },
+})
+```
+
+`ctx.credentials.list()` 只返回当前插件有效凭据的元数据。`ctx.credentials.readAll({ group })` 返回指定用途的有效原值，适用于 HMAC；`match` 做安全值比较，`bearer` 解析标准 Bearer 请求头。这些方法都按插件名隔离。移除用途不会自动删除凭据：框架会停用它们，让面板能显示并撤销；`/plugin uninstall` 默认保留凭据，清除插件数据时一并删除。插件运行在宿主进程中；该密钥保护的是数据库和面板默认返回值，不隔离可信插件代码。
+
+完整的 `release-notifier` 部署密钥与 GitHub HMAC 验签示例见 [`plugins/_examples/release-notifier.ts`](plugins/_examples/release-notifier.ts)。
 
 ### 插件面板页面
 

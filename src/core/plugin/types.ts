@@ -1,6 +1,7 @@
 import type { Bot } from '../bot.ts'
 import type { CapabilityRequirements } from '../capabilities.ts'
 import type { BaseEvent } from '../event/index.ts'
+import type { PluginCredentialGroup } from './credentials.ts'
 
 /** 插件面板页面的标题、图标、静态目录和可选入口文件。 */
 export interface PanelPageOptions {
@@ -40,6 +41,19 @@ export interface PluginState {
   inject: { name: string; optional: boolean }[]
   configSchema?: Record<string, unknown>
   capabilities?: CapabilityRequirements
+  credentialGroups?: readonly PluginCredentialGroup[]
+}
+
+/** 已发现插件的公开目录条目，不包含路径、配置和错误详情。 */
+export interface PluginCatalogEntry {
+  readonly name: string
+  readonly version?: string
+  readonly description?: string
+  readonly source: PluginState['source']
+  readonly state: PluginState['state']
+  readonly enabled: boolean
+  readonly provides: readonly string[]
+  readonly inject: readonly Readonly<PluginState['inject'][number]>[]
 }
 
 // Framework events can be emitted before an adapter has registered a Bot.

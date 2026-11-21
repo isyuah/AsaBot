@@ -46,6 +46,94 @@ function rawGet(port: number, path: string): Promise<number | undefined> {
 }
 
 describe('batch 4 panel server', () => {
+  it('exposes the same canonical plugin directory to plugins and the panel after file removal', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'asabot-plugin-catalog-'))
+    const entry = join(directory, 'observer.ts')
+    await writeFile(entry, "export default { name: 'observer', inject: { optional: ['ai'] }, setup() {} }")
+    await writeFile(join(directory, 'duplicate.ts'), "export default { name: 'catalog-user', setup() {} }")
+    const config = z.object({
+      consumer: z
+        .string()
+        .meta({ 'x-asabot-options': { source: 'plugins', consumes: 'ai' } })
+        .optional(),
+    })
+    const t = await createTestApp({
+      plugins: [
+        definePlugin({
+          name: 'catalog-user',
+          config,
+          setup(ctx) {
+            ctx.panel.route((routes) => {
+              routes.get('/catalog', (c) => c.json(ctx.plugins.list()))
+              routes.get('/observer', (c) => c.json(ctx.plugins.get('observer') ?? null))
+            })
+          },
+        }),
+        definePlugin({ name: 'required-ai', inject: ['ai'], setup() {} }),
+      ],
+      pluginDirs: [directory],
+      config: {
+        plugins: {
+          observer: { enabled: false },
+          'catalog-user': { enabled: true, config: { consumer: 'observer' } },
+        },
+        server: { port: 0, panelPassword: password },
+      },
+    })
+    let socket: WebSocket | undefined
+    try {
+      const port = t.app.server?.address()?.port
+      if (port === undefined) throw new Error('Missing server')
+      const { origin, cookie, request } = await client(port)
+      const catalog = () => request('/plugin-catalog').then((res) => res.json())
+      const before = await catalog()
+      expect(await (await request('/ext/catalog-user/catalog')).json()).toEqual(before)
+      expect(before.filter((item: { name: string }) => item.name === 'catalog-user')).toEqual([
+        { name: 'catalog-user', state: 'active', source: 'builtin', enabled: true, provides: [], inject: [] },
+      ])
+      expect(before).toContainEqual({
+        name: 'observer',
+        state: 'disabled',
+        source: 'file',
+        enabled: false,
+        provides: [],
+        inject: [{ name: 'ai', optional: true }],
+      })
+      expect(before).toContainEqual({
+        name: 'required-ai',
+        state: 'failed',
+        source: 'builtin',
+        enabled: true,
+        provides: [],
+        inject: [{ name: 'ai', optional: false }],
+      })
+      expect(await (await request('/ext/catalog-user/observer')).json()).toEqual(
+        before.find((item: { name: string }) => item.name === 'observer'),
+      )
+
+      socket = new WebSocket(`${origin.replace('http:', 'ws:')}/api/panel/ws`, { headers: { cookie } })
+      const frames: unknown[] = []
+      socket.on('message', (data) => frames.push(JSON.parse(data.toString())))
+      await vi.waitFor(() => expect(frames).toContainEqual(expect.objectContaining({ type: 'hello' })))
+      await rm(entry)
+      await request('/plugins/rescan', 'POST')
+      await vi.waitFor(() => expect(frames).toContainEqual({ type: 'plugins-changed' }))
+      expect(await catalog()).toEqual(before.filter((item: { name: string }) => item.name !== 'observer'))
+      expect(await (await request('/ext/catalog-user/observer')).json()).toBeNull()
+      const plugins = await (await request('/plugins')).json()
+      expect(plugins.find((item: { name: string }) => item.name === 'catalog-user')).toMatchObject({
+        config: { consumer: 'observer' },
+        configSchema: {
+          properties: { consumer: { 'x-asabot-options': { source: 'plugins', consumes: 'ai' } } },
+        },
+      })
+    } finally {
+      socket?.terminate()
+      await t.dispose()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it('serves plugin pages safely, authenticates extension routes and pushes events until unload', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'asabot-panel-pages-'))
     const root = join(directory, 'page')
