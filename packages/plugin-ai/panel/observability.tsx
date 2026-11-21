@@ -1,6 +1,17 @@
-import { Badge, Button, Card, DatePicker, Dialog, EmptyState, Field, Input, Sheet } from '@asabot/panel-ui'
+import {
+  Badge,
+  Button,
+  Card,
+  DatePicker,
+  Dialog,
+  EmptyState,
+  Field,
+  Input,
+  Sheet,
+  Skeleton,
+} from '@asabot/panel-ui'
 import { Activity, ChevronLeft, ChevronRight, ClipboardList, RefreshCw } from 'lucide-react'
-import { useEffect, useId, useState } from 'react'
+import { lazy, Suspense, useEffect, useId, useState } from 'react'
 import {
   type Capability,
   type CatalogView,
@@ -33,6 +44,8 @@ import {
   useAction,
   useRemote,
 } from './ui.tsx'
+
+const UsageChart = lazy(() => import('./usage-chart.tsx'))
 
 function uniqueSources(data: CatalogView) {
   return [...new Set(['@panel', ...data.consumers, ...(data.capture ? [data.capture.source] : [])])]
@@ -610,7 +623,9 @@ export function Usage({ data }: { data: CatalogView }) {
                     {report.from} 至 {report.to}（UTC）
                   </span>
                 </div>
-                <Trend report={report} />
+                <Suspense fallback={<Skeleton className="ai-usage-chart" />}>
+                  <UsageChart daily={report.daily} />
+                </Suspense>
               </Card>
               <Card className="ai-padding">
                 <div className="ai-head">
@@ -688,38 +703,5 @@ function Metric({ title, value }: { title: string; value: string }) {
       <span className="ai-muted">{title}</span>
       <strong>{value}</strong>
     </Card>
-  )
-}
-
-function Trend({ report }: { report: UsageReport }) {
-  const max = Math.max(1, ...report.daily.map((day) => day.requests))
-  const width = 700 / report.daily.length
-  const gap = Math.min(width * 0.33, 12)
-  return (
-    <svg
-      viewBox="0 0 700 100"
-      preserveAspectRatio="none"
-      role="img"
-      aria-label={`每日已结束调用量，最高 ${number.format(max)} 次`}
-    >
-      <line x1={0} x2={700} y1={98} y2={98} vectorEffect="non-scaling-stroke" />
-      {report.daily.map((day, index) => {
-        const height = (day.requests / max) * 94
-        return (
-          <rect
-            key={day.day}
-            x={index * width + gap / 2}
-            y={98 - height}
-            width={width - gap}
-            height={height}
-            rx={Math.min(3, width / 6)}
-          >
-            <title>
-              {day.day}：{day.requests} 次
-            </title>
-          </rect>
-        )
-      })}
-    </svg>
   )
 }
