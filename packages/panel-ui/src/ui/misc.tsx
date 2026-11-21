@@ -99,7 +99,7 @@ export function PageTabs<V extends string>({
 }) {
   const id = useId()
   return (
-    <div role="tablist" className={cn('flex gap-5 border-b border-border', className)}>
+    <div role="tablist" className={cn('flex flex-wrap gap-x-3 border-b border-border sm:gap-x-5', className)}>
       {tabs.map((tab) => {
         const active = tab.value === value
         return (
@@ -110,7 +110,7 @@ export function PageTabs<V extends string>({
             aria-selected={active}
             onClick={() => onChange(tab.value)}
             className={cn(
-              'relative -mb-px flex h-10 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap text-[13.5px] font-medium transition-colors',
+              'relative flex h-10 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap text-[13.5px] font-medium transition-colors',
               active ? 'text-fg' : 'text-fg-3 hover:text-fg-2',
             )}
           >
@@ -119,7 +119,7 @@ export function PageTabs<V extends string>({
               <motion.span
                 layoutId={`page-tab-${id}`}
                 transition={spring}
-                className="absolute inset-x-0 bottom-0 h-[2px] rounded-full bg-accent"
+                className="absolute inset-x-0 -bottom-px h-[2px] rounded-full bg-accent"
               />
             )}
           </button>

@@ -48,6 +48,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { PackageMarket } from '../components/market.tsx'
+import { InstalledPluginReadme } from '../components/package-readme.tsx'
 import { hasUpdate, UninstallDialog, UpdateButton, UploadDialog } from '../components/plugin-manage.tsx'
 import { ApiError, api } from '../lib/api.ts'
 import { groupPath } from '../lib/groups.ts'
@@ -462,7 +463,6 @@ function PluginCard({
 export function PluginDetailPage() {
   const parts = usePath().split('/').filter(Boolean).map(decodeURIComponent)
   const name = parts[1] ?? ''
-  const tab = parts[2] ?? 'overview'
   const plugins = useQuery({ queryKey: ['plugins'], queryFn: api.plugins })
   const [removing, setRemoving] = useState<PluginView | null>(null)
   const { action } = usePluginMutations()
@@ -477,6 +477,15 @@ export function PluginDetailPage() {
         action={<Button onClick={() => navigate('/plugins')}>返回插件列表</Button>}
       />
     )
+  const tabs = [
+    { value: 'overview', label: '概览' },
+    ...(plugin.package ? [{ value: 'readme', label: 'README' }] : []),
+    { value: 'config', label: '全局配置' },
+    { value: 'commands', label: '命令' },
+    { value: 'bots', label: '机器人' },
+    { value: 'groups', label: '群组' },
+  ]
+  const tab = tabs.find((item) => item.value === parts[2])?.value ?? 'overview'
   return (
     <>
       <Link
@@ -522,14 +531,8 @@ export function PluginDetailPage() {
       <PageTabs
         value={tab}
         onChange={(value) => navigate(pluginPath(name, value))}
-        tabs={[
-          { value: 'overview', label: '概览' },
-          { value: 'config', label: '全局配置' },
-          { value: 'commands', label: '命令' },
-          { value: 'bots', label: '机器人' },
-          { value: 'groups', label: '群组' },
-        ]}
-        className="mb-5 overflow-x-auto"
+        tabs={tabs}
+        className="mb-5"
       />
       <Card className="p-5 sm:p-6">
         {tab === 'overview' && (
@@ -538,6 +541,7 @@ export function PluginDetailPage() {
             <CapabilityRequirements plugin={plugin} />
           </>
         )}
+        {tab === 'readme' && plugin.package && <InstalledPluginReadme name={name} info={plugin.package} />}
         {tab === 'config' && (
           <>
             <p className="mb-4 text-[13px] text-fg-3">

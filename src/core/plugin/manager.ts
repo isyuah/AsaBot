@@ -569,6 +569,12 @@ export class PluginManager {
     return manifest ? this.packages.info(manifest) : undefined
   }
 
+  packageReadme(name: string): Promise<string | undefined> {
+    const manifest = this.entries.get(name)?.manifest
+    if (!manifest) throw new ManagementError(404, 'Plugin package is not installed')
+    return this.packages.installedReadme(manifest)
+  }
+
   subscribePackageUpdates(subscriber: (state: PluginState) => void): () => void {
     this.packageUpdateSubscribers.add(subscriber)
     return () => this.packageUpdateSubscribers.delete(subscriber)
@@ -889,7 +895,7 @@ export class PluginManager {
     const target = manifest.exports === undefined ? (manifest.main ?? 'index.js') : select(exports)
     if (!target || !/\.(?:js|mjs)$/.test(target))
       throw new ManagementError(400, 'Plugin package entry must be JavaScript')
-    const root = join(this.packages.dir, 'node_modules', ...manifest.name.split('/'))
+    const root = this.packages.packageRoot(manifest.name)
     const path = resolve(root, target)
     this.ensureInside(root, path)
     await this.ensureRealInside(root, path)

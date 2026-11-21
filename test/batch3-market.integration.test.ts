@@ -31,6 +31,7 @@ describe('package market', () => {
       }),
     )
     await writeFile(join(installedDir, 'index.js'), "export default { name: 'market-fixture', setup() {} }")
+    await writeFile(join(installedDir, 'ReadMe.MD'), '# Installed v1.0.0')
     const searchRequests: URL[] = []
     const metadataAccept: string[] = []
     const objects = Array.from({ length: 250 }, (_, index) => {
@@ -123,6 +124,9 @@ describe('package market', () => {
       expect(searchRequests).toHaveLength(1)
       expect(searchRequests[0]?.searchParams.get('size')).toBe('250')
       expect(searchRequests[0]?.searchParams.get('from')).toBe('0')
+      const installedReadme = await get('/plugins/market-fixture/readme')
+      expect(installedReadme.status).toBe(200)
+      expect(await installedReadme.json()).toEqual({ readme: '# Installed v1.0.0' })
       const info = (await (await get('/packages/info?name=asabot-market-001')).json()) as {
         latest: string
         installed: string

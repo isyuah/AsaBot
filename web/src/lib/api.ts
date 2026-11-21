@@ -159,6 +159,7 @@ export const api = {
   group: (groupKey: string) => request<GroupDetail>('GET', `/groups/${encode(groupKey)}`),
 
   plugins: () => request<PluginView[]>('GET', '/plugins'),
+  pluginReadme: (name: string) => request<{ readme?: string }>('GET', `/plugins/${encode(name)}/readme`),
   pluginAction: (name: string, action: 'enable' | 'disable' | 'reload') =>
     request<PluginView>('POST', `/plugins/${encode(name)}/${action}`, {}),
   pluginBotDefault: (name: string, defaultOnNewBots: boolean) =>

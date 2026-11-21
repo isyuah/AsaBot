@@ -711,6 +711,9 @@ export class HttpServer implements ServerService {
     panel.get('/plugins', (c) =>
       c.json(this.app.plugins.list().map((plugin) => pluginView(this.app, plugin))),
     )
+    panel.get('/plugins/:name/readme', async (c) =>
+      c.json({ readme: await this.app.plugins.packageReadme(c.req.param('name')) }),
+    )
     panel.post('/plugins/rescan', async (c) => {
       const result = await this.app.plugins.rescan()
       return c.json({

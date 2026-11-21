@@ -621,6 +621,7 @@ type Target = { type: 'group' | 'private'; id: string }
 | `GET /bots/:platform/:selfId/groups` | `{ groupId, groupName, memberCount? }[]`（实时调用平台 API） |
 | `POST /send` | `{ platform?, selfId?, target: Target, message: string \| Segment[] }` → `{ messageId }`。不指定 Bot 时使用第一个在线的 |
 | `GET /plugins` | `PluginView[]` |
+| `GET /plugins/:name/readme` | 读取已安装 npm 插件随包附带的 README，返回 `{ readme?: string }`；文档缺失时省略 `readme` |
 | `POST /plugins/:name/enable` / `disable` / `reload` | 返回最新的 `PluginView`；失败（例如 admin 不允许停用）返回 409 和原因 |
 | `PUT /plugins/:name/bot-default` | `{ defaultOnNewBots: boolean }`。设置新机器人的初始开关，返回最新的 `PluginView` |
 | `PUT /plugins/:name/config` | `{ config }`。校验失败返回 400，`issues` 带字段路径；成功返回最新的 `PluginView` |

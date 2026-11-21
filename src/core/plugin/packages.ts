@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { delimiter, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gunzipSync } from 'fflate'
@@ -169,7 +170,14 @@ export function redact(value: string): string {
 }
 
 const maxTarballBytes = 5 * 1024 * 1024
-const readmePath = /^[^/]+\/readme(?:\.(?:md|markdown|txt))?$/i
+const maxReadmeBytes = 200 * 1024
+const readmeFilename = /^readme(?:\.(?:md|markdown|txt))?$/i
+
+function decodeReadme(bytes: Uint8Array): string {
+  return new TextDecoder().decode(bytes.subarray(0, maxReadmeBytes), {
+    stream: bytes.length > maxReadmeBytes,
+  })
+}
 
 /** The top-level README of an npm tarball (gzipped ustar), or undefined when there is none. */
 export function readmeFromTarball(tgz: Uint8Array): string | undefined {
@@ -189,7 +197,8 @@ export function readmeFromTarball(tgz: Uint8Array): string | undefined {
     const prefix = field(offset + 345, 155)
     const path = prefix ? `${prefix}/${name}` : name
     const start = offset + 512
-    if ((type === '' || type === '0') && readmePath.test(path))
+    const slash = path.indexOf('/')
+    if ((type === '' || type === '0') && slash > 0 && readmeFilename.test(path.slice(slash + 1)))
       return decoder.decode(tar.subarray(start, start + size))
     offset = start + Math.ceil(size / 512) * 512
   }
@@ -409,15 +418,32 @@ export class PackageService {
     return data.dependencies ?? {}
   }
 
+  packageRoot(name: string): string {
+    return join(this.dir, 'node_modules', ...name.split('/'))
+  }
+
   async manifest(name: string): Promise<PackageManifest> {
     if (!validPackageName(name)) throw new ManagementError(400, 'Invalid package name')
-    const data: unknown = JSON.parse(
-      await readFile(join(this.dir, 'node_modules', ...name.split('/'), 'package.json'), 'utf8'),
-    )
+    const data: unknown = JSON.parse(await readFile(join(this.packageRoot(name), 'package.json'), 'utf8'))
     const parsed = manifestSchema.safeParse(data)
     if (!parsed.success || parsed.data.name !== name || !valid(parsed.data.version))
       throw new ManagementError(400, 'Invalid installed package metadata')
     return parsed.data
+  }
+
+  async installedReadme(manifest: PackageManifest): Promise<string | undefined> {
+    const root = this.packageRoot(manifest.name)
+    try {
+      const files = await readdir(root, { withFileTypes: true })
+      const readme = files.find((file) => file.isFile() && readmeFilename.test(file.name))
+      if (!readme) return undefined
+      const stream = createReadStream(join(root, readme.name), { end: maxReadmeBytes })
+      const chunks: Buffer[] = await stream.toArray()
+      return decodeReadme(Buffer.concat(chunks))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+      throw error
+    }
   }
 
   info(manifest: PackageManifest): PackageInfo {
@@ -532,11 +558,7 @@ export class PackageService {
     const data = cached.value
     const installed = this.host.installedPackages().get(name)?.manifest.version
     const repository = typeof data.repository === 'string' ? data.repository : data.repository?.url
-    const bytes = data.readme === undefined ? undefined : Buffer.from(data.readme, 'utf8')
-    const readme =
-      bytes && bytes.length > 200 * 1024
-        ? new TextDecoder().decode(bytes.subarray(0, 200 * 1024), { stream: true })
-        : data.readme
+    const readme = data.readme === undefined ? undefined : decodeReadme(Buffer.from(data.readme, 'utf8'))
     const versions = Object.keys(data.versions)
       .filter((version) => valid(version))
       .sort(rcompare)

@@ -20,7 +20,6 @@ import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query'
 import {
   AlertTriangle,
   ArrowUpCircle,
-  BookOpen,
   Download,
   ExternalLink,
   PackageSearch,
@@ -29,17 +28,13 @@ import {
   ShieldAlert,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { ApiError, api } from '../lib/api.ts'
 import { formatRelative } from '../lib/format.ts'
 import { useTrackOperation } from '../lib/realtime.tsx'
 import type { PackageDetail, PackageSearchItem, PackageSort, PackageVersion } from '../lib/types.ts'
-
-// react-markdown and remark-gfm are only needed once a package's details are opened.
-const Markdown = lazy(() =>
-  import('@asabot/panel-ui/markdown').then((module) => ({ default: module.Markdown })),
-)
+import { PackageReadme } from './package-readme.tsx'
 
 interface InstallTarget {
   name: string
@@ -408,21 +403,7 @@ function PackageSheet({
               <PackageLinks links={detail.links} />
             </div>
           </div>
-          {detail.readme?.trim() ? (
-            <Suspense
-              fallback={
-                <div className="space-y-2.5 px-6 py-5">
-                  <Skeleton className="h-5 w-1/2" />
-                  <Skeleton className="h-4 w-full" />
-                  <Skeleton className="h-4 w-5/6" />
-                </div>
-              }
-            >
-              <Markdown className="px-6 py-5">{detail.readme}</Markdown>
-            </Suspense>
-          ) : (
-            <EmptyState icon={<BookOpen />} title="没有 README" description="这个插件包没有提供说明文档。" />
-          )}
+          <PackageReadme className="px-6 py-5" readme={detail.readme} />
         </div>
       )}
     </Sheet>
