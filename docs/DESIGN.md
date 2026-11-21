@@ -545,7 +545,7 @@ t.app; t.mock; await t.dispose()
 
 ## 16. 测试策略
 
-遵循 CLAUDE.md 的测试哲学：测稳定的契约，不测实现细节和平凡行为。
+遵循 AGENTS.md 的测试原则：测稳定的契约，不测实现细节和平凡行为。
 
 - **`src/testing/`**（对外导出为 `asabot/testing`，插件作者也能用）：
   - `MockOneBot`：一个 WS 服务端（端口 0），能够：

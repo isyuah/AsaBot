@@ -6,9 +6,9 @@
 
 ## 提交改动
 
-有需要讨论的设计或暂时做不了的问题，可以先开 Issue。能直接完成的修复可以直接提 PR。维护者从最新的 `main` 切分支，外部贡献者先 fork，再从自己的分支向本仓库的 `main` 提 PR。
+有需要讨论的设计或暂时做不了的问题，可以先开 Issue。能直接完成的修复可以直接提 PR。不要在 `main` 上直接提交：维护者从最新的 `main` 切分支，外部贡献者先 fork，再从自己的分支向本仓库的 `main` 提 PR。
 
-本地开发见 [README](README.md#仓库开发)。提交前运行与改动相关的检查，PR 里的 `Verify` 会在 Linux 上安装锁定的依赖并运行 `pnpm lint`、`pnpm typecheck`、`pnpm test` 和 `pnpm build`。PR 描述里写清变更和验证方式；想让 GitHub 在合并后关掉对应 Issue 时，写 `Closes #编号`（用实际编号替换）。
+本地开发见 [README](README.md#仓库开发)，仓库开发规则见 [AGENTS.md](AGENTS.md)。提交前运行与改动相关的检查，PR 里的 `Verify` 会在 Linux 上安装锁定的依赖并运行 `pnpm lint`、`pnpm typecheck`、`pnpm --filter @asabot/plugin-ai typecheck`、`pnpm test`、`pnpm build` 和 `pnpm --filter @asabot/plugin-ai build`。PR 描述里写清变更和验证方式；想让 GitHub 在合并后关掉对应 Issue 时，写 `Closes #编号`（用实际编号替换）。
 
 PR 标题用 `type(scope): description`，范围可以省略。例如 `fix(panel): show installed plugin READMEs`。分支里可以有临时提交，合并时用 Squash merge，并让最终提交标题沿用 PR 标题。
 
