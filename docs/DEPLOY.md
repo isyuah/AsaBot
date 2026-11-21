@@ -54,6 +54,27 @@ curl http://127.0.0.1:5140/healthz
 
 Compose 只启动 AsaBot；OneBot 服务需要自行准备。`/healthz` 检查 HTTP 服务是否运行，Bot 离线时也会返回成功，可结合响应中的 `bots.online` 查看连接状态。停止服务使用 `docker compose stop`。
 
+### 使用 GHCR 镜像
+
+Linux x86-64 服务器可以直接拉取预构建镜像。在 `compose.yaml` 同目录下的 `compose.override.yaml` 中为 `asabot` 服务设置以下两项（已有端口、网络等配置可继续保留）：
+
+```yaml
+services:
+  asabot:
+    build: !reset null
+    image: ghcr.io/isyuah/asabot:latest
+```
+
+`!reset` 清除主配置里的本地构建配置，需要 Docker Compose 2.24.4 或更新版本。初始化配置和目录后，首次启动和后续拉取新版使用同一条命令：
+
+```sh
+docker compose up -d --pull always --wait asabot
+```
+
+Compose 会先拉取镜像，再根据变更重建 AsaBot 容器，沿用宿主机上的 `config`、`data` 和 `plugins`。`latest` 会在发布时更新，已经运行的容器要在执行上述命令后才会换用新镜像。也可以指定版本号或 `sha-<完整 Git 提交哈希>` 标签来固定部署版本。
+
+维护者推送 `vX.Y.Z` 格式的 Git 标签后，[Publish container image](https://github.com/isyuah/AsaBot/actions/workflows/container.yml) 会发布 `X.Y.Z`、`sha-<完整 Git 提交哈希>` 和 `latest`。也可在 Actions 中对默认分支手动运行该工作流，更新 `latest` 和提交标签。GHCR 首次发布后，需要在包设置中将可见性设为 Public，服务器即可匿名拉取。
+
 也可直接构建和运行容器（示例为 Linux/macOS shell）：
 
 ```sh
@@ -150,7 +171,7 @@ server {
 
 数据目录包含 `asabot.db`、SQLite 的 WAL 文件以及插件数据。备份前先停止 AsaBot，再备份整个数据目录、用户插件和实际使用的配置文件；环境变量和 `.env` 应单独安全保存。恢复时使用对应的数据、插件和配置，并确保容器用户有正确的读写权限。
 
-升级前先停止服务并完成备份。更新仓库代码后，直接运行方式执行 `pnpm install --frozen-lockfile` 和 `pnpm --filter web build` 再启动；Compose 方式执行 `docker compose up -d --build`。升级后检查日志、`/healthz`、面板和 OneBot 连接。升级时保留原有数据挂载，不要清理数据卷。
+升级前先停止服务并完成备份。直接运行方式在更新仓库代码后执行 `pnpm install --frozen-lockfile` 和 `pnpm --filter web build` 再启动；Compose 按部署方式构建源码或[拉取 GHCR 镜像](#使用-ghcr-镜像)。升级后检查日志、`/healthz`、面板和 OneBot 连接。升级时保留原有数据挂载，不要清理数据卷。
 
 ### 从 0.1.x 迁移群规则
 
