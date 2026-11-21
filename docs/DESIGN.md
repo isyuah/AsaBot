@@ -905,6 +905,7 @@ export default definePlugin({ name: 'shop', inject: ['coins'], setup(ctx) { cons
   - 有服务不可用时，插件状态为 `failed`，原因写 `服务 coins 不可用`。服务恢复后，由 reconcile 自动加载它，规则与 depends 相同。
   - 提供方卸载时，使用方级联卸载；提供方重载时，使用方级联重载。
 - `ctx.inject(name)` 只能获取 `inject` 中声明过的服务，否则直接抛错，以保证生命周期可以追踪。
+- `ctx.provideScoped(name, factory)` 按注入方的插件上下文创建并缓存服务实例。工厂收到插件名、卸载信号及当前分发事件的读取方法，可用于归因、策略和取消；声明依赖、级联重载和卸载规则与普通服务一致。`ctx.serviceConsumers(name)` 可列出声明该服务依赖的插件。
 - **加载顺序**：先按 `depends` 做拓扑排序；因为只有插件 setup 之后才知道它提供了哪些服务，所以 reconcile 会反复执行，直到状态不再变化。
 - `depends` 保留，用于依赖某个具体的插件；`inject` 用于依赖某种能力，不关心由哪个插件提供。
 - `PluginState` 和面板的插件视图新增 `provides: string[]`、`inject: string[]`。

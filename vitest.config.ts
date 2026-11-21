@@ -5,6 +5,7 @@ export default defineConfig({
     include: [
       'src/**/*.test.ts',
       'test/**/*.test.ts',
+      'packages/plugin-ai/src/**/*.test.ts',
       'packages/plugin-render/src/**/*.test.ts',
       'packages/create/test/**/*.test.js',
     ],

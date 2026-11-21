@@ -17,6 +17,13 @@ export interface PanelPage {
   entry: string
 }
 
+/** 由框架绑定的服务使用方；事件信息只在该插件的分发处理期间可用。 */
+export interface ServiceConsumer {
+  readonly plugin: string
+  readonly signal: AbortSignal
+  event(): { eventId: string; platform: string; selfId: string } | undefined
+}
+
 /** 插件的来源、运行状态、依赖服务及可选错误信息。 */
 export interface PluginState {
   name: string

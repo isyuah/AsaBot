@@ -16,8 +16,17 @@ import { pluginExecution } from './execution.ts'
 import { parsePluginIconUrl, pluginIconFromKeywords } from './icon.ts'
 import { importPlugin, registerPluginRoots } from './loader.ts'
 import { type PackageManifest, type PackageOptions, PackageService, redact } from './packages.ts'
-import type { PluginState } from './types.ts'
+import type { PluginState, ServiceConsumer } from './types.ts'
 import { ManagementError, uploadContents } from './upload.ts'
+
+type ServiceEntry = { plugin: string } & (
+  | { kind: 'shared'; value: unknown }
+  | {
+      kind: 'scoped'
+      factory: (consumer: ServiceConsumer) => unknown
+      instances: WeakMap<ServiceConsumer, unknown>
+    }
+)
 
 interface Entry {
   state: PluginState
@@ -27,7 +36,7 @@ interface Entry {
   release?: () => void
   failure?: 'dependency' | 'setup' | 'import' | 'duplicate'
   manifest?: PackageManifest
-  optionalServices?: Map<string, { plugin: string; value: unknown } | undefined>
+  optionalServices?: Map<string, ServiceEntry | undefined>
 }
 
 function errorMessage(error: unknown): string {
@@ -98,7 +107,7 @@ export class PluginManager {
   private readonly dirs: string[]
   readonly packages: PackageService
   private readonly entries = new Map<string, Entry>()
-  private readonly services = new Map<string, { plugin: string; value: unknown }>()
+  private readonly services = new Map<string, ServiceEntry>()
   private readonly serviceProviders = new Map<string, string>()
   private readonly files = new Map<string, Entry>()
   private readonly duplicates: Entry[] = []
@@ -179,12 +188,27 @@ export class PluginManager {
   }
 
   provide(plugin: string, name: string, value: unknown): () => void {
+    return this.registerService(name, { plugin, kind: 'shared', value })
+  }
+
+  provideScoped(plugin: string, name: string, factory: (consumer: ServiceConsumer) => unknown): () => void {
+    return this.registerService(name, { plugin, kind: 'scoped', factory, instances: new WeakMap() })
+  }
+
+  serviceConsumers(name: string): string[] {
+    return [...this.entries.values()]
+      .filter(({ state }) => state.inject.some((item) => item.name === name))
+      .map(({ state }) => state.name)
+      .sort()
+  }
+
+  private registerService(name: string, service: ServiceEntry): () => void {
+    const { plugin } = service
     const existing = this.services.get(name)
     if (existing)
       throw new PluginError(
         `服务 ${name} 冲突：插件 "${existing.plugin}" 已提供，插件 "${plugin}" 无法重复提供`,
       )
-    const service = { plugin, value }
     this.services.set(name, service)
     this.serviceProviders.set(name, plugin)
     const entry = this.require(plugin)
@@ -200,14 +224,22 @@ export class PluginManager {
     }
   }
 
-  inject(name: string): unknown {
+  inject(name: string, consumer?: ServiceConsumer): unknown {
     const service = this.services.get(name)
     if (!service) throw new PluginError(`服务 ${name} 不可用`)
-    return service.value
+    return this.serviceValue(name, service, consumer)
   }
 
-  injectOptional(name: string): unknown {
-    return this.services.get(name)?.value
+  injectOptional(name: string, consumer?: ServiceConsumer): unknown {
+    const service = this.services.get(name)
+    return service && this.serviceValue(name, service, consumer)
+  }
+
+  private serviceValue(name: string, service: ServiceEntry, consumer?: ServiceConsumer): unknown {
+    if (service.kind === 'shared') return service.value
+    if (!consumer) throw new PluginError(`服务 ${name} 必须在插件上下文中注入`)
+    if (!service.instances.has(consumer)) service.instances.set(consumer, service.factory(consumer))
+    return service.instances.get(consumer)
   }
 
   getConfig(name: string): unknown {

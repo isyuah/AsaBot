@@ -10,6 +10,7 @@ import type { App } from '../app.ts'
 import type { Bot, SendResult } from '../bot.ts'
 import type { CommandBuilder } from '../command/builder.ts'
 import type { ApiInterceptor } from '../dispatch/api.ts'
+import { dispatchContext } from '../dispatch/trace.ts'
 import type {
   DispatchEvent,
   Disposer,
@@ -36,7 +37,7 @@ import { type Duration, parseDuration } from '../utils/duration.ts'
 import { type PluginDefinition, serviceDependencies } from './definition.ts'
 import { pluginExecution } from './execution.ts'
 import { PersistentTasks, type TaskHandle, type TaskHandler, type TaskRegistrationOptions } from './tasks.ts'
-import type { PanelPageOptions, PluginStateEvent } from './types.ts'
+import type { PanelPageOptions, PluginStateEvent, ServiceConsumer } from './types.ts'
 
 type Listener = (event: AnyEvent | PluginStateEvent, signal: AbortSignal) => unknown | Promise<unknown>
 type PublicListener = Listener | ((event: never, signal: AbortSignal) => unknown | Promise<unknown>)
@@ -57,6 +58,7 @@ export class Context<Config = undefined> {
   private readonly tasks: PersistentTasks
   private readonly cleanups: Cleanup[] = []
   private readonly dependencies: ReturnType<typeof serviceDependencies>
+  private readonly consumer: ServiceConsumer
   private routeApp?: Hono
   private panelRouteApp?: Hono
   private disposed = false
@@ -101,6 +103,16 @@ export class Context<Config = undefined> {
     this.owner = name
     this.value = config
     this.dependencies = serviceDependencies(dependencies)
+    this.consumer = Object.freeze({
+      plugin: name,
+      signal: this.controller.signal,
+      event() {
+        const current = dispatchContext.getStore()
+        if (current?.plugin !== name || !current.active.value) return undefined
+        const { eventId, platform, selfId } = current.trace
+        return { eventId, platform, selfId }
+      },
+    })
     this.childLogger = app.logger.child({ plugin: name })
     this.scope = { owner: name, signal: this.controller.signal }
     this.scheduler = new Scheduler(this.childLogger, this.controller.signal, app.config.timezone)
@@ -208,7 +220,25 @@ export class Context<Config = undefined> {
   /** 按名称提供插件服务并返回撤销函数；同名服务已存在时抛错。 */
   provide<K extends string>(name: K, service: K extends keyof Services ? Services[K] : unknown): Disposer {
     this.assertActive()
-    const dispose = this.app.plugins.provide(this.owner, name, service)
+    return this.disposeService(this.app.plugins.provide(this.owner, name, service))
+  }
+
+  /** 提供按使用方上下文创建的服务，服务可获取插件身份和卸载信号。 */
+  provideScoped<K extends string>(
+    name: K,
+    factory: (consumer: ServiceConsumer) => K extends keyof Services ? Services[K] : unknown,
+  ): Disposer {
+    this.assertActive()
+    return this.disposeService(this.app.plugins.provideScoped(this.owner, name, factory))
+  }
+
+  /** 列出声明依赖指定服务的已发现插件，包括未启用的插件。 */
+  serviceConsumers(name: string): string[] {
+    this.assertActive()
+    return this.app.plugins.serviceConsumers(name)
+  }
+
+  private disposeService(dispose: Disposer): Disposer {
     this.controller.signal.addEventListener('abort', dispose, { once: true })
     return () => {
       this.controller.signal.removeEventListener('abort', dispose)
@@ -221,7 +251,7 @@ export class Context<Config = undefined> {
     this.assertActive()
     if (!this.dependencies.required.includes(name))
       throw new PluginError(`插件 "${this.owner}" 未声明服务 ${name}`)
-    return this.app.plugins.inject(name) as K extends keyof Services ? Services[K] : unknown
+    return this.app.plugins.inject(name, this.consumer) as K extends keyof Services ? Services[K] : unknown
   }
 
   /** 获取已声明的可选服务；服务缺失返回 undefined，未声明时抛出 PluginError。 */
@@ -229,7 +259,7 @@ export class Context<Config = undefined> {
     this.assertActive()
     if (!this.dependencies.optional.includes(name))
       throw new PluginError(`插件 "${this.owner}" 未声明可选服务 ${name}`)
-    return this.app.plugins.injectOptional(name) as
+    return this.app.plugins.injectOptional(name, this.consumer) as
       | (K extends keyof Services ? Services[K] : unknown)
       | undefined
   }

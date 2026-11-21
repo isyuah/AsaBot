@@ -77,6 +77,8 @@ npm run dev
 
 ## 官方插件
 
+`@asabot/plugin-ai` 为业务插件提供统一的对话、生图、语音合成和结构化决策服务。启用后，从「插件页面 → AI 管理」配置 API 渠道、模型、默认分配和白名单，查看来源、请求及用量。用法及本地构建见 [AI 插件文档](packages/plugin-ai/README.md)。
+
 `@asabot/plugin-render` 将文本、Markdown 和 satori HTML 渲染为 PNG，也可通过配置 Chrome 或 Edge 使用网页截图。可在插件市场安装，或由超管发送 `/plugin install @asabot/plugin-render`。在插件中声明 `inject: ['render']` 后即可使用：
 
 ```ts
@@ -200,7 +202,7 @@ export default definePlugin({
 | `ctx.bot(selfId?)`、`ctx.bots` | 查找在线 Bot、列出 Bot；找不到在线 Bot 时 `ctx.bot()` 抛错 |
 | `ctx.send`、`ctx.broadcast` | 向指定平台和会话主动发送或批量发送 |
 | `ctx.beforeSend`、`ctx.interceptApi` | 处理出站消息或拦截 Bot API 调用 |
-| `ctx.provide`、`ctx.inject`、`ctx.injectOptional` | 提供或使用插件服务 |
+| `ctx.provide`、`ctx.provideScoped`、`ctx.inject`、`ctx.injectOptional` | 提供共享或按调用方绑定的服务，或注入已声明的服务 |
 | `ctx.dataDir`、`ctx.signal`、`ctx.onDispose(fn)` | 插件数据目录、卸载信号、自定义清理函数 |
 
 观察者、命令、中间件、匹配器和定时任务随插件卸载自动回收。事件处理器应配合 `signal` 取消耗时操作；插件代码仍运行在主进程中。
