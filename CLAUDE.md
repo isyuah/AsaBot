@@ -4,6 +4,8 @@ TypeScript QQ 机器人框架。核心层与平台无关，首个适配器为 On
 
 **权威设计文档：[docs/DESIGN.md](docs/DESIGN.md)**。实现前先读对应章节。发现设计缺陷时，在交付说明中提出，不要静默偏离设计。
 
+**开发指南：[docs/guide/README.md](docs/guide/README.md)**（给 AI 与贡献者：工程规范、插件开发、面板 UI 与动效规范）。写插件或面板页前先读对应文件。
+
 ## 运行与检查
 
 ```sh

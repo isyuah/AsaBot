@@ -468,3 +468,5 @@ pnpm test
 ```
 
 其他检查命令：`pnpm typecheck`、`pnpm lint`；构建发布用框架代码使用 `pnpm build:lib`。
+
+面向 AI 与贡献者的开发规范（工程约束、插件配方、面板 UI 与动效）见 [开发指南](docs/guide/README.md)。
