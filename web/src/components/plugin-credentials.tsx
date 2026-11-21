@@ -1,6 +1,16 @@
-import { Badge, Button, Dialog, EmptyState, ErrorState, Field, Input, Skeleton } from '@asabot/panel-ui'
+import {
+  Badge,
+  Button,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  Field,
+  Input,
+  Skeleton,
+  Tooltip,
+} from '@asabot/panel-ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Copy, Eye, Import, KeyRound, Plus, Trash2 } from 'lucide-react'
+import { Copy, Dices, Eye, KeyRound, Plus, Trash2 } from 'lucide-react'
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { ApiError, api } from '../lib/api.ts'
@@ -8,7 +18,7 @@ import { timeText } from '../lib/management.ts'
 import type { PluginCredentialGroup, PluginCredentialInfo } from '../lib/types.ts'
 
 type CredentialAction =
-  | { kind: 'generate' | 'import'; group: PluginCredentialGroup }
+  | { kind: 'create'; group: PluginCredentialGroup }
   | { kind: 'reveal' | 'revoke'; item: PluginCredentialInfo }
 
 export function PluginCredentialsTab({ name }: { name: string }) {
@@ -52,20 +62,11 @@ export function PluginCredentialsTab({ name }: { name: string }) {
                 <div className="flex gap-2">
                   <Button
                     size="sm"
-                    aria-label={`生成${group.title}凭据`}
-                    onClick={() => setAction({ kind: 'generate', group })}
+                    aria-label={`添加${group.title}凭据`}
+                    onClick={() => setAction({ kind: 'create', group })}
                   >
                     <Plus className="size-3.5" />
-                    生成
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label={`导入${group.title}凭据`}
-                    onClick={() => setAction({ kind: 'import', group })}
-                  >
-                    <Import className="size-3.5" />
-                    导入
+                    添加凭据
                   </Button>
                 </div>
               )}
@@ -120,14 +121,8 @@ export function PluginCredentialsTab({ name }: { name: string }) {
           </section>
         )
       })}
-      {(action?.kind === 'generate' || action?.kind === 'import') && (
-        <CreateCredential
-          name={name}
-          group={action.group}
-          mode={action.kind}
-          onClose={close}
-          onSaved={saved}
-        />
+      {action?.kind === 'create' && (
+        <CreateCredential name={name} group={action.group} onClose={close} onSaved={saved} />
       )}
       {action?.kind === 'reveal' && <RevealCredential name={name} item={action.item} onClose={close} />}
       {action?.kind === 'revoke' && (
@@ -140,20 +135,18 @@ export function PluginCredentialsTab({ name }: { name: string }) {
 function CreateCredential({
   name,
   group,
-  mode,
   onClose,
   onSaved,
 }: {
   name: string
   group: PluginCredentialGroup
-  mode: 'generate' | 'import'
   onClose: () => void
   onSaved: () => void
 }) {
   const id = useId()
-  const title = mode === 'generate' ? '生成凭据' : '导入凭据'
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<Error>()
+  const [value, setValue] = useState('')
   const issues = error instanceof ApiError ? error.issues : []
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -163,12 +156,9 @@ function CreateCredential({
     setError(undefined)
     setSaving(true)
     try {
-      // An import contains the secret. Keep its arguments out of the query/mutation cache.
-      await api.createPluginCredential(
-        name,
-        mode === 'generate' ? { ...fields, mode } : { ...fields, mode, value: String(form.get('value')) },
-      )
-      toast.success(mode === 'generate' ? '凭据已生成' : '凭据已导入')
+      // Keep the secret in this form and out of React Query's cache.
+      await api.createPluginCredential(name, { ...fields, mode: 'import', value })
+      toast.success('凭据已添加')
       onSaved()
     } catch (error) {
       setError(error instanceof Error ? error : new Error('无法保存凭据'))
@@ -180,14 +170,14 @@ function CreateCredential({
   return (
     <Dialog
       open
-      title={title}
+      title="添加凭据"
       description={group.title}
       onOpenChange={(open) => {
         if (!open && !saving) onClose()
       }}
       footer={
         <Button type="submit" form={id} variant="primary" loading={saving}>
-          {title}
+          添加
         </Button>
       }
     >
@@ -199,23 +189,45 @@ function CreateCredential({
         >
           <Input id={`${id}-label`} name="label" required maxLength={80} autoComplete="off" />
         </Field>
-        {mode === 'import' && (
-          <Field
-            label="凭据原值"
-            htmlFor={`${id}-value`}
-            error={issues.find((issue) => issue.path === 'value')?.message}
-          >
+        <Field
+          label="凭据原值"
+          htmlFor={`${id}-value`}
+          error={issues.find((issue) => issue.path === 'value')?.message}
+        >
+          <div className="flex items-center gap-2">
             <Input
               id={`${id}-value`}
-              name="value"
               type="password"
               required
               maxLength={4096}
               autoComplete="new-password"
-              className="font-mono"
+              className="min-w-0 flex-1 font-mono"
+              value={value}
+              onChange={(event) => {
+                setValue(event.target.value)
+                setError(undefined)
+              }}
             />
-          </Field>
-        )}
+            <Tooltip content="随机生成凭据">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-9"
+                aria-label="随机生成凭据"
+                disabled={saving}
+                onClick={() => {
+                  const bytes = crypto.getRandomValues(new Uint8Array(32))
+                  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('')
+                  setValue(btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''))
+                  setError(undefined)
+                }}
+              >
+                <Dices className="size-4" />
+              </Button>
+            </Tooltip>
+          </div>
+        </Field>
         {error && issues.length === 0 && (
           <p role="alert" className="text-[12.5px] text-danger">
             {error.message}
