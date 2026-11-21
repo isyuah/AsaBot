@@ -51,4 +51,4 @@ export {
 } from './ui/primitives.tsx'
 export { Select, type SelectOption } from './ui/select.tsx'
 export { Switch } from './ui/switch.tsx'
-export { cn } from './utils.ts'
+export { cn, createUuid } from './utils.ts'

@@ -2,6 +2,7 @@ import {
   Badge,
   Button,
   Card,
+  createUuid,
   Dialog,
   EmptyState,
   ErrorState,
@@ -138,7 +139,7 @@ function ConnectionEditor({
 }) {
   const client = useQueryClient()
   const [adapterId, setAdapterId] = useState(connection?.adapter ?? initialAdapter ?? adapters[0]?.id ?? '')
-  const [id] = useState(() => connection?.id ?? crypto.randomUUID())
+  const [id] = useState(() => connection?.id ?? createUuid())
   const [removing, setRemoving] = useState(false)
   const [rescanning, setRescanning] = useState(false)
   const adapter = adapters.find((item) => item.id === adapterId)

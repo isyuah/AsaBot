@@ -7,7 +7,7 @@ import { Button } from './ui/button.tsx'
 import { Field, Input, Textarea } from './ui/input.tsx'
 import { Select } from './ui/select.tsx'
 import { Switch } from './ui/switch.tsx'
-import { cn } from './utils.ts'
+import { cn, createUuid } from './utils.ts'
 
 type Value = unknown
 type Issues = Record<string, string>
@@ -479,7 +479,7 @@ function ObjectListControl({
   onChange: (path: string[], value: Value) => void
 }) {
   // Items have no identity of their own; a parallel list of keys keeps animations and inputs stable on removal.
-  const [keys, setKeys] = useState<string[]>(() => value.map(() => crypto.randomUUID()))
+  const [keys, setKeys] = useState<string[]>(() => value.map(createUuid))
   const ids = value.map((_, index) => keys[index] ?? `item-${index}`)
   return (
     <div className="space-y-2.5">
@@ -527,7 +527,7 @@ function ObjectListControl({
         variant="secondary"
         size="sm"
         onClick={() => {
-          setKeys([...ids, crypto.randomUUID()])
+          setKeys([...ids, createUuid()])
           onChange(path, [...value, defaultsOf(schema)])
         }}
       >
