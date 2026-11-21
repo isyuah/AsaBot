@@ -20,20 +20,8 @@ function mediaSource(source: string | Buffer | URL): string {
   if (/^(?:https?|base64|file):\/\//i.test(source)) {
     return source
   }
-  if (isAbsolute(source) || win32.isAbsolute(source)) {
-    if (process.platform !== 'win32' && win32.isAbsolute(source)) {
-      const normalized = source.replaceAll('\\', '/')
-      if (normalized.startsWith('//')) {
-        const [host, ...parts] = normalized.slice(2).split('/')
-        return `file://${host}/${parts.map(encodeURIComponent).join('/')}`
-      }
-      return `file:///${normalized
-        .split('/')
-        .map((part, index) => (index === 0 ? part : encodeURIComponent(part)))
-        .join('/')}`
-    }
-    return pathToFileURL(source).href
-  }
+  if (isAbsolute(source) && !source.startsWith('//')) return pathToFileURL(source).href
+  if (win32.isAbsolute(source)) return pathToFileURL(source, { windows: true }).href
   if (/^\.\.?\//.test(source)) {
     throw new TypeError('请使用 new URL(..., import.meta.url) 或绝对路径指定本地文件')
   }

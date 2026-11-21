@@ -46,26 +46,24 @@ describe('logger redaction', () => {
           callback()
         },
       })
-      const path = join(dir, 'logs', 'asabot.log')
+      const logDir = join(dir, 'logs')
+      const path = join(logDir, 'asabot.log')
       const log = createLogger({ destination, pretty: false, file: { path, maxSize: 1, maxFiles: 3 } })
       for (const message of ['one', 'two', 'three', 'four']) log.info(message)
-      expect((await readdir(join(dir, 'logs'))).sort()).toEqual([
-        'asabot.log',
-        'asabot.log.1',
-        'asabot.log.2',
-      ])
+      expect((await readdir(logDir)).sort()).toEqual(['asabot.log', 'asabot.log.1', 'asabot.log.2'])
       expect(JSON.parse(await readFile(path, 'utf8')).msg).toBe('four')
       expect(JSON.parse(await readFile(`${path}.1`, 'utf8')).msg).toBe('three')
       expect(JSON.parse(await readFile(`${path}.2`, 'utf8')).msg).toBe('two')
       const broken = createLogger({
         destination,
         pretty: false,
-        file: { path: dir, maxSize: 1, maxFiles: 2 },
+        file: { path: logDir, maxSize: 1, maxFiles: 2 },
       })
       broken.info('still written')
       await new Promise<void>((resolve) => queueMicrotask(resolve))
       expect(output).toContain('still written')
       expect(output).toContain('Log file write or rotation failed')
+      expect(await readdir(dir)).toEqual(['logs'])
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

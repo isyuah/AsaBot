@@ -16,6 +16,7 @@ describe('media sources', () => {
     ['Windows path', 'C:\\cats\\a b.png', 'file:///C:/cats/a%20b.png'],
     ['Windows slash path', 'C:/cats/a b.png', 'file:///C:/cats/a%20b.png'],
     ['UNC path', '\\\\server\\share\\cat.png', 'file://server/share/cat.png'],
+    ['UNC slash path', '//server/share/cat.png', 'file://server/share/cat.png'],
     ['platform id', 'resource-id.png', 'resource-id.png'],
   ]
   it.each(cases)('uses %s consistently for all media', (_label, source, expected) => {

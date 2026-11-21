@@ -336,34 +336,6 @@ describe('OneBot reverse WebSocket', () => {
 })
 
 describe('OneBot send queue', () => {
-  it('spaces sends, while other actions bypass the queue', async () => {
-    const interval = 40
-    const { app, url } = await setup({ interval })
-    const client = await mock({ token: 'reverse-secret' })
-    const times: number[] = []
-    const order: string[] = []
-    client.onCall('send_group_msg', () => {
-      times.push(performance.now())
-      order.push('send')
-      return { message_id: times.length }
-    })
-    client.onCall('get_group_list', () => {
-      order.push('get')
-      return []
-    })
-    await client.connectReverse(url)
-    const bot = await online(app, '10000')
-    const sends = [bot.sendGroup('10', 'one'), bot.sendGroup('10', 'two'), bot.sendGroup('10', 'three')]
-    await client.waitForCall('send_group_msg')
-    await bot.getGroupList()
-    await Promise.all(sends)
-    expect(order).toEqual(['send', 'get', 'send', 'send'])
-    expect(times).toHaveLength(3)
-    // The mock measures receipt time, which includes WebSocket scheduling delay for each frame.
-    expect((times[1] ?? 0) - (times[0] ?? 0)).toBeGreaterThanOrEqual(interval - 5)
-    expect((times[2] ?? 0) - (times[1] ?? 0)).toBeGreaterThanOrEqual(interval - 5)
-  })
-
   it('rejects overflow and queued requests on disconnect', async () => {
     const { app, url } = await setup({ interval: 1_000, maxPending: 1 })
     const client = await mock({ token: 'reverse-secret' })

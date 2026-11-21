@@ -122,7 +122,9 @@ class RotatingFile {
       const { path, maxSize, maxFiles } = this.options
       if (!this.initialized) {
         mkdirSync(dirname(path), { recursive: true })
-        this.size = existsSync(path) ? statSync(path).size : 0
+        const existing = statSync(path, { throwIfNoEntry: false })
+        if (existing && !existing.isFile()) throw new Error('Log path must point to a regular file')
+        this.size = existing?.size ?? 0
         this.initialized = true
       }
       const length = Buffer.byteLength(chunk)
