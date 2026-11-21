@@ -400,7 +400,8 @@ function PrimitiveControl({
   if (choices) {
     return (
       <Select
-        aria-label={id}
+        id={id}
+        aria-invalid={invalid}
         className="w-full"
         value={value === undefined ? undefined : String(value)}
         onValueChange={(next) =>
@@ -413,7 +414,8 @@ function PrimitiveControl({
   if (schema.enum) {
     return (
       <Select
-        aria-label={id}
+        id={id}
+        aria-invalid={invalid}
         className="w-full"
         value={value === undefined ? undefined : String(value)}
         onValueChange={(next) => onChange(schema.enum?.find((option) => String(option) === next))}
