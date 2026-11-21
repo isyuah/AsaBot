@@ -203,9 +203,27 @@ export default definePlugin({
 | `ctx.send`、`ctx.broadcast` | 向指定平台和会话主动发送或批量发送 |
 | `ctx.beforeSend`、`ctx.interceptApi` | 处理出站消息或拦截 Bot API 调用 |
 | `ctx.provide`、`ctx.provideScoped`、`ctx.inject`、`ctx.injectOptional` | 提供共享或按调用方绑定的服务，或注入已声明的服务 |
+| `ctx.plugins.list()`、`ctx.plugins.get(name)` | 查询已发现插件的只读目录快照 |
 | `ctx.dataDir`、`ctx.signal`、`ctx.onDispose(fn)` | 插件数据目录、卸载信号、自定义清理函数 |
 
 观察者、命令、中间件、匹配器和定时任务随插件卸载自动回收。事件处理器应配合 `signal` 取消耗时操作；插件代码仍运行在主进程中。
+
+### 选择其他插件
+
+`ctx.plugins.list()` 和 `ctx.plugins.get(name)` 可以查询插件的名称、版本、描述、来源、状态以及提供和依赖的服务。目录包含停用和加载失败的插件；`provides` 只包含当前已注册的服务。`get` 在插件不存在时返回 `undefined`。
+
+配置里的字符串可以在面板中显示为插件选择框。例如，只列出声明使用 `ai` 服务的插件：
+
+```ts
+const config = z.object({
+  plugin: z.string().meta({
+    title: '使用 AI 的插件',
+    'x-asabot-options': { source: 'plugins', consumes: 'ai' },
+  }).optional(),
+})
+```
+
+省略 `consumes` 会列出所有已发现的插件。必需和可选服务依赖都能匹配。全局、机器人和群组配置保存的都是插件名；所选插件卸载后，原值仍保留并标记为不可用。运行时可以用 `ctx.plugins.get(name)` 判断它是否仍在目录中。
 
 ### 插件面板页面
 

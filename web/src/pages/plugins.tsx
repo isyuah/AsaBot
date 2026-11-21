@@ -54,6 +54,7 @@ import { ApiError, api } from '../lib/api.ts'
 import { groupPath } from '../lib/groups.ts'
 import { botPath, invalidatePolicies, pluginPath } from '../lib/management.ts'
 import { isValidId } from '../lib/platform.ts'
+import { usePluginConfigOptions } from '../lib/plugin-config-options.ts'
 import { Link, navigate, usePath } from '../lib/router.tsx'
 import type { BotView, PluginGroupSetting, PluginStateName, PluginView } from '../lib/types.ts'
 import { playgroundDraft } from '../lib/ui-state.ts'
@@ -804,6 +805,7 @@ function normalizeIssues(plugin: string, error: unknown): Record<string, string>
 }
 
 function ConfigTab({ plugin }: { plugin: PluginView }) {
+  const resolveOptions = usePluginConfigOptions()
   const { update } = usePluginMutations()
   const save = useMutation({
     mutationFn: (config: unknown) => api.pluginConfig(plugin.name, config),
@@ -831,6 +833,7 @@ function ConfigTab({ plugin }: { plugin: PluginView }) {
       value={plugin.config}
       issues={save.error ? normalizeIssues(plugin.name, save.error) : {}}
       saving={save.isPending}
+      resolveOptions={resolveOptions}
       onSubmit={(value) => save.mutate(value)}
     />
   )

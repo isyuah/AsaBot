@@ -159,7 +159,13 @@ export type {
   TaskState,
 } from './core/plugin/tasks.ts'
 export { TaskConflictError } from './core/plugin/tasks.ts'
-export type { PanelPageOptions, PluginState, PluginStateEvent, ServiceConsumer } from './core/plugin/types.ts'
+export type {
+  PanelPageOptions,
+  PluginCatalogEntry,
+  PluginState,
+  PluginStateEvent,
+  ServiceConsumer,
+} from './core/plugin/types.ts'
 export type { CooldownScope } from './core/ratelimit.ts'
 export {
   type AccessEntry,

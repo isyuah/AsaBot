@@ -72,16 +72,27 @@ function applyFrame(
         overview ? { ...overview, bots: upsertBot(overview.bots, frame.bot) ?? overview.bots } : overview,
       )
       break
+    case 'plugins-changed':
+      void client.invalidateQueries({ queryKey: ['plugins'] })
+      void client.invalidateQueries({ queryKey: ['pluginCatalog'] })
+      void client.invalidateQueries({ queryKey: ['overview'] })
+      void client.invalidateQueries({ queryKey: ['commands'] })
+      void client.invalidateQueries({ queryKey: ['bot'] })
+      void client.invalidateQueries({ queryKey: ['pluginBots'] })
+      void client.invalidateQueries({ queryKey: ['group'] })
+      break
     case 'plugin': {
       // A plugin the cached list does not know yet (new install, or the list request still in flight
       // when the frame arrived) would be lost by an in-place update, so refetch the list instead.
       const list = client.getQueryData<PluginView[]>(['plugins'])
-      if (list?.some((item) => item.name === frame.plugin.name))
+      const matches = (item: PluginView) => item.name === frame.plugin.name && item.path === frame.plugin.path
+      if (list?.some(matches))
         client.setQueryData<PluginView[]>(
           ['plugins'],
-          list.map((item) => (item.name === frame.plugin.name ? frame.plugin : item)),
+          list.map((item) => (matches(item) ? frame.plugin : item)),
         )
       else void client.invalidateQueries({ queryKey: ['plugins'] })
+      void client.invalidateQueries({ queryKey: ['pluginCatalog'] })
       void client.invalidateQueries({ queryKey: ['overview'] })
       void client.invalidateQueries({ queryKey: ['commands'] })
       void client.invalidateQueries({ queryKey: ['bot'] })

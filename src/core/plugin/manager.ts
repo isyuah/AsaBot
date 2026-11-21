@@ -16,7 +16,7 @@ import { pluginExecution } from './execution.ts'
 import { parsePluginIconUrl, pluginIconFromKeywords } from './icon.ts'
 import { importPlugin, registerPluginRoots } from './loader.ts'
 import { type PackageManifest, type PackageOptions, PackageService, redact } from './packages.ts'
-import type { PluginState, ServiceConsumer } from './types.ts'
+import type { PluginCatalogEntry, PluginState, ServiceConsumer } from './types.ts'
 import { ManagementError, uploadContents } from './upload.ts'
 
 type ServiceEntry = { plugin: string } & (
@@ -45,6 +45,19 @@ function errorMessage(error: unknown): string {
 
 function ignoredEntry(name: string): boolean {
   return name.startsWith('_') || name.startsWith('.') || /\.(?:test|spec)\.|\.d\.ts$/.test(name)
+}
+
+function catalogEntry({ state, manifest }: Entry): PluginCatalogEntry {
+  return {
+    name: state.name,
+    version: state.version ?? manifest?.version,
+    description: state.description ?? manifest?.description,
+    source: state.source,
+    state: state.state,
+    enabled: state.enabled,
+    provides: [...state.provides],
+    inject: state.inject.map((service) => ({ ...service })),
+  }
 }
 
 function validateDefinition(value: unknown): PluginDefinition {
@@ -114,6 +127,7 @@ export class PluginManager {
   private readonly uninstalling = new Set<string>()
   private readonly watchers: FSWatcher[] = []
   private readonly packageUpdateSubscribers = new Set<(state: PluginState) => void>()
+  private readonly listSubscribers = new Set<() => void>()
   private readonly timers = new Map<string, NodeJS.Timeout>()
   private readonly groupConfigCache = new Map<string, unknown>()
   private releaseRoots?: () => void
@@ -185,6 +199,15 @@ export class PluginManager {
   get(name: string): PluginState | undefined {
     const state = this.entries.get(name)?.state
     return state && { ...state }
+  }
+
+  listCatalog(): readonly PluginCatalogEntry[] {
+    return [...this.entries.values()].map(catalogEntry)
+  }
+
+  getCatalogEntry(name: string): PluginCatalogEntry | undefined {
+    const entry = this.entries.get(name)
+    return entry && catalogEntry(entry)
   }
 
   provide(plugin: string, name: string, value: unknown): () => void {
@@ -591,6 +614,7 @@ export class PluginManager {
         this.entries.set(name, entry)
         this.files.set(path, entry)
         await this.reconcile()
+        this.publishListChange()
         throw error
       }
       if (purge) await this.purge(name)
@@ -612,6 +636,22 @@ export class PluginManager {
   subscribePackageUpdates(subscriber: (state: PluginState) => void): () => void {
     this.packageUpdateSubscribers.add(subscriber)
     return () => this.packageUpdateSubscribers.delete(subscriber)
+  }
+
+  /** 发现、移除或重读插件定义；运行状态另由 plugin.state 通知。 */
+  subscribeListChanges(subscriber: () => void): () => void {
+    this.listSubscribers.add(subscriber)
+    return () => this.listSubscribers.delete(subscriber)
+  }
+
+  private publishListChange(): void {
+    for (const subscriber of this.listSubscribers) {
+      try {
+        subscriber()
+      } catch (error) {
+        this.app.logger.error({ err: error }, 'Plugin list subscriber failed')
+      }
+    }
   }
 
   updateConfig(name: string, value: unknown): Promise<void> {
@@ -869,6 +909,7 @@ export class PluginManager {
       if (entry.state.path) this.files.delete(entry.state.path)
       entry.release?.()
     }
+    this.publishListChange()
   }
 
   private async rescanFiles(): Promise<{ added: string[]; removed: string[] }> {
@@ -886,10 +927,12 @@ export class PluginManager {
     if (missing.length) await this.removeEntries(missing)
     for (const dir of this.dirs) await this.discover(dir)
     await this.reconcile()
+    const added = [...this.files]
+      .filter(([path, entry]) => !previous.has(path) && entry.state.source === 'file')
+      .map(([, entry]) => entry.state.name)
+    if (added.length) this.publishListChange()
     return {
-      added: [...this.files]
-        .filter(([path, entry]) => !previous.has(path) && entry.state.source === 'file')
-        .map(([, entry]) => entry.state.name),
+      added,
       removed: missing.map((entry) => entry.state.name),
     }
   }
@@ -999,6 +1042,7 @@ export class PluginManager {
           throw new ManagementError(409, 'Plugin changed during package installation')
         const entry = await this.addPackage(installed, previous)
         await this.reconcile()
+        if (!previous) this.publishListChange()
         return { ...entry.state }
       })
     } catch (error) {
@@ -1329,6 +1373,7 @@ export class PluginManager {
     entry.release = release
     this.metadata(entry)
     await this.reconcile()
+    this.publishListChange()
   }
 
   private async handleChange(dir: string, path: string): Promise<void> {
@@ -1343,18 +1388,7 @@ export class PluginManager {
         removed.push(entry)
       }
     }
-    if (removed.length > 0) {
-      // Reconcile before removing entries so dependents are disposed before their dependencies.
-      for (const entry of removed) entry.state.enabled = false
-      await this.reconcile()
-      for (const entry of removed) {
-        if (this.entries.get(entry.state.name) === entry) this.entries.delete(entry.state.name)
-        const duplicate = this.duplicates.indexOf(entry)
-        if (duplicate !== -1) this.duplicates.splice(duplicate, 1)
-        if (entry.state.path) this.files.delete(entry.state.path)
-        entry.release?.()
-      }
-    }
+    if (removed.length) await this.removeEntries(removed)
     const previous = new Set(this.files.keys())
     await this.discover(dir)
     const affected = [...this.entries.values()].filter(
@@ -1371,6 +1405,7 @@ export class PluginManager {
       }
     }
     await this.reconcile()
+    if (this.files.size !== previous.size) this.publishListChange()
   }
 
   private setState(entry: Entry, state: PluginState['state'], error?: string): void {

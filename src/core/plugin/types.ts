@@ -42,6 +42,18 @@ export interface PluginState {
   capabilities?: CapabilityRequirements
 }
 
+/** 已发现插件的公开目录条目，不包含路径、配置和错误详情。 */
+export interface PluginCatalogEntry {
+  readonly name: string
+  readonly version?: string
+  readonly description?: string
+  readonly source: PluginState['source']
+  readonly state: PluginState['state']
+  readonly enabled: boolean
+  readonly provides: readonly string[]
+  readonly inject: readonly Readonly<PluginState['inject'][number]>[]
+}
+
 // Framework events can be emitted before an adapter has registered a Bot.
 /** 插件状态变化事件；机器人可能尚未上线，bot 因而可缺省。 */
 export interface PluginStateEvent extends Omit<BaseEvent, 'bot'> {

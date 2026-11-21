@@ -37,7 +37,7 @@ import { type Duration, parseDuration } from '../utils/duration.ts'
 import { type PluginDefinition, serviceDependencies } from './definition.ts'
 import { pluginExecution } from './execution.ts'
 import { PersistentTasks, type TaskHandle, type TaskHandler, type TaskRegistrationOptions } from './tasks.ts'
-import type { PanelPageOptions, PluginStateEvent, ServiceConsumer } from './types.ts'
+import type { PanelPageOptions, PluginCatalogEntry, PluginStateEvent, ServiceConsumer } from './types.ts'
 
 type Listener = (event: AnyEvent | PluginStateEvent, signal: AbortSignal) => unknown | Promise<unknown>
 type PublicListener = Listener | ((event: never, signal: AbortSignal) => unknown | Promise<unknown>)
@@ -62,6 +62,18 @@ export class Context<Config = undefined> {
   private routeApp?: Hono
   private panelRouteApp?: Hono
   private disposed = false
+
+  /** 查询插件目录；每次调用返回当前快照，包含停用或加载失败的插件。 */
+  readonly plugins = {
+    list: (): readonly PluginCatalogEntry[] => {
+      this.assertActive()
+      return this.app.plugins.listCatalog()
+    },
+    get: (name: string): PluginCatalogEntry | undefined => {
+      this.assertActive()
+      return this.app.plugins.getCatalogEntry(name)
+    },
+  }
 
   /** 注册插件面板页面、认证接口和实时事件；资源随插件卸载回收。 */
   readonly panel = {

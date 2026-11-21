@@ -95,6 +95,11 @@ export interface PluginView {
   page?: { title: string; icon?: string }
 }
 
+export type PluginCatalogEntry = Pick<
+  PluginView,
+  'name' | 'version' | 'description' | 'source' | 'state' | 'enabled' | 'provides' | 'inject'
+>
+
 export interface PackageInfo {
   name: string
   version: string
@@ -338,6 +343,7 @@ export type ServerFrame =
   | { type: 'log'; record: LogRecord }
   | { type: 'bot'; bot: BotView }
   | { type: 'plugin'; plugin: PluginView }
+  | { type: 'plugins-changed' }
   | ({ type: 'message' } & LiveMessage)
   | { type: 'stats'; point: StatsPoint }
   | { type: 'package'; operation: PackageOperation }

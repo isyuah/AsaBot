@@ -461,6 +461,7 @@ export default definePlugin({
 | `ctx.dataDir` | `data/plugins/<name>/`，首次访问时创建 |
 | `ctx.signal` / `ctx.onDispose(fn)` | 插件卸载时 abort；登记自定义清理逻辑 |
 | `ctx.route(...)` | M5：挂载 `/plugins/<name>/*` HTTP 路由 |
+| `ctx.plugins.list()` / `ctx.plugins.get(name)` | 读取插件目录快照，仅含公开元数据和服务声明 |
 
 **生命周期与状态**：`loading → active | failed`，`active → disposing → disabled`。setup 失败（抛异常、配置校验失败、命令冲突、依赖缺失）时，回收它已注册的资源，标记为 `failed` 并记录原因，其他插件不受影响。卸载按依赖的逆序进行。
 
@@ -495,6 +496,7 @@ export default definePlugin({
 **名称与发现**
 - `definePlugin` 中的 `name` 是插件的权威名称，同名插件重复出现时，后发现的那个标记为 `failed`。
 - 热重载通过“入口文件路径 → 插件名”的映射定位插件。
+- 插件目录只取每个名称的唯一条目，包含停用和加载失败的插件，不含配置、路径和错误详情；`provides` 表示当前注册的服务。配置表单使用同一个目录解析字符串字段上的 `x-asabot-options: { source: 'plugins', consumes?: string }`；`consumes` 匹配必需或可选依赖，保存时保留插件名和已失效的旧值。
 
 **按群开关与黑白名单**（替换 M2 中的默认钩子）
 - 群的标识 `groupKey` 为 `${platform}:${selfId}:group:${groupId}`，隶属于指定机器人。私聊事件不受按群开关影响。带 groupId 的通知事件同样受按群开关约束。
@@ -621,6 +623,7 @@ type Target = { type: 'group' | 'private'; id: string }
 | `GET /bots/:platform/:selfId/groups` | `{ groupId, groupName, memberCount? }[]`（实时调用平台 API） |
 | `POST /send` | `{ platform?, selfId?, target: Target, message: string \| Segment[] }` → `{ messageId }`。不指定 Bot 时使用第一个在线的 |
 | `GET /plugins` | `PluginView[]` |
+| `GET /plugin-catalog` | 与 `ctx.plugins.list()` 相同的目录，供配置下拉选项使用 |
 | `GET /plugins/:name/readme` | 读取已安装 npm 插件随包附带的 README，返回 `{ readme?: string }`；文档缺失时省略 `readme` |
 | `POST /plugins/:name/enable` / `disable` / `reload` | 返回最新的 `PluginView`；失败（例如 admin 不允许停用）返回 409 和原因 |
 | `PUT /plugins/:name/bot-default` | `{ defaultOnNewBots: boolean }`。设置新机器人的初始开关，返回最新的 `PluginView` |
@@ -636,6 +639,7 @@ type Target = { type: 'group' | 'private'; id: string }
 - `{ type: 'log', record: LogRecord }`
 - `{ type: 'bot', bot: BotView }`：上线、掉线、状态变化
 - `{ type: 'plugin', plugin: PluginView }`：插件状态变化
+- `{ type: 'plugins-changed' }`：插件发现、移除或定义重读，面板重新查询插件列表和目录
 - `{ type: 'message', direction: 'in' | 'out', platform, selfId, channel: Target, userId?, nickname?, avatar?, preview: string, time }`（avatar：收到的消息取发送者头像，发出的消息取机器人自己的头像，均来自 `bot.getAvatarUrl`）：用于面板的实时消息流，preview 为纯文本摘要，最长 120 字
 - `{ type: 'stats', point: StatsPoint }`：每分钟一次，推送刚结束的那一分钟
 - 连接建立后，服务端先推送一帧 `{ type: 'hello', overview }`。客户端不发送业务消息；服务端每 30s ping 一次。

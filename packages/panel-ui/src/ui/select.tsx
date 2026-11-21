@@ -6,6 +6,7 @@ import { cn } from '../utils.ts'
 export interface SelectOption<V extends string> {
   value: V
   label: ReactNode
+  disabled?: boolean
 }
 
 const optionKey = (value: string) => `:${value}`
@@ -73,7 +74,8 @@ export function Select<V extends string>({
               <SelectPrimitive.Item
                 key={option.value}
                 value={optionKey(option.value)}
-                className="relative flex min-h-8 cursor-pointer items-center rounded-md py-1.5 pr-8 pl-2.5 text-[13px] leading-snug wrap-anywhere text-fg-2 outline-none select-none data-[highlighted]:bg-accent-soft data-[highlighted]:text-accent-soft-fg data-[state=checked]:font-medium"
+                disabled={option.disabled}
+                className="relative flex min-h-8 cursor-pointer items-center rounded-md py-1.5 pr-8 pl-2.5 text-[13px] leading-snug wrap-anywhere text-fg-2 outline-none select-none data-[disabled]:cursor-not-allowed data-[disabled]:text-fg-3 data-[highlighted]:bg-accent-soft data-[highlighted]:text-accent-soft-fg data-[state=checked]:font-medium"
               >
                 <SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText>
                 <SelectPrimitive.ItemIndicator className="absolute top-1/2 right-2.5 -translate-y-1/2">

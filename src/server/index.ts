@@ -715,6 +715,7 @@ export class HttpServer implements ServerService {
       )
     })
     panel.post('/send', async (c) => c.json(await this.send(await body(c, sendSchema))))
+    panel.get('/plugin-catalog', (c) => c.json(this.app.plugins.listCatalog()))
     panel.get('/plugins', (c) =>
       c.json(this.app.plugins.list().map((plugin) => pluginView(this.app, plugin))),
     )
@@ -999,6 +1000,9 @@ export class HttpServer implements ServerService {
     const unsubscribePackageUpdates = this.app.plugins.subscribePackageUpdates((plugin) =>
       push({ type: 'plugin', plugin: pluginView(this.app, plugin) }),
     )
+    const unsubscribePluginList = this.app.plugins.subscribeListChanges(() =>
+      push({ type: 'plugins-changed' }),
+    )
     const unsubscribeEvents = this.app.subscribeDispatch((event) => {
       const frame = this.eventFrame(event)
       if (frame) push(frame)
@@ -1038,6 +1042,7 @@ export class HttpServer implements ServerService {
       unsubscribeLogs()
       unsubscribePackages()
       unsubscribePackageUpdates()
+      unsubscribePluginList()
       unsubscribeEvents()
       unsubscribePanelEvents()
       unsubscribeTasks()

@@ -23,6 +23,7 @@ import type {
   PlaygroundEventRequest,
   PlaygroundRequest,
   PlaygroundResult,
+  PluginCatalogEntry,
   PluginGroupSetting,
   PluginView,
   Session,
@@ -159,6 +160,8 @@ export const api = {
   group: (groupKey: string) => request<GroupDetail>('GET', `/groups/${encode(groupKey)}`),
 
   plugins: () => request<PluginView[]>('GET', '/plugins'),
+  pluginCatalog: (signal: AbortSignal) =>
+    request<PluginCatalogEntry[]>('GET', '/plugin-catalog', undefined, signal),
   pluginReadme: (name: string) => request<{ readme?: string }>('GET', `/plugins/${encode(name)}/readme`),
   pluginAction: (name: string, action: 'enable' | 'disable' | 'reload') =>
     request<PluginView>('POST', `/plugins/${encode(name)}/${action}`, {}),
