@@ -203,4 +203,5 @@ import { MockOneBot } from '@asabot/core/onebot11/testing'
 - 依赖其他插件用 `depends`；使用服务用 `inject.required` / `inject.optional`。
 - 声明平台能力需求用 `capabilities`，它用于面板提示，不阻止启用。
 - 配置 schema 新增字段要带默认值；删除或重命名字段时保留可选旧字段或给出兼容处理，避免旧配置校验失败。配置本身没有迁移机制，真正的数据迁移走 `ctx.migrate`。
+- 声明 `credentials` 的插件，卸载默认保留凭据，清除插件数据（purge）时删除；备份数据时连同 `data/plugin-credentials.key` 一起备份。
 - 插件状态 `failed` 时先看面板里的错误和日志；常见原因是命令冲突、配置校验失败和缺失的依赖服务。

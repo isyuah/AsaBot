@@ -56,6 +56,7 @@ npm 包的结构、构建和 `package.json` 见 [package.md](package.md)。
 | `depends` | 必须先加载的插件名 |
 | `inject` | 必需或可选的服务：`['http']` 或 `{ required: [], optional: [] }` |
 | `capabilities` | 平台能力需求，只用于面板兼容性提示 |
+| `credentials` | 面板管理的凭据用途：`{ groupId: { title, description? } }` |
 | `defaultOnNewBots` | 新机器人上的初始开关，默认关闭 |
 | `setup(ctx)` | 注册资源，可以是 async |
 
@@ -89,6 +90,8 @@ npm 包的结构、构建和 `package.json` 见 [package.md](package.md)。
 | 面板页面 | `ctx.panel.page` + `route` + `push` | 沙箱 iframe，数据走认证接口，见 [panel-ui.md](panel-ui.md) |
 | 出站改写 | `ctx.beforeSend(fn)` | 可修改、拦截或接管发送 |
 | 平台 API 拦截 | `ctx.interceptApi(fn)` | 按优先级执行，可改参数或结果 |
+| 查询插件目录 | `ctx.plugins.list()` / `ctx.plugins.get(name)` | 只读快照，包含停用和失败插件 |
+| 插件凭据 | `ctx.credentials.list/readAll/match/bearer` | 先在定义里声明 `credentials`，按插件隔离 |
 
 ## 常用配方
 
@@ -236,6 +239,64 @@ export default definePlugin({
 - 覆盖按「全局原始输入 → 机器人 → 当前机器人的群」递归合并；对象逐字段合并，数组整体替换，最后执行 schema。
 - 保存父级配置前会校验所有受影响的子级，任何一个失败都不写入。
 
+字符串字段可以显示为插件选择框：
+
+```ts
+const config = z.object({
+  plugin: z.string().meta({
+    title: '使用的 AI 插件',
+    'x-asabot-options': { source: 'plugins', consumes: 'ai' },
+  }).optional(),
+})
+```
+
+- `consumes` 匹配必需或可选服务；省略时列出所有已发现插件。
+- 保存的是插件名；所选插件卸载后原值保留，面板会标记为不可用。
+- 运行时用 `ctx.plugins.get(name)` 判断插件是否仍在目录中。
+
+### 查询其他插件
+
+```ts
+const catalog = ctx.plugins.list()
+const ai = ctx.plugins.get('ai')
+if (ai?.state === 'active') {
+  // 使用 ai 插件
+}
+```
+
+- 返回名称、版本、描述、来源、状态以及提供和依赖的服务；不含配置、路径和错误详情。
+- 目录包含停用和加载失败的插件；`provides` 只包含当前已注册的服务。
+- `get` 在插件不存在时返回 `undefined`。
+
+### 插件凭据
+
+需要 API key、webhook secret 等敏感值时，在插件定义中声明用途，然后通过 `ctx.credentials` 读取。不要写进配置 schema 或日志。
+
+```ts
+export default definePlugin({
+  name: 'incoming-hook',
+  credentials: {
+    webhook: { title: 'Webhook', description: '调用 /notify 时放在 Authorization: Bearer 中' },
+  },
+  setup(ctx) {
+    ctx.route((app) =>
+      app.post('/notify', async (c) => {
+        if (!ctx.credentials.bearer(c.req.raw, { group: 'webhook' }))
+          return c.json({ error: 'Invalid credential' }, 401)
+        return c.body(null, 204)
+      }),
+    )
+  },
+})
+```
+
+- 面板会为每个用途显示生成、导入、查看和撤销入口；生成值是 32 字节随机值的 base64url 编码。
+- `list()` 返回有效凭据的元数据；`readAll({ group })` 返回原值，适合 HMAC；`match(value, { group })` 做安全比较；`bearer(request, { group })` 解析标准 Bearer 头。
+- 凭据用 AES-GCM 加密后存入 SQLite，主密钥保存在 `data/plugin-credentials.key`；备份时要一起保留。
+- 移除用途不会删除凭据，只会停用；`/plugin uninstall` 默认保留凭据，清除插件数据（purge）时删除。
+- 凭据保护数据库和面板默认响应，不隔离同进程的插件代码。
+- 完整的部署密钥和 GitHub HMAC 验签示例见 `plugins/_examples/release-notifier.ts`。
+
 ### 主动发送与查找 Bot
 
 ```ts
@@ -276,6 +337,8 @@ await writeFile(join(ctx.dataDir, 'snapshot.json'), JSON.stringify(data))
 | 注入服务报 `PluginError` | 没在 `inject` 里声明 | 在插件定义里声明必需或可选服务 |
 | 多轮对话收不到回复 | 回复被 prompt 消费 | 这是设计行为；旁路逻辑放观察者 |
 | 群内命令不触发 | 插件在该群或该机器人上未启用 | 检查 `/plugin on <name>` 和机器人插件开关 |
+| 凭据读取为空 | 没有声明 `credentials`，或面板里还没生成 | 先声明用途，再在面板生成或导入 |
+| 配置里的插件选择失效 | 所选插件已卸载或停用 | 值会保留；用 `ctx.plugins.get(name)` 判断并降级 |
 
 ## 下一步
 

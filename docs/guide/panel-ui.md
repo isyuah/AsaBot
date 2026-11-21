@@ -227,6 +227,7 @@ export function App() {
 
 ## 表单与可访问性
 
+- 配置 schema 的字符串字段可以用 `x-asabot-options: { source: 'plugins', consumes?: string }` 让面板渲染插件选择框；写法见 [plugin.md](plugin.md#配置)，插件端不用自己写选择组件。
 - 用 `Field` 包标签、提示和错误，`htmlFor` 关联控件 `id`。
 - `Select` 的 `undefined` 显示占位文本，`''` 是真实选项（例如「全部」）。
 - `DatePicker` 用 `YYYY-MM-DD`，清空时回传 `undefined`；按 UTC 筛选时传 `timeZone="UTC"`。

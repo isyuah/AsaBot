@@ -13,6 +13,8 @@
 | 存数据 | [plugin.md](plugin.md#kv-与迁移) |
 | 定时任务和持久任务 | [plugin.md](plugin.md#定时与持久任务) |
 | 提供服务或使用别人的服务 | [plugin.md](plugin.md#服务) |
+| 查询其他插件或做插件选择框 | [plugin.md](plugin.md#查询其他插件) |
+| 管理 webhook、API key 等凭据 | [plugin.md](plugin.md#插件凭据) |
 | 给插件加面板页 | [panel-ui.md](panel-ui.md) |
 | 面板页的动效 | [motion.md](motion.md) |
 | 测试、打包、发布 | [package.md](package.md) |
@@ -58,6 +60,7 @@ export default definePlugin({
 
 - `plugins/echo.ts`：配置 schema、命令选项、冷却、成员加入事件。
 - `plugins/guess.ts`：多轮对话、`store` 读写、子命令。
+- `plugins/_examples/release-notifier.ts`：插件凭据、Bearer 鉴权、GitHub HMAC 验签。
 - `packages/create/templates/plugin/`：可发布 npm 包的完整结构。
 
 ## 插件作者需要遵守的规则
@@ -66,6 +69,7 @@ export default definePlugin({
 - 只从 `@asabot/core` 导入框架和 zod；平台专属能力从 `@asabot/core/onebot11` 等子路径导入，并用类型守卫判断。
 - 不吞异常。框架会记录命令、事件和定时任务的异常；自己管理的异步流程要 catch，并用 `ctx.logger` 记录上下文；耗时操作响应 `ctx.signal`。
 - 日志和错误信息不出现 token、密码或带 `access_token` 的 URL。
+- 敏感值用 `credentials` 声明和 `ctx.credentials` 读取，不要写进插件配置或日志。
 - 面板页静态文件公开，不放敏感数据；数据通过 `ctx.panel.route` 提供。
 - npm 包把 `@asabot/core` 声明为 `peerDependencies`，不要打进产物。
 
