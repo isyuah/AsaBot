@@ -162,6 +162,8 @@ curl -X POST http://127.0.0.1:5140/api/v1/send \
 
 ## 开发插件
 
+面向插件作者的分步指南（插件功能、面板 UI、动效、测试与发布）见 [开发指南](docs/guide/README.md)。
+
 ### 最小插件
 
 在 `plugins/hello.ts` 中编写：
