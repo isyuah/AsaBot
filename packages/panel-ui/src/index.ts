@@ -22,6 +22,7 @@ export type {
   TraceStep,
 } from './types.ts'
 export { Button, type ButtonProps } from './ui/button.tsx'
+export { DatePicker, type DatePickerProps } from './ui/date-picker.tsx'
 export { Dialog, Sheet } from './ui/dialog.tsx'
 export { Field, Input, Textarea } from './ui/input.tsx'
 export {

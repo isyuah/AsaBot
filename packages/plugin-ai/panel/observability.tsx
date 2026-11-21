@@ -1,4 +1,4 @@
-import { Badge, Button, Card, Dialog, EmptyState, Field, Input, Sheet } from '@asabot/panel-ui'
+import { Badge, Button, Card, DatePicker, Dialog, EmptyState, Field, Input, Sheet } from '@asabot/panel-ui'
 import { Activity, ChevronLeft, ChevronRight, ClipboardList, RefreshCw } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
 import {
@@ -59,21 +59,21 @@ function Filters({
         }}
       >
         <Field label="开始日期（UTC）" htmlFor={`${form}-from`}>
-          <Input
+          <DatePicker
             id={`${form}-from`}
-            type="date"
-            value={draft.from ?? ''}
-            max={draft.to || undefined}
-            onChange={(event) => setDraft({ ...draft, from: event.target.value || undefined })}
+            value={draft.from}
+            max={draft.to}
+            timeZone="UTC"
+            onValueChange={(from) => setDraft({ ...draft, from })}
           />
         </Field>
         <Field label="结束日期（UTC）" htmlFor={`${form}-to`}>
-          <Input
+          <DatePicker
             id={`${form}-to`}
-            type="date"
-            value={draft.to ?? ''}
-            min={draft.from || undefined}
-            onChange={(event) => setDraft({ ...draft, to: event.target.value || undefined })}
+            value={draft.to}
+            min={draft.from}
+            timeZone="UTC"
+            onValueChange={(to) => setDraft({ ...draft, to })}
           />
         </Field>
         <Field label="来源" htmlFor={`${form}-source`}>
