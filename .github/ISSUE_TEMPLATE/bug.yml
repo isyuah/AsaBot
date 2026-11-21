@@ -1,0 +1,51 @@
+name: Bug report
+description: Report unexpected behavior in AsaBot
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: AsaBot version
+      placeholder: For example, 0.2.0, a container image tag, or a Git commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation method
+      options:
+        - Docker / Compose
+        - npm
+        - From source
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Affected platform
+      options:
+        - OneBot 11
+        - Feishu
+        - WeCom
+        - WeChat ClawBot
+        - Other / Not platform-specific
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: List the steps to reproduce the issue, including any relevant setup.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Actual and expected behavior
+      description: What happened? What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Additional information
+      description: Include relevant logs, screenshots, or system versions. Remove credentials and private messages before sharing.
