@@ -1,8 +1,13 @@
 {
   "name": "@asabot/plugin-render",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "AsaBot 官方出图插件：把 HTML、Markdown、文本渲染成图片（satori + resvg，可选浏览器后端）",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/isyuah/AsaBot.git",
+    "directory": "packages/plugin-render"
+  },
   "keywords": [
     "asabot-plugin",
     "asabot",

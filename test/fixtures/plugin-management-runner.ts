@@ -335,7 +335,7 @@ try {
     name: 'asabot-m8-e2e',
     version: '2.0.0',
     latest: '2.0.0',
-    peerRange: '^0.1.0',
+    peerRange: '^0.2.0',
     compatible: true,
   })
   assert.equal(pluginList.find((plugin) => plugin.name === 'm8-npm')?.removable, true)

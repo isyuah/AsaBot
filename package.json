@@ -1,8 +1,12 @@
 {
   "name": "@asabot/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "协议无关的 TypeScript 聊天机器人框架，内置 Web 面板、任务中心及 OneBot 11、飞书、企业微信、微信 ClawBot 适配器",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/isyuah/AsaBot.git"
+  },
   "type": "module",
   "engines": {
     "node": ">=24"
@@ -59,6 +63,8 @@
     "dist",
     "web/dist",
     "README.md",
+    "CHANGELOG.md",
+    "docs/DEPLOY.md",
     "docs/FEISHU.md",
     "docs/WECOM.md",
     "docs/WEIXIN-CLAWBOT.md",

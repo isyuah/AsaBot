@@ -151,3 +151,40 @@ server {
 数据目录包含 `asabot.db`、SQLite 的 WAL 文件以及插件数据。备份前先停止 AsaBot，再备份整个数据目录、用户插件和实际使用的配置文件；环境变量和 `.env` 应单独安全保存。恢复时使用对应的数据、插件和配置，并确保容器用户有正确的读写权限。
 
 升级前先停止服务并完成备份。更新仓库代码后，直接运行方式执行 `pnpm install --frozen-lockfile` 和 `pnpm --filter web build` 再启动；Compose 方式执行 `docker compose up -d --build`。升级后检查日志、`/healthz`、面板和 OneBot 连接。升级时保留原有数据挂载，不要清理数据卷。
+
+### 从 0.1.x 迁移群规则
+
+旧群规则只记录平台和群号，例如 `onebot11:20000`，新版要求指定机器人，例如 `onebot11:10000:group:20000`。若设置过群插件开关、群配置覆盖或群命令开关，停服并备份后，用 SQLite 工具打开实际使用的 `data/asabot.db`。将下例的 `10000` 改为你的机器人 QQ 号，然后在同一连接中执行。如果原来多台机器人共用规则，在 `migration_bots` 中为每台机器人加一行；调试台的群规则对应 `virtual` 平台。
+
+```sql
+BEGIN IMMEDIATE;
+CREATE TEMP TABLE migration_bots (platform TEXT, self_id TEXT, PRIMARY KEY (platform, self_id));
+INSERT INTO migration_bots VALUES ('onebot11', '10000');
+
+CREATE TEMP VIEW migration_group_keys AS
+  WITH keys AS (
+    SELECT group_key FROM plugin_group_state
+    UNION SELECT group_key FROM plugin_group_config
+    UNION SELECT group_key FROM command_group_state
+  )
+  SELECT group_key AS old_key,
+         platform || ':' || self_id || ':group:' || substr(group_key, instr(group_key, ':') + 1) AS new_key
+  FROM keys JOIN migration_bots ON platform = substr(group_key, 1, instr(group_key, ':') - 1)
+  WHERE group_key NOT GLOB '*:*:group:*';
+
+INSERT OR IGNORE INTO plugin_group_state
+  SELECT plugin, new_key, enabled FROM plugin_group_state JOIN migration_group_keys ON group_key = old_key;
+INSERT OR IGNORE INTO plugin_group_config
+  SELECT plugin, new_key, config FROM plugin_group_config JOIN migration_group_keys ON group_key = old_key;
+INSERT OR IGNORE INTO command_group_state
+  SELECT command, new_key, enabled FROM command_group_state JOIN migration_group_keys ON group_key = old_key;
+
+DELETE FROM plugin_group_state WHERE group_key IN (SELECT old_key FROM migration_group_keys);
+DELETE FROM plugin_group_config WHERE group_key IN (SELECT old_key FROM migration_group_keys);
+DELETE FROM command_group_state WHERE group_key IN (SELECT old_key FROM migration_group_keys);
+DROP VIEW migration_group_keys;
+DROP TABLE migration_bots;
+COMMIT;
+```
+
+对旧规则涉及的每个平台都指定机器人后再启动。访问控制列表（黑名单和白名单）仍按平台生效，无需迁移。升级后打开「群组」核对规则归属。

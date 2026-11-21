@@ -4,6 +4,11 @@
   "description": "AsaBot 控制台和插件页面共用的 React 组件与主题",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/isyuah/AsaBot.git",
+    "directory": "packages/panel-ui"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./markdown": "./src/markdown.tsx",

@@ -2,6 +2,8 @@
 
 AsaBot 是一个协议无关的 TypeScript 聊天机器人框架，支持 OneBot 11、飞书、企业微信和微信 ClawBot。
 
+[更新记录与升级指南](CHANGELOG.md)
+
 ## 特性
 
 - 协议无关：每个适配器可以配置多条独立连接。
@@ -140,7 +142,7 @@ curl -X POST http://127.0.0.1:5140/api/v1/send \
   "type": "module",
   "keywords": ["asabot-plugin"],
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
-  "peerDependencies": { "@asabot/core": "^0.1.0" }
+  "peerDependencies": { "@asabot/core": "^0.2.0" }
 }
 ```
 
