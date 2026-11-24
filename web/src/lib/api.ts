@@ -116,6 +116,8 @@ export const api = {
   bots: () => request<BotView[]>('GET', '/bots'),
   bot: (bot: Pick<BotView, 'platform' | 'selfId'>) =>
     request<BotDetail>('GET', `/bots/${encode(bot.platform)}/${encode(bot.selfId)}`),
+  botAlias: (bot: Pick<BotView, 'platform' | 'selfId'>, alias: string | null) =>
+    request<BotView>('PUT', `/bots/${encode(bot.platform)}/${encode(bot.selfId)}/alias`, { alias }),
   botAdmins: (bot: Pick<BotView, 'platform' | 'selfId'>, admins: string[]) =>
     request<{ admins: string[] }>('PUT', `/bots/${encode(bot.platform)}/${encode(bot.selfId)}/admins`, {
       admins,

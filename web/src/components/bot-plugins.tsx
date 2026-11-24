@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, Settings2 } from 'lucide-react'
 import { useState } from 'react'
 import { api } from '../lib/api.ts'
-import { invalidatePolicies, pluginPath } from '../lib/management.ts'
+import { botDisplayName, invalidatePolicies, pluginPath } from '../lib/management.ts'
 import { Link } from '../lib/router.tsx'
 import type { BotPluginView, BotView } from '../lib/types.ts'
 import { ScopedConfig } from './scoped-config.tsx'
@@ -83,7 +83,7 @@ function BotPlugin({
             </Button>
           )}
           <Switch
-            aria-label={`在 ${bot.nickname ?? bot.selfId} 上启用 ${plugin.name}`}
+            aria-label={`在 ${botDisplayName(bot)} 上启用 ${plugin.name}`}
             checked={plugin.overrideEnabled ?? plugin.botDefaultEnabled}
             disabled={toggle.isPending}
             onCheckedChange={(enabled) => toggle.mutate(enabled)}

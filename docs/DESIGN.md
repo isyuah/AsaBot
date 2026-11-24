@@ -609,7 +609,7 @@ t.app; t.mock; await t.dispose()
 **面板 API**（前缀 `/api/panel`，下面的类型就是契约，前后端都按它实现）
 
 ```ts
-type BotView = { platform: string; selfId: string; nickname?: string; avatar?: string; status: 'connecting' | 'online' | 'offline'; connection: string; connectionId?: string; capabilities?: BotCapabilities; lastOnlineAt?: number }
+type BotView = { platform: string; selfId: string; alias?: string; nickname?: string; avatar?: string; status: 'connecting' | 'online' | 'offline'; connection: string; connectionId?: string; capabilities?: BotCapabilities; lastOnlineAt?: number }
 type PluginView = PluginState & { hasCredentials: boolean; commands: CommandView[]; config?: unknown }   // PluginState 见 12.1；hasCredentials 只告知详情页是否显示凭据管理入口，不暴露凭据用途或原值
 type PluginCredentialInfo = { id: string; group: string; label: string; createdAt: number; active: boolean }
 type CommandView = { owner: string; path: string; usage: string; description: string; aliases: string[]; options: { flags: string[]; description?: string; default?: unknown }[]; examples: string[]; permission: boolean; scope: 'all' | 'group' | 'private'; hidden: boolean }
@@ -623,6 +623,7 @@ type Target = { type: 'group' | 'private'; id: string }
 | `GET /overview` | `{ version, node, startedAt, memory: { rss, heapUsed }, bots: BotView[], plugins: { active, failed, disabled }, today: { received, sent } }` |
 | `GET /stats/messages?range=1h\|24h` | `StatsPoint[]`。1h 按分钟（60 个点），24h 按 15 分钟聚合（96 个点）；没有消息的时段补 0。统计在内存中，保留 24 小时 |
 | `GET /bots` | `BotView[]` |
+| `PUT /bots/:platform/:selfId/alias` | `{ alias: string \| null }`。为已识别的账号设置别名（去掉首尾空白后最多 80 个字符），`null` 清除；返回最新的 `BotView` |
 | `GET /bots/:platform/:selfId/groups` | `{ groupId, groupName, memberCount? }[]`（实时调用平台 API） |
 | `POST /send` | `{ platform?, selfId?, target: Target, message: string \| Segment[] }` → `{ messageId }`。不指定 Bot 时使用第一个在线的 |
 | `GET /plugins` | `PluginView[]` |
@@ -644,7 +645,7 @@ type Target = { type: 'group' | 'private'; id: string }
 
 **实时推送** `GET /api/panel/ws`（升级为 WebSocket）。服务端推送 JSON 帧：
 - `{ type: 'log', record: LogRecord }`
-- `{ type: 'bot', bot: BotView }`：上线、掉线、状态变化
+- `{ type: 'bot', bot: BotView }`：上线、掉线、状态或别名变化
 - `{ type: 'plugin', plugin: PluginView }`：插件状态变化
 - `{ type: 'plugins-changed' }`：插件发现、移除或定义重读，面板重新查询插件列表和目录
 - `{ type: 'message', direction: 'in' | 'out', platform, selfId, channel: Target, userId?, nickname?, avatar?, preview: string, time }`（avatar：收到的消息取发送者头像，发出的消息取机器人自己的头像，均来自 `bot.getAvatarUrl`）：用于面板的实时消息流，preview 为纯文本摘要，最长 120 字
@@ -1492,7 +1493,7 @@ type HttpInit = RequestInit & { timeout?: Duration; proxy?: boolean | string; ma
 - 反向接入点为 `/connections/<id>/onebot/v11/ws`。连接单独编辑、停用、重连和删除；同协议的其他连接不受影响。
 - 核心公开 `AdapterDefinition`、`defineAdapter()`。独立包默认导出适配器定义，包含 id、platform、name、version、description、connectionTypes、capabilities、configSchema 和 create。内置驱动与外部包使用同一注册契约。
 - 已知固定账号的驱动可声明 `accountId(config)`（扫码驱动必填）。配置保存和启动前按平台及账号查重；换号时停止原驱动、清除状态并使用新账号的存储命名空间。企业微信按 BotID 绑定，认证失败、订阅超时或服务端通知被另一连接替换时停在错误状态，普通断线自动重连。
-- `bot_accounts` 按平台与 selfId 保存账号档案，记录昵称、公开头像、能力、连接关联和最近上线时间。面板从档案与实时实例合成视图；列表、详情与策略编辑可以离线使用，群列表和发送仍需要在线实例。框架会从旧版已记录的账号初始化档案，待下次上线补齐资料；虚拟机器人不持久化。
+- `bot_accounts` 按平台与 selfId 保存账号档案，记录面板别名、平台昵称、公开头像、能力、连接关联和最近上线时间。面板优先显示别名，未设置时使用平台昵称或机器人 ID。列表、详情与设置编辑可以离线使用，群列表和发送仍需要在线实例。框架会从旧版已记录的账号初始化档案，待下次上线补齐资料；虚拟机器人不持久化。
 - selfId 只能在平台登录后得知时，适配器可用 `botBinding(config)` 提供稳定的远端标识。框架用连接 ID 和标识的摘要识别关联；删除连接、改变标识或单账号连接识别到新账号时，解除旧账号关联。反向监听可声明 `multiple: true`，保留多个已接入账号。
 - 用户先用项目包管理器安装包，再在 `adapterModules` 中填写 npm 包名（可包含子路径），CLI 从项目工作目录按 Node import 条件解析并在启动时加载。程序化 `createApp` 可通过 options.adapters 注入定义。面板展示来源、schema 和实现能力，本轮不提供适配器市场或热升级。
 - 连接表单从 schema 生成；常见敏感字段及 schema 的 writeOnly 字段掩码返回，保留环境变量引用和 YAML 注释，错误返回也按 schema 脱敏。

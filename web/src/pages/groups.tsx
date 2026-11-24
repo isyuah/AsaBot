@@ -36,6 +36,7 @@ import { toast } from 'sonner'
 import { ScopedConfig } from '../components/scoped-config.tsx'
 import { api } from '../lib/api.ts'
 import { groupPath } from '../lib/groups.ts'
+import { botDisplayName } from '../lib/management.ts'
 import { isValidId, platformName } from '../lib/platform.ts'
 import { navigate, usePath } from '../lib/router.tsx'
 import type { AccessEntry, GroupDetail, GroupView } from '../lib/types.ts'
@@ -111,7 +112,7 @@ export function GroupsPage() {
             onValueChange={setSelectedBot}
             options={(bots.data ?? []).map((bot) => ({
               value: `${bot.platform}:${bot.selfId}`,
-              label: `${bot.nickname || bot.selfId} · ${bot.platform}`,
+              label: `${botDisplayName(bot)} · ${bot.platform}`,
             }))}
           />
           <Input

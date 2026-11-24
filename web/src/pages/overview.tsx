@@ -32,6 +32,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useEffect, useState } from 'react'
 import { api } from '../lib/api.ts'
 import { formatBytes, formatDuration, formatRelative } from '../lib/format.ts'
+import { botDisplayName } from '../lib/management.ts'
 import { useLiveMessages } from '../lib/realtime.tsx'
 import { Link } from '../lib/router.tsx'
 import type { BotView } from '../lib/types.ts'
@@ -272,9 +273,9 @@ function BotsCard({ bots }: { bots: BotView[] | undefined }) {
                 key={`${bot.platform}:${bot.selfId}`}
                 className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-surface-2/70"
               >
-                <Avatar id={bot.selfId} name={bot.nickname} src={bot.avatar} size={34} />
+                <Avatar id={bot.selfId} name={botDisplayName(bot)} src={bot.avatar} size={34} />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13.5px] font-medium">{bot.nickname ?? bot.selfId}</div>
+                  <div className="truncate text-[13.5px] font-medium">{botDisplayName(bot)}</div>
                   <div className="truncate font-mono text-[11.5px] text-fg-3">
                     {bot.selfId} · {bot.connection}
                   </div>

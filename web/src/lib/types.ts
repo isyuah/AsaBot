@@ -13,6 +13,7 @@ export type BotStatus = 'connecting' | 'online' | 'offline'
 export interface BotView {
   platform: string
   selfId: string
+  alias?: string
   nickname?: string
   status: BotStatus
   /** Display text supplied by the adapter, e.g. '正向 WS'. */
