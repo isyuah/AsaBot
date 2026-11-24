@@ -5,5 +5,5 @@
   "exports": "./index.js",
   "imports": { "#shared": "./shared.js" },
   "keywords": ["asabot-plugin"],
-  "peerDependencies": { "@asabot/core": "^0.2.0" }
+  "peerDependencies": { "@asabot/core": "^0.2.0 || ^0.3.0" }
 }
