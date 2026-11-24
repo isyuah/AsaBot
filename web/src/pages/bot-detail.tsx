@@ -5,23 +5,26 @@ import {
   Card,
   EmptyState,
   ErrorState,
+  Field,
+  Input,
   type JsonSchema,
   PageHeader,
   PageTabs,
   SchemaForm,
   Skeleton,
+  Tooltip,
   useFadeUp,
 } from '@asabot/panel-ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Cable, Radio, Send } from 'lucide-react'
+import { ArrowLeft, Cable, Radio, Save, Send, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { BotPlugins } from '../components/bot-plugins.tsx'
-import { api } from '../lib/api.ts'
-import { botPath, connectionPath, invalidatePolicies, timeText } from '../lib/management.ts'
+import { ApiError, api } from '../lib/api.ts'
+import { botDisplayName, botPath, connectionPath, invalidatePolicies, timeText } from '../lib/management.ts'
 import { Link, navigate } from '../lib/router.tsx'
-import type { BotView, ChannelTarget } from '../lib/types.ts'
+import type { BotDetail, BotView, ChannelTarget } from '../lib/types.ts'
 import { CapabilityPanel, GroupList, SendDialog } from './bots.tsx'
 import { ConnectionStatus } from './connections.tsx'
 
@@ -82,8 +85,8 @@ export function BotDetailPage({ path }: { path: string }) {
       <PageHeader
         title={
           <span className="flex items-center gap-3">
-            <Avatar id={bot.selfId} name={bot.nickname} src={bot.avatar} size={44} />
-            <span>{bot.nickname || bot.selfId}</span>
+            <Avatar id={bot.selfId} name={botDisplayName(bot)} src={bot.avatar} size={44} />
+            <span className="min-w-0 wrap-anywhere">{botDisplayName(bot)}</span>
             <Badge tone={bot.status === 'online' ? 'success' : 'neutral'} dot>
               {bot.status === 'online' ? '在线' : bot.status === 'connecting' ? '连接中' : '离线'}
             </Badge>
@@ -176,6 +179,7 @@ export function BotDetailPage({ path }: { path: string }) {
           )}
           {tab === 'settings' && (
             <div className="max-w-3xl space-y-4">
+              {bot.platform !== 'virtual' && <BotAliasSettings bot={bot} />}
               <Card className="p-6">
                 <h2 className="mb-4 text-sm font-semibold">管理员</h2>
                 <SchemaForm
@@ -202,5 +206,85 @@ export function BotDetailPage({ path }: { path: string }) {
       </AnimatePresence>
       <SendDialog state={sendTo} onClose={() => setSendTo(null)} />
     </>
+  )
+}
+
+function BotAliasSettings({ bot }: { bot: BotView }) {
+  const client = useQueryClient()
+  const input = useRef<HTMLInputElement>(null)
+  const [draft, setDraft] = useState<string>()
+  const alias = draft ?? bot.alias ?? ''
+  const value = alias.trim() || null
+  const changed = value !== (bot.alias ?? null)
+  const save = useMutation({
+    mutationFn: (value: string | null) => api.botAlias(bot, value),
+    meta: { silent: true },
+    onSuccess: async (updated) => {
+      const key = ['bot', bot.platform, bot.selfId]
+      client.setQueryData<BotDetail>(key, (detail) => detail && { ...detail, bot: updated })
+      setDraft(undefined)
+      await Promise.all([
+        client.invalidateQueries({ queryKey: key }),
+        ...['bots', 'pluginBots', 'overview'].map((key) => client.invalidateQueries({ queryKey: [key] })),
+      ])
+    },
+  })
+  const error =
+    (save.error instanceof ApiError && save.error.issues.find((issue) => issue.path === 'alias')?.message) ||
+    save.error?.message
+  const edit = (value: string) => {
+    setDraft(value)
+    if (save.isError) save.reset()
+  }
+  return (
+    <Card className="p-6">
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (changed && !save.isPending) save.mutate(value)
+        }}
+      >
+        <Field label="面板别名" htmlFor="bot-alias" error={error}>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative min-w-0 flex-1 basis-40">
+              <Input
+                ref={input}
+                id="bot-alias"
+                autoComplete="off"
+                maxLength={80}
+                value={alias}
+                placeholder={bot.nickname || bot.selfId}
+                disabled={save.isPending}
+                aria-invalid={!!error}
+                className="pr-10"
+                onChange={(event) => edit(event.target.value)}
+              />
+              {alias && (
+                <Tooltip content="清空别名">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="absolute top-1/2 right-1 -translate-y-1/2"
+                    aria-label="清空别名"
+                    disabled={save.isPending}
+                    onClick={() => {
+                      edit('')
+                      input.current?.focus()
+                    }}
+                  >
+                    <X className="size-3.5" aria-hidden />
+                  </Button>
+                </Tooltip>
+              )}
+            </div>
+            <Button type="submit" variant="primary" loading={save.isPending} disabled={!changed}>
+              <Save className="size-3.5" aria-hidden />
+              保存别名
+            </Button>
+          </div>
+        </Field>
+      </form>
+    </Card>
   )
 }

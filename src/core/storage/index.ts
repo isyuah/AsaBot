@@ -88,6 +88,7 @@ const coreMigrations: Migration[] = [
      created_at INTEGER NOT NULL, ciphertext BLOB NOT NULL, retired INTEGER NOT NULL DEFAULT 0
    );
    CREATE INDEX plugin_credentials_purpose ON plugin_credentials(plugin, purpose, retired);`,
+  'ALTER TABLE bot_accounts ADD COLUMN alias TEXT;',
 ]
 
 /** SQLite 存储及插件状态、迁移和访问控制管理器。 */

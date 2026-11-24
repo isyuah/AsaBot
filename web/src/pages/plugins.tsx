@@ -52,7 +52,7 @@ import { PluginIcon } from '../components/plugin-icon.tsx'
 import { hasUpdate, UninstallDialog, UpdateButton, UploadDialog } from '../components/plugin-manage.tsx'
 import { ApiError, api } from '../lib/api.ts'
 import { groupPath } from '../lib/groups.ts'
-import { botPath, invalidatePolicies, pluginPath } from '../lib/management.ts'
+import { botDisplayName, botPath, invalidatePolicies, pluginPath } from '../lib/management.ts'
 import { isValidId } from '../lib/platform.ts'
 import { usePluginConfigOptions } from '../lib/plugin-config-options.ts'
 import { Link, navigate, usePath } from '../lib/router.tsx'
@@ -661,7 +661,7 @@ function BotApplications({ plugin }: { plugin: PluginView }) {
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div>
               <Link to={botPath(bot)} className="text-sm font-medium hover:text-accent">
-                {bot.nickname || bot.selfId}
+                {botDisplayName(bot)}
               </Link>
               <p className="mt-1 break-all font-mono text-[11.5px] text-fg-3">
                 {bot.platform} · {bot.selfId}
@@ -675,7 +675,7 @@ function BotApplications({ plugin }: { plugin: PluginView }) {
                 配置与继承
               </Link>
               <Switch
-                aria-label={`在 ${bot.nickname ?? bot.selfId} 上启用`}
+                aria-label={`在 ${botDisplayName(bot)} 上启用`}
                 checked={application.overrideEnabled ?? application.botDefaultEnabled}
                 disabled={toggle.isPending}
                 onCheckedChange={(enabled) => toggle.mutate({ bot, enabled })}
@@ -957,7 +957,7 @@ function GroupsTab({ plugin }: { plugin: PluginView }) {
           onValueChange={setSelectedBot}
           options={(bots.data ?? []).map((bot) => ({
             value: `${bot.platform}:${bot.selfId}`,
-            label: `${bot.nickname || bot.selfId} · ${bot.platform}`,
+            label: `${botDisplayName(bot)} · ${bot.platform}`,
           }))}
         />
         <Input

@@ -13,7 +13,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Cable, ChevronRight, Plus, Radio } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../lib/api.ts'
-import { adapterPath, botPath, connectionPath } from '../lib/management.ts'
+import { adapterPath, botDisplayName, botPath, connectionPath } from '../lib/management.ts'
 import { Link, navigate, usePath } from '../lib/router.tsx'
 import type { AdapterView } from '../lib/types.ts'
 import { CapabilityPanel } from './bots.tsx'
@@ -184,7 +184,7 @@ function AdapterContent({ id }: { id?: string }) {
                 {relatedBots.map((bot) => (
                   <li key={`${bot.platform}:${bot.selfId}`}>
                     <Link className="break-all text-[13px] text-accent" to={botPath(bot)}>
-                      {bot.nickname || bot.selfId}
+                      {botDisplayName(bot)}
                     </Link>
                   </li>
                 ))}

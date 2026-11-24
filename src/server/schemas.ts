@@ -156,6 +156,18 @@ export const uploadSchema = z.object({
   overwrite: z.boolean().optional(),
 })
 export const purgeSchema = z.object({ purge: z.boolean() })
+export const botAliasSchema = z.strictObject({
+  alias: z
+    .string()
+    .trim()
+    .min(1)
+    .max(80, '别名最多 80 个字符')
+    .refine(
+      (value) => value.isWellFormed() && !value.includes('\0') && !/[\r\n\u2028\u2029]/.test(value),
+      '请输入单行别名',
+    )
+    .nullable(),
+})
 export const packageInstallSchema = z.object({
   name: z.string(),
   version: z.string().optional(),

@@ -35,6 +35,7 @@ import { Playground } from './playground.ts'
 import { isPluginPageName, pluginPageFile, unsafePluginPageUrl } from './plugin-pages.ts'
 import {
   accessSchema,
+  botAliasSchema,
   packageInstallSchema,
   packageNameSchema,
   packageUninstallSchema,
@@ -629,6 +630,16 @@ export class HttpServer implements ServerService {
         plugins: this.app.plugins.list().map((plugin) => botPluginView(this.app, bot, plugin.name)),
       })
     })
+    panel.put('/bots/:platform/:selfId/alias', async (c) => {
+      const platform = c.req.param('platform')
+      const selfId = c.req.param('selfId')
+      const { alias } = await body(c, botAliasSchema, 4096, '别名请求过长')
+      if (!this.app.botAccounts.setAlias({ platform, selfId }, alias))
+        throw new HttpError(404, 'NOT_FOUND', 'Bot account not found')
+      const bot = requireBot(platform, selfId)
+      for (const [client, cookie] of this.clientSessions) this.pushFrame(client, cookie, { type: 'bot', bot })
+      return c.json(bot)
+    })
     panel.put('/bots/:platform/:selfId/admins', async (c) => {
       const bot = requireBot(c.req.param('platform'), c.req.param('selfId'))
       const { admins } = await body(
@@ -1028,21 +1039,23 @@ export class HttpServer implements ServerService {
     return this.app.send(input.target, input.message)
   }
 
+  private pushFrame(client: WebSocket, cookie: string | undefined, frame: unknown): void {
+    if (client.readyState !== WebSocket.OPEN) return
+    if (!this.auth.authenticated(cookie)) {
+      client.close(1008, 'Session expired')
+      return
+    }
+    try {
+      client.send(JSON.stringify(frame))
+    } catch (error) {
+      client.terminate()
+      this.app.logger.warn({ err: error }, 'Panel WebSocket send failed')
+    }
+  }
+
   private connect(client: WebSocket, cookie: string | undefined): void {
     this.clientSessions.set(client, cookie)
-    const push = (frame: unknown): void => {
-      if (client.readyState !== WebSocket.OPEN) return
-      if (!this.auth.authenticated(cookie)) {
-        client.close(1008, 'Session expired')
-        return
-      }
-      try {
-        client.send(JSON.stringify(frame))
-      } catch (error) {
-        client.terminate()
-        this.app.logger.warn({ err: error }, 'Panel WebSocket send failed')
-      }
-    }
+    const push = (frame: unknown) => this.pushFrame(client, cookie, frame)
     push({ type: 'hello', overview: overview(this.app) })
     const unsubscribeLogs = subscribeLogs((record) => push({ type: 'log', record }))
     const unsubscribePackages = this.app.plugins.packages.subscribe((operation) =>

@@ -20,7 +20,7 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { ConnectionQrSetup } from '../components/connection-qr-setup.tsx'
 import { ApiError, api } from '../lib/api.ts'
-import { adapterPath, botPath, connectionPath, timeText } from '../lib/management.ts'
+import { adapterPath, botDisplayName, botPath, connectionPath, timeText } from '../lib/management.ts'
 import { Link, navigate } from '../lib/router.tsx'
 import type { AdapterView, ConnectionInput, ConnectionView } from '../lib/types.ts'
 
@@ -138,6 +138,7 @@ function ConnectionEditor({
   initialAdapter?: string
 }) {
   const client = useQueryClient()
+  const bots = useQuery({ queryKey: ['bots'], queryFn: api.bots, enabled: !!connection?.bots.length })
   const [adapterId, setAdapterId] = useState(connection?.adapter ?? initialAdapter ?? adapters[0]?.id ?? '')
   const [id] = useState(() => connection?.id ?? createUuid())
   const [removing, setRemoving] = useState(false)
@@ -340,13 +341,22 @@ function ConnectionEditor({
             <Card className="p-5">
               <h2 className="mb-3 text-sm font-semibold">关联机器人</h2>
               <ul className="space-y-2">
-                {connection.bots.map((bot) => (
-                  <li key={`${bot.platform}:${bot.selfId}`}>
-                    <Link to={botPath(bot)} className="break-all font-mono text-[12.5px] text-accent">
-                      {bot.selfId}
-                    </Link>
-                  </li>
-                ))}
+                {connection.bots.map((identity) => {
+                  const bot = bots.data?.find(
+                    (item) => item.platform === identity.platform && item.selfId === identity.selfId,
+                  )
+                  return (
+                    <li key={`${identity.platform}:${identity.selfId}`}>
+                      <Link
+                        to={botPath(identity)}
+                        title={identity.selfId}
+                        className="wrap-anywhere text-[13px] text-accent"
+                      >
+                        {bot ? botDisplayName(bot) : identity.selfId}
+                      </Link>
+                    </li>
+                  )
+                })}
               </ul>
             </Card>
           )}

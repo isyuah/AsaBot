@@ -6,6 +6,7 @@ import { type BotIdentity, botKey } from './identity.ts'
 import type { Storage } from './storage/index.ts'
 
 export interface BotAccount extends BotIdentity {
+  alias?: string
   nickname?: string
   avatar?: string
   capabilities?: BotCapabilities
@@ -40,6 +41,7 @@ function account(row: Record<string, SQLOutputValue>): BotAccount {
   return {
     platform,
     selfId,
+    alias: row.alias === null ? undefined : String(row.alias),
     nickname: row.nickname === null ? undefined : String(row.nickname),
     avatar: row.avatar === null ? undefined : String(row.avatar),
     capabilities:
@@ -65,6 +67,13 @@ export class BotAccounts {
 
   list(): BotAccount[] {
     return this.storage.db.prepare('SELECT * FROM bot_accounts ORDER BY bot_key').all().map(account)
+  }
+
+  setAlias(bot: BotIdentity, alias: string | null): boolean {
+    const result = this.storage.db
+      .prepare('UPDATE bot_accounts SET alias = ? WHERE bot_key = ?')
+      .run(alias, botKey(bot))
+    return Number(result.changes) > 0
   }
 
   record(bot: Bot, info?: BotInfo, lastOnlineAt?: number): void {

@@ -26,7 +26,7 @@ import { toast } from 'sonner'
 import { api } from '../lib/api.ts'
 import { type CapabilityRow, capabilityRows } from '../lib/capabilities.ts'
 import { groupPath } from '../lib/groups.ts'
-import { botPath } from '../lib/management.ts'
+import { botDisplayName, botPath } from '../lib/management.ts'
 import { isValidId } from '../lib/platform.ts'
 import { Link, navigate, usePath } from '../lib/router.tsx'
 import type { BotCapabilities, BotView, ChannelTarget } from '../lib/types.ts'
@@ -98,10 +98,10 @@ function BotList() {
       {bots.data.map((bot) => (
         <Link to={botPath(bot)} key={`${bot.platform}:${bot.selfId}`} className="block">
           <Card className="flex items-center gap-4 p-5 transition-colors hover:border-border-strong">
-            <Avatar id={bot.selfId} name={bot.nickname} src={bot.avatar} size={48} />
+            <Avatar id={bot.selfId} name={botDisplayName(bot)} src={bot.avatar} size={48} />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="truncate text-[15px] font-semibold">{bot.nickname || bot.selfId}</span>
+                <span className="truncate text-[15px] font-semibold">{botDisplayName(bot)}</span>
                 <Badge
                   tone={
                     bot.status === 'online' ? 'success' : bot.status === 'connecting' ? 'warning' : 'neutral'
@@ -294,7 +294,7 @@ export function SendDialog({
       open={state !== null}
       onOpenChange={(open) => !open && onClose()}
       title="发送消息"
-      description={state ? `以 ${state.bot.nickname ?? state.bot.selfId} 的身份发送` : undefined}
+      description={state ? `以 ${botDisplayName(state.bot)} 的身份发送` : undefined}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>

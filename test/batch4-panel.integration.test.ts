@@ -9,7 +9,7 @@ import { createApp } from '../src/bootstrap.ts'
 import { configSchema } from '../src/core/config/schema.ts'
 import { createLogger } from '../src/core/logger.ts'
 import { definePlugin, seg, z } from '../src/index.ts'
-import { createTestApp } from '../src/testing/index.ts'
+import { createTestApp, FakeBot } from '../src/testing/index.ts'
 
 const password = 'batch4-panel-secret'
 
@@ -46,6 +46,67 @@ function rawGet(port: number, path: string): Promise<number | undefined> {
 }
 
 describe('batch 4 panel server', () => {
+  it('sets and clears aliases for individual bot accounts without changing their platform names', async () => {
+    const t = await createTestApp({ config: { server: { port: 0, panelPassword: password } } })
+    const first = Object.assign(new FakeBot('first@im.bot'), { nickname: 'Platform name' })
+    const second = new FakeBot('second@im.bot')
+    const path = `/bots/${first.platform}/${encodeURIComponent(first.selfId)}`
+    let socket: WebSocket | undefined
+    let restarted: ReturnType<typeof createApp> | undefined
+    try {
+      t.app.registerBot(first)
+      t.app.registerBot(second)
+      const port = t.app.server?.address()?.port
+      if (port === undefined) throw new Error('Missing server')
+      const { origin, cookie, request } = await client(port)
+      socket = new WebSocket(`${origin.replace('http:', 'ws:')}/api/panel/ws`, { headers: { cookie } })
+      const frames: unknown[] = []
+      socket.on('message', (data) => frames.push(JSON.parse(data.toString())))
+      await vi.waitFor(() => expect(frames).toContainEqual(expect.objectContaining({ type: 'hello' })))
+
+      const saved = { selfId: first.selfId, nickname: first.nickname, alias: '工作微信' }
+      const response = await request(`${path}/alias`, 'PUT', { alias: '  工作微信  ' })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject(saved)
+      await vi.waitFor(() =>
+        expect(frames).toContainEqual({ type: 'bot', bot: expect.objectContaining(saved) }),
+      )
+      expect(await (await request('/bots')).json()).toContainEqual(expect.objectContaining(saved))
+      const other = await (
+        await request(`/bots/${second.platform}/${encodeURIComponent(second.selfId)}`)
+      ).json()
+      expect(other.bot).not.toHaveProperty('alias')
+      expect((await request(`${path}/alias`, 'PUT', { alias: 'x'.repeat(81) })).status).toBe(400)
+      expect((await request('/bots/fake/unknown/alias', 'PUT', { alias: 'Unknown' })).status).toBe(404)
+
+      socket.terminate()
+      await t.app.stop()
+      restarted = createApp(t.app.config, { logger: t.app.logger })
+      await restarted.start()
+      const restartedPort = restarted.server?.address()?.port
+      if (restartedPort === undefined) throw new Error('Missing server after restart')
+      const { request: afterRestart } = await client(restartedPort)
+      expect(await (await afterRestart(path)).json()).toMatchObject({ bot: { ...saved, status: 'offline' } })
+      const renamed = await afterRestart(`${path}/alias`, 'PUT', { alias: '离线编辑' })
+      expect(renamed.status).toBe(200)
+
+      restarted.registerBot(Object.assign(new FakeBot(first.selfId), { nickname: 'New platform name' }))
+      expect(await (await afterRestart(path)).json()).toMatchObject({
+        bot: { selfId: first.selfId, alias: '离线编辑', nickname: 'New platform name', status: 'online' },
+      })
+      const cleared = await afterRestart(`${path}/alias`, 'PUT', { alias: null })
+      expect(cleared.status).toBe(200)
+      expect(await cleared.json()).not.toHaveProperty('alias')
+      const detail = await (await afterRestart(path)).json()
+      expect(detail.bot).toMatchObject({ selfId: first.selfId, nickname: 'New platform name' })
+      expect(detail.bot).not.toHaveProperty('alias')
+    } finally {
+      socket?.terminate()
+      await restarted?.stop()
+      await t.dispose()
+    }
+  })
+
   it('exposes the same canonical plugin directory to plugins and the panel after file removal', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'asabot-plugin-catalog-'))
     const entry = join(directory, 'observer.ts')
