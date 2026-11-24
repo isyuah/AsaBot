@@ -1,6 +1,6 @@
 # @asabot/plugin-ai
 
-AsaBot 的可选 AI 基础插件。需要 `@asabot/core` 0.2.1、已启用的内置 `http` 插件和 Node.js 24 或更高版本。启用后，进入控制台「插件页面 → AI 管理」。
+AsaBot 的可选 AI 基础插件。需要 `@asabot/core` 0.3.0、已启用的内置 `http` 插件和 Node.js 24 或更高版本。启用后，进入控制台「插件页面 → AI 管理」。
 
 - **渠道**：配置协议、Base URL、API Key 或服务器环境变量。可以配置同一协议的多个渠道，包括自建网关；拉取列表与实际测试调用是两个操作。
 - **模型**：拉取或手动添加模型，再选择其实际提供的能力。每个模型有不随名称变动的本地 ID；上游模型名填写提供商要求的值。
@@ -63,6 +63,6 @@ pnpm --filter @asabot/plugin-ai build
 pnpm --filter @asabot/plugin-ai pack
 ```
 
-使用本仓库的 AsaBot 0.2.1 或匹配的构建。在已初始化的 `data/packages`（或 `packages.dir` 指定的目录）执行 `npm install --save --legacy-peer-deps --ignore-scripts <生成的 .tgz 绝对路径>`，然后重启 AsaBot。框架会校验版本并提供运行时，不需要在插件目录额外安装 `@asabot/core`。正式发布后可从插件市场安装 `@asabot/plugin-ai`。
+使用本仓库的 AsaBot 0.3.0 或匹配的构建。在已初始化的 `data/packages`（或 `packages.dir` 指定的目录）执行 `npm install --save --legacy-peer-deps --ignore-scripts <生成的 .tgz 绝对路径>`，然后重启 AsaBot。框架会校验版本并提供运行时，不需要在插件目录额外安装 `@asabot/core`。正式发布后可从插件市场安装 `@asabot/plugin-ai`。
 
 面板资源随安装包分发。修改插件页面或共享组件后，需要用新生成的 `.tgz` 更新插件，单独刷新浏览器不会更新已安装的资源。

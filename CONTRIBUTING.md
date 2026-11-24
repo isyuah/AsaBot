@@ -42,10 +42,10 @@ PR 标题用 `type(scope): description`，范围可以省略。例如 `fix(panel
 3. 在 [Actions](https://github.com/isyuah/AsaBot/actions/workflows/container.yml) 确认 `Publish container image` 成功。正式 Tag 会发布版本镜像和 `latest`。需要同时发布 npm 包时，按本次准备好的版本单独发布并确认可安装。
 4. 到 [Releases](https://github.com/isyuah/AsaBot/releases) 点 **Draft a new release**。选择刚推送的 Tag，在 **Previous tag** 选上一个正式 Tag，点 **Generate release notes**。GitHub 会根据 `.github/release.yml` 和这段范围内合并的 PR 生成清单，保留 PR 标题原文。正文开头可以分别加 `## 简体中文` 和 `## English`，各写一份亮点和升级说明，两段共用后面的 PR 清单。直接推到 `main` 的用户可见改动需要手动补进摘要。预览后点 **Publish release**。
 
-也可以用 GitHub CLI 生成草稿，仍以 `v0.3.0` 和上一个 Tag `v0.2.0` 为例：
+也可以用 GitHub CLI 生成草稿，仍以 `v0.3.0` 和上一个 Tag `v0.2.1` 为例：
 
 ```powershell
-gh release create v0.3.0 --verify-tag --draft --generate-notes --notes-start-tag v0.2.0
+gh release create v0.3.0 --verify-tag --draft --generate-notes --notes-start-tag v0.2.1
 ```
 
 发布草稿、更新 GHCR 镜像和升级已运行的服务是各自独立的动作。部署新版按[部署文档](docs/DEPLOY.md#使用-ghcr-镜像)操作；已发布版本有问题时，修复后发一个新版本，保留原 Tag。

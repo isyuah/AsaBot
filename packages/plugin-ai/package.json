@@ -1,6 +1,6 @@
 {
   "name": "@asabot/plugin-ai",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "AsaBot 官方 AI 基础插件：管理模型、插件权限、请求记录和用量",
   "type": "module",
   "license": "MIT",
@@ -38,7 +38,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "peerDependencies": {
-    "@asabot/core": "workspace:^"
+    "@asabot/core": "^0.2.1 || ^0.3.0"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.106",

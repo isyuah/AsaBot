@@ -1,6 +1,6 @@
 {
   "name": "@asabot/panel-ui",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "AsaBot 控制台和插件页面共用的 React 组件与主题",
   "type": "module",
   "license": "MIT",

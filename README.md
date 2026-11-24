@@ -146,7 +146,7 @@ curl -X POST http://127.0.0.1:5140/api/v1/send \
   "type": "module",
   "keywords": ["asabot-plugin"],
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
-  "peerDependencies": { "@asabot/core": "^0.2.0" }
+  "peerDependencies": { "@asabot/core": "^0.3.0" }
 }
 ```
 

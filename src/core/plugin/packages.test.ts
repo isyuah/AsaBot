@@ -74,7 +74,7 @@ describe('package operation contract', () => {
       name: 'asabot-example',
       version: '1.0.0',
       keywords: ['asabot-plugin'],
-      peerDependencies: { '@asabot/core': '^0.2.0' },
+      peerDependencies: { '@asabot/core': '^0.2.0 || ^0.3.0' },
     }
     const registry: RegistryClient = {
       async fullMetadata() {

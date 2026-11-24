@@ -1,6 +1,6 @@
 {
   "name": "@asabot/create",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "创建 AsaBot 机器人项目或插件包：npm create @asabot@latest",
   "type": "module",
   "repository": {
